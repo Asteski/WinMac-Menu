@@ -2,7 +2,9 @@
 
 A tiny, fast Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, supports a dynamic Recent Items submenu, and can render in either native (legacy) or a modern owner‑draw style.
 
-- Windows 10/11, x64 and ARM64
+![WinMacMenu screenshot](assets/winmacmenu-demo.png)
+
+- Windows 10/11, x64 and ARM64 supported
 - No installer, single EXE
 - Low-latency popup that exits after the menu closes
 
@@ -31,19 +33,19 @@ Examples:
 
 WinMacMenu reads an INI. If missing, a default is created.
 
-Sections
+### Sections
 - [General] global behavior and style
 - [Placement] position rules
 - [Menu] menu items Item1..ItemN
 - [Icons] per-item icon mapping Icon1..IconN
 - [Modern] modern-only visual tweaks
 
-Notes
+### Notes
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
 - Indices N in [Icons] map to ItemN in [Menu].
 - MenuWidth and [Modern] options apply to Modern style only; Legacy keeps native look.
 
-### [General]
+#### [General]
 
 - MenuStyle = legacy | modern
 - DefaultIcon = path\to\default.ico (optional)
@@ -57,7 +59,7 @@ Notes
 - MenuWidth = 226..255 (0 or omit = auto; Modern only, DPI‑scaled)
 - Corners = rounded | square (Modern only; selection pill corners)
 
-### [Placement]
+#### [Placement]
 
 Used when PointerRelative = 0.
 
@@ -66,7 +68,7 @@ Used when PointerRelative = 0.
 - VPlacement = Top | Center | Bottom
 - VOffset   = integer pixels from top/bottom when not centered
 
-### [Menu]
+#### [Menu]
 
 Define items Item1..ItemN as pipe-separated fields:
 
@@ -93,7 +95,7 @@ You can also use a value in [Icons] to assign an icon to ItemN: IconN = path\to\
 
 Separators: use TYPE = SEPARATOR, or leave Label empty with a valid TYPE/Path; the parser also accepts explicit CI_SEPARATOR internally.
 
-### [Icons]
+#### [Icons]
 
 - Icon1 = C:\path\to\apps.ico
 - Icon2 = C:\path\to\settings.ico
@@ -101,10 +103,11 @@ Separators: use TYPE = SEPARATOR, or leave Label empty with a valid TYPE/Path; t
 
 If an item has no IconPath and there is no IconN mapping, DefaultIcon (if set) is used.
 
-### [Modern]
+#### [Modern]
 
 Modern style only:
-- Corners = rounded | square (mirrors General; [Modern] takes precedence)
+- MenuWidth = 226..255
+- Corners = rounded | square
 
 ## Examples
 
@@ -169,6 +172,16 @@ VOffset=24
 
 - Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
 - This app uses normal popup menus; exact visual parity with the system Win+X menu isn’t guaranteed.
+- It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
+- You can also pin shortcuts to taskbar, or add to Links toolbar. Each shortcut can refer different config.ini files.
+
+> [!NOTE]
+> **Please be informed that this is a beta version - you're using it at your own risk!**
+
+## Future plans
+
+- Update modern style to look like Windows 11 context menu
+- Sub-menus sorting options
 
 ## License
 
