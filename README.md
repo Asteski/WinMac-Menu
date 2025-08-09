@@ -1,4 +1,4 @@
-<p align="center" style="font-size:1.8em;">
+<p align="center" style="font-size:4em;">
   <b>WinMac Menu</b>
 </p>
 
