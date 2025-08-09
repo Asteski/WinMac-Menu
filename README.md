@@ -173,7 +173,7 @@ VOffset=24
 - Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
 - This app uses normal popup menus; exact visual parity with the system Win+X menu isn’t guaranteed.
 - It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
-- You can also pin shortcuts to taskbar, or add to Links toolbar. Each shortcut can refer different config.ini files.
+- You can also pin shortcuts to taskbar, or add to Links toolbar. Each shortcut can refer to different config.ini files.
 
 > [!NOTE]
 > **Please be informed that this is a beta version - you're using it at your own risk!**
@@ -185,4 +185,4 @@ VOffset=24
 
 ## License
 
-TBD.
+TBD
