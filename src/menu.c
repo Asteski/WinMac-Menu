@@ -480,7 +480,6 @@ BOOL MenuOnMeasureItem(HWND owner, MEASUREITEMSTRUCT* mis) {
     }
     if (g_cfg.menuStyle != STYLE_MODERN) return FALSE;
     // Measure text size
-    HMENU m = (HMENU)mis->itemID; // not reliable for menus; use owner window DC
     HDC hdc = GetDC(owner);
     HFONT hf = get_menu_font();
     HFONT old = (HFONT)SelectObject(hdc, hf);
@@ -500,7 +499,9 @@ BOOL MenuOnMeasureItem(HWND owner, MEASUREITEMSTRUCT* mis) {
     height = (rc.bottom - rc.top);
     int padY = 10; // top/bottom padding
     int minH = 28;
-    mis->itemHeight = max(minH, (UINT)(height + padY*2));
+    int calcH = (height + padY*2);
+    if (calcH < minH) calcH = minH;
+    mis->itemHeight = (UINT)calcH;
     // Width: will be recomputed in Draw via DT_CALCRECT; provide nominal
     // Target width for modern: MenuWidth override (226..255) if set, else DPI-based default (~264 @ 96dpi)
     int w = 0;
