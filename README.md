@@ -182,6 +182,8 @@ VOffset=24
 
 - Update modern style to look like Windows 11 context menu
 - Sub-menus sorting options
+- Different depths level for specific folders
+- Always hide specific file by the name/extension for every folder submenus
 
 ## License
 
