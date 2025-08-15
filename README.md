@@ -185,7 +185,3 @@ VOffset=24
 - Different depths level for specific folders
 - Always hide specific file by the name/extension for every folder submenus
 - Possibility to open WinMac menu with right clicking Start button using Open-Shell ([#2286](https://github.com/Open-Shell/Open-Shell-Menu/issues/2286))
-
-## License
-
-TBD
