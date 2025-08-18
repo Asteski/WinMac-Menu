@@ -4,7 +4,7 @@ A tiny, fast Win32 application that shows a Windows context-like popup menu. Itâ
 
 ![WinMacMenu screenshot](assets/winmacmenu-demo.png)
 
-- Windows 10/11, x64 and ARM64 supported
+- Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
 - Low-latency popup that exits after the menu closes
 
