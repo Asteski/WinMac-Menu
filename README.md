@@ -22,6 +22,7 @@ A tiny, fast Win32 application that shows a Windows context-like popup menu. It�
 
 ## Run
 
+- Move default config.ini file from repository to the root folder of WinMacMenu.exe executable.
 - Double‑click the EXE to show the menu.
 - The menu closes on selection or outside click and the process exits.
 - Use --config to point at a custom INI; each INI path gets its own single‑instance gate.
