@@ -1,6 +1,6 @@
 # WinMac Menu
 
-A tiny, fast Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, supports a dynamic Recent Items submenu, and can render in either native (legacy) or a modern owner‑draw style.
+A tiny Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, supports a dynamic Recent Items submenu, and can render in either native (legacy) or a modern owner‑draw style.
 
 ![WinMacMenu screenshot](assets/winmacmenu-demo.png)
 
