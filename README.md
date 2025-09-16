@@ -212,7 +212,8 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 
 ## Future plans
 
-- Update modern style to look like Windows 11 context menu
+- Run constantly in background as process
 - Sub-menus sorting options
 - Different depths level for specific folders
+- Add modern style to look like Windows 11 context menu
 - Possibility to open WinMac menu with right clicking Start button using Open-Shell ([#2286](https://github.com/Open-Shell/Open-Shell-Menu/issues/2286))
