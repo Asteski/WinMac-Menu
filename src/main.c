@@ -12,7 +12,13 @@
 #pragma comment(lib, "comctl32.lib")
 
 static const wchar_t *WC_APPWND = L"WinMacMenuWnd";
+static Config g_cfg; // global config
 static HANDLE g_hSingleInstance = NULL;
+static BOOL g_menuActive = FALSE;
+static BOOL g_menuShowingNow = FALSE; // tracks if a popup is currently displayed (between ShowWinXMenu enter and menu close)
+static HWND g_hMainWnd = NULL;
+
+// Resident hooks and triggers removed
 
 static DWORD simple_hash_w(const wchar_t* s) {
     DWORD h = 2166136261u; // FNV-1a base
@@ -59,10 +65,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_RBUTTONUP:
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
-    case WM_APP: // custom trigger
     {
+        if (g_menuActive) return 0;
+        g_menuActive = TRUE;
+        g_menuShowingNow = TRUE;
         POINT pt = {0,0};
         ShowWinXMenu(hWnd, pt);
+        g_menuShowingNow = FALSE;
+        g_menuActive = FALSE;
         return 0;
     }
     case WM_KEYDOWN:
@@ -74,6 +84,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     case WM_COMMAND:
         MenuExecuteCommand(hWnd, (UINT)LOWORD(wParam));
+        return 0;
+    case WM_APP:
+        // Toggle behavior: if menu visible, close it; else open it.
+        if (g_menuShowingNow) {
+            EndMenu(); // dismiss current popup
+            return 0;
+        } else if (!g_menuActive) {
+            g_menuActive = TRUE; g_menuShowingNow = TRUE;
+            POINT pt = {0,0};
+            ShowWinXMenu(hWnd, pt);
+            g_menuShowingNow = FALSE; g_menuActive = FALSE;
+            return 0;
+        }
         return 0;
     case WM_MENUSELECT:
         MenuOnMenuSelect(hWnd, wParam, lParam);
@@ -150,17 +173,14 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     HWND hWnd = CreateWindowExW(WS_EX_TOOLWINDOW, WC_APPWND, L"WinMacMenu",
         WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT, 200, 200, NULL, NULL, hInstance, NULL);
     if (!hWnd) return 0;
+    g_hMainWnd = hWnd;
 
     // Command line parsing already done above (for mutex)
 
-    // Make invisible owner window; show menu immediately at cursor
-    MSG msg;
-    PostMessage(hWnd, WM_APP, 0, 0);
-
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
+    config_load(&g_cfg);
+    POINT pt = {0,0};
+    ShowWinXMenu(hWnd, pt);
+    DestroyWindow(hWnd);
     if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
-    return (int)msg.wParam;
+    return 0;
 }

@@ -17,7 +17,8 @@ typedef enum {
     CI_POWER_RESTART,
     CI_POWER_LOCK,
     CI_POWER_LOGOFF,
-    CI_RECENT_SUBMENU
+    CI_RECENT_SUBMENU,
+    CI_POWER_MENU
 } ConfigItemType;
 
 typedef struct ConfigItem {
@@ -28,25 +29,32 @@ typedef struct ConfigItem {
     WCHAR params[256];        // optional params
     WCHAR iconPath[MAX_PATH]; // optional icon path (.ico), 16x16 preferred
     BOOL submenu;             // for folder: display as submenu
+    BOOL inlineExpand;        // experimental: for folder, expand contents directly in root menu (params contains "inline")
+    BOOL inlineNoHeader;      // when inlineExpand, suppress header even if label present (params contains notitle|noheader)
+    BOOL inlineOpen;          // when inlineExpand and this set, header becomes clickable and opens folder (params contains inlineopen)
 } ConfigItem;
 
 typedef struct Config {
     WCHAR iniPath[MAX_PATH];
     int recentMax;
-    // Recent items label mode: FALSE = filename only, TRUE = full path
-    BOOL recentShowFullPath; // General: RecentLabel = filename | fullpath
     int folderMaxDepth; // 1..4 depth for nested folder submenus
     // Whether folder submenus should offer single-click open of the folder itself
     BOOL folderSingleClickOpen; // General: FolderSubmenuOpen = single|double
     // Visibility options
     BOOL showHidden;   // show items with FILE_ATTRIBUTE_HIDDEN
     BOOL showDotfiles; // show items whose name starts with '.'
-    // Styles
+    // Extended dotfile visibility mode: 0 = none, 1 = files only, 2 = folders only, 3 = both
+    int dotMode; // derived from ShowDotfiles string: false=0, true=3, filesonly=1, foldersonly=2
+    // Styles (modern style compiled only when ENABLE_MODERN_STYLE defined)
+#ifdef ENABLE_MODERN_STYLE
     enum { STYLE_LEGACY=0, STYLE_MODERN=1 } menuStyle;
+#else
+    enum { STYLE_LEGACY=0 } menuStyle; // always legacy when modern disabled
+#endif
     WCHAR defaultIconPath[MAX_PATH]; // optional default icon for items without explicit icon
-    BOOL legacyIcons; // show icons also in legacy style (owner-draw minimal)
+    BOOL showIcons; // show icons in legacy style (previously LegacyIcons)
     // Appearance
-    BOOL roundedCorners; // General: Corners = rounded | square (modern style selection corners)
+    BOOL roundedCorners; // (modern only when enabled) selection corner styling
     // Placement settings
     enum { HP_LEFT=0, HP_CENTER=1, HP_RIGHT=2 } hPlacement;
     int hOffset; // pixels from left/right when not centered
@@ -54,7 +62,16 @@ typedef struct Config {
     int vOffset; // pixels from top/bottom when not centered
     // Optional: pointer-relative positioning and menu width (modern-only override)
     BOOL pointerRelative; // Position near mouse pointer instead of edges
-    int menuWidth; // [General] MenuWidth=226..255 (0 = auto). Applies only to modern style.
+    int menuWidth; // (modern only) [General] MenuWidth=226..255 (0 = auto). Ignored when modern disabled.
+    BOOL folderShowOpenEntry; // [General] FolderShowOpenEntry=true|false (default true) controls showing "Open <folder>" in submenus when single-click open mode is enabled
+    int logLevel; // 0=off,1=basic,2=verbose (from LogConfig=off|basic|verbose|true|false). Backward compatible: LogConfig=true -> basic.
+    WCHAR logFolderPath[MAX_PATH]; // Base folder for dynamic log file (LogFolder=...)
+    WCHAR logFilePath[MAX_PATH];   // Resolved dynamic log file full path (WinMacMenu_<configBase>_<yyMMdd-HHmm>.log)
+    int recentLabelMode; // [General] RecentLabel=fullpath|name (0=full path, 1=file name)
+    BOOL showExtensions; // [General] ShowExtensions=true keeps file extensions visible (inverse of deprecated HideExtensions)
+    BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
+    BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
+    BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
     ConfigItem items[64];
     int count;
 } Config;

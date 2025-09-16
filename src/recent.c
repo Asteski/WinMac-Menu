@@ -58,3 +58,18 @@ void recent_open_item(const RecentItem *item) {
     if (!item) return;
     ShellExecuteW(NULL, L"open", item->path, NULL, NULL, SW_SHOWNORMAL);
 }
+
+void recent_clear_all(void) {
+    WCHAR recentPath[MAX_PATH];
+    if (!SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_RECENT, NULL, SHGFP_TYPE_CURRENT, recentPath))) return;
+    WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
+    PathCombineW(pattern, recentPath, L"*.lnk");
+    HANDLE h = FindFirstFileW(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        WCHAR full[MAX_PATH]; PathCombineW(full, recentPath, fd.cFileName);
+        DeleteFileW(full);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
