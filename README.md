@@ -11,161 +11,192 @@ A tiny, fast Win32 application that shows a Windows context-like popup menu. It�
 ## Features
 
 - Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
-- Config-driven items with separators, folders as submenus, URIs, commands, and power actions
+- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
 - Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
-- Styles: Legacy (native popup) or Modern (owner-draw, Win11-like)
-- Icons per item (+ default icon); optional icons in legacy style without changing native look
+- Icons: per-item icon, optional DefaultIcon fallback, and optional system folder icon retrieval
 - Placement controls (edges or cursor, with offsets), per‑monitor DPI aware
-- First-letter activation, outside-click dismissal, process exits after use
-- Folder submenu behaviors: lazy population, max depth, name-only items, single vs double click to open
-- Per-config single-instance (separate instance per INI path)
+- First-letter activation, outside-click dismissal
+- Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
+- Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
+- Granular extension hiding (global + recent-only override)
 
 ## Run
 
-- Move default config.ini file from repository to the root folder of WinMacMenu.exe executable.
-- Double‑click the EXE to show the menu.
-- The menu closes on selection or outside click and the process exits.
-- Use --config to point at a custom INI; each INI path gets its own single‑instance gate.
-
-Examples:
-- WinMacMenu.exe --config C:\Tools\menu.ini
+Double‑click the EXE to show the menu. It exits immediately after the menu closes.
+Use `--config <path>` to point at a custom INI (single instance per INI path applies).
 
 ## Configuration
 
 WinMacMenu reads an INI. If missing, a default is created.
 
-### Sections
+Sections
 - [General] global behavior and style
 - [Placement] position rules
 - [Menu] menu items Item1..ItemN
 - [Icons] per-item icon mapping Icon1..IconN
-- [Modern] modern-only visual tweaks
 
-### Notes
+Notes
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
 - Indices N in [Icons] map to ItemN in [Menu].
-- MenuWidth and [Modern] options apply to Modern style only; Legacy keeps native look.
+- Comments: Lines beginning with `;` or `#` are ignored. Inline (end‑of‑line) comments are not supported—place comments on their own line.
+- Duplicate keys: The last occurrence in a section wins (standard Win32 profile API behavior).
+- Unknown keys are ignored.
 
-#### [General]
+### Quick Reference (All Keys)
 
-- MenuStyle = legacy | modern
-- DefaultIcon = path\to\default.ico (optional)
-- LegacyIcons = 0 | 1  (show icons in legacy style via MIIM_BITMAP)
-- RecentMax = 10       (max items in Recent submenu)
-- FolderMaxDepth = 2   (1..4 for nested folder submenus)
-- FolderSubmenuOpen = single | double (open folder itself on single/double click)
-- ShowHidden = 0 | 1   (show FILE_ATTRIBUTE_HIDDEN files)
-- ShowDotfiles = 0 | 1 (show entries whose name starts with '.')
-- PointerRelative = 0 | 1 (place menu near cursor instead of edges)
-- MenuWidth = 226..255 (0 or omit = auto; Modern only, DPI‑scaled)
-- Corners = rounded | square (Modern only; selection pill corners)
+| Section | Key | Values | Default | Notes / Synonyms / Deprecated |
+|---------|-----|--------|---------|--------------------------------|
+| General | RecentMax | integer (1..64) | 12 | Caps recent submenu items |
+| General | FolderSubmenuDepth | 1..4 | 1 | Max recursive depth for folder submenus |
+| General | FolderSubmenuOpen | single \| double | single | single = activate on first click; double = require second click |
+| General | FolderShowOpenEntry | true/false | true | Adds "Open <folder>" entry at top when single-click open enabled |
+| General | MenuStyle | legacy | legacy | modern hidden unless compiled with ENABLE_MODERN_STYLE |
+| General | DefaultIcon | path | (empty) | .ico file; env vars expand |
+| General | ShowIcons | true/false | false | LegacyIcons (deprecated) still accepted |
+| General | ShowFolderIcons | true/false | false | Uses system small folder icon (unless per-item icon) |
+| General | ShowExtensions | true/false | true | HideExtensions (deprecated inverse) overrides if present |
+| General | RecentShowExtensions | true/false | true | RecentHideExtensions (deprecated inverse) overrides if present |
+| General | RecentShowCleanItems | true/false | true | Adds clear command to recent submenu |
+| General | ShowHidden | true/false | false | Hidden attribute files |
+| General | ShowDotfiles | false\|true\|filesonly\|foldersonly | false | true=both; synonyms: files-only/folders-only |
+| General | RecentLabel | fullpath\|name | fullpath | name synonyms: filename,file,leaf |
+| General | LogConfig | off\|basic\|verbose \| 0/1/2/true/false | off | basic=true=1, verbose=2 |
+| General | LogFolder | path | (exe dir) | Dynamic file naming (see logging) |
+| General | MenuWidth | 226..255 | 0 | Modern style only (ignored otherwise) |
+| General | Corners | rounded\|square | rounded | Modern style only (or Modern section) |
+| Placement | PointerRelative | true/false | false | Toggle pointer anchoring |
+| Placement | Horizontal | left\|center\|right | right | Along working area |
+| Placement | HOffset | integer | 16 | Pixels; negative flips semantics |
+| Placement | Vertical | top\|center\|bottom | bottom | Along working area |
+| Placement | VOffset | integer | 48 | Pixels; negative flips semantics |
+| Menu | ItemN | see Menu format | (none) | Up to 64 entries |
+| Icons | IconN | path | (none) | Maps to ItemN if item lacks explicit icon |
+| Debug | LogConfig | (same as General) | (fallback) | Used only if not set in General |
+| Debug | LogFolder | path | (fallback) | Used only if not set in General |
 
-#### [Placement]
+### Comment Syntax
 
+Use `;` or `#` at the start of a line:
+
+```
+; This is a comment
+# Also a comment
+[General]
+ShowIcons=true
+```
+
+Inline comments are not reliably ignored; avoid `Key=Value ; like this` patterns—place comments above.
+
+### [General]
+
+Key | Description
+----|------------
+MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
+DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used
+ShowIcons | `0|1` (renamed from LegacyIcons; LegacyIcons still accepted for backward compatibility)
+ShowExtensions | `0|1` (default 1). When 0, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode). Deprecated `HideExtensions` (legacy) still honored and inverts this value.
+RecentShowExtensions | `0|1` (default 1). When 0, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions. Deprecated `RecentHideExtensions` still honored and inverts this value.
+RecentShowCleanItems | `0|1` (default 1). When 1 adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
+ShowFolderIcons | `0|1` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
+RecentMax | Maximum recent entries (default 12)
+FolderSubmenuDepth | Max nested folder submenu depth (1–4)
+FolderSubmenuOpen | `single|double` click depth-1 submenu folders to open (default single)
+FolderShowOpenEntry | `true|false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
+ShowHidden | Show items with Hidden attribute
+ShowDotfiles | `false|true|filesonly|foldersonly` extended dotfile visibility (dot overrides hidden filter for those names)
+RecentLabel | `fullpath|name` controls label style for recent items (name aliases: filename, file, leaf)
+PointerRelative | `0|1` position near cursor instead of configured edges
+LogConfig | `off|0|false`, `basic|1|true`, `verbose|2` – logging level (can reside in [General] or [Debug])
+LogFolder | Optional folder path (env vars expand) where a dynamic log file will be created. If omitted, the executable directory is used.
+
+(Width / rounded corner settings for a modern style are intentionally omitted unless modern build is enabled.)
+
+### Extension Visibility Details
+### Logging Details
+- Lookup order for `LogConfig` and `LogFolder`: `[General]` then `[Debug]` (first non-empty wins).
+- Levels:
+  - off / 0 / false: no output
+  - basic / 1 / true: one config summary block to debugger (OutputDebugString) and to the log file if logging enabled
+  - verbose / 2 : basic summary plus a per-item listing (Type, Label, Path, Icon, Params)
+- Dynamic log file name pattern: `WinMacMenu_<configBase>_<yyMMdd-HHmm>.log` where `<configBase>` is the INI filename without extension. Timestamp uses local time when config loads (first run of process).
+- Location: if `LogFolder` is set its expanded path is used (folder auto-created best-effort). Otherwise the executable directory.
+- Encoding: UTF-8 (no BOM) with newline per entry.
+- Legacy: `LogConfig=true` continues to map to basic. The former `LogFile` key is deprecated and replaced by `LogFolder` + dynamic naming (direct absolute filenames can be simulated by setting a dedicated empty folder path).
+- Dot-prefixed files (like `.gitignore`) are not extension-stripped (mirrors Explorer convention).
+- Keys now use positive logic: ShowExtensions / RecentShowExtensions (older HideExtensions / RecentHideExtensions still parsed and invert).
+- Precedence for recent items when `RecentLabel=name`:
+  1. RecentShowExtensions=0 (or legacy RecentHideExtensions=1) → hide extension
+  2. Else ShowExtensions=0 (or legacy HideExtensions=1) → hide extension
+  3. Else extension shown
+- Folder listings & inline expansions ignore the recent-specific key and use only ShowExtensions (or legacy HideExtensions inversion).
+
+### Icon Precedence
+For each menu item / popup root:
+1. Explicit per-item icon (fifth field or [Icons] mapping)
+2. (Folders only, when ShowFolderIcons=1) System folder icon
+3. DefaultIcon (if set)
+4. None
+
+Recent submenu root & Power menu root follow: per-item icon > DefaultIcon. The optional "Clear Recent Items" command (when `RecentShowCleanItems=1`) has no icon.
+
+### [Placement]
 Used when PointerRelative = 0.
 
 - HPlacement = Left | Center | Right
-- HOffset   = integer pixels from left/right when not centered
+- HOffset   = integer (pixels; negative allowed to invert side padding semantics)
 - VPlacement = Top | Center | Bottom
-- VOffset   = integer pixels from top/bottom when not centered
+- VOffset   = integer
 
-#### [Menu]
-
-Define items Item1..ItemN as pipe-separated fields:
+### [Menu]
 
 ItemN = Label | TYPE | PathOrTarget | Params | IconPath
 
-- Label: text shown in the menu (env vars expand)
-- TYPE: one of
-  - URI              (ms-settings:, shell:, http:, etc.)
-  - FILE             (launch a file or executable)
-  - CMD              (run a command line; Params appended)
-  - FOLDER           (open folder directly)
-  - FOLDER_SUBMENU   (show folder contents as submenu)
-  - POWER_SLEEP
-  - POWER_SHUTDOWN
-  - POWER_RESTART
-  - POWER_LOCK
-  - POWER_LOGOFF
-  - RECENT_SUBMENU   (inserts the dynamic Recent items submenu)
-- PathOrTarget: meaning depends on TYPE; for URI use the full URI; for FOLDER[_SUBMENU] use the folder path
-- Params: optional command-line parameters for FILE/CMD (ignored otherwise)
-- IconPath: optional per-item icon (.ico recommended)
+TYPE values:
+- URI, FILE, CMD
+- FOLDER (clickable or mode-adjusted by params tokens)
+- FOLDER_SUBMENU
+- POWER_SLEEP, POWER_SHUTDOWN, POWER_RESTART, POWER_LOCK, POWER_LOGOFF
+- POWER_MENU (adds aggregated power submenu: Sleep, Shut down, Restart, Lock, Log off)
+- RECENT_SUBMENU
+- SEPARATOR
 
-You can also use a value in [Icons] to assign an icon to ItemN: IconN = path\to\icon.ico
+Folder params tokens (space-separated, case-insensitive):
+- `submenu` treat as submenu (like FOLDER_SUBMENU)
+- `link` force clickable folder
+- `inline` inject contents at root (files & lazy submenus for subfolders)
+- `inlineopen` clickable header + inline contents
+- `notitle` / `noheader` suppress header row (with inline/inlineopen)
 
-Separators: use TYPE = SEPARATOR, or leave Label empty with a valid TYPE/Path; the parser also accepts explicit CI_SEPARATOR internally.
+Example:
+```
+Item10=Code|FOLDER|%USERPROFILE%\Code|inline|
+Item11=Scripts|FOLDER|%USERPROFILE%\Scripts|inline notitle|
+Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
+```
 
-#### [Icons]
+### Inline Expansion Notes
+- Subdirectories become lazy submenus (depth starts at 2)
+- Visibility filters apply (ShowHidden / ShowDotfiles modes)
+- No automatic separator insertion
 
-- Icon1 = C:\path\to\apps.ico
-- Icon2 = C:\path\to\settings.ico
-- ... (maps 1:1 to ItemN)
+### [Icons]
+`IconN` maps to `ItemN` if the item itself doesn’t define an icon path.
 
-If an item has no IconPath and there is no IconN mapping, DefaultIcon (if set) is used.
+### Experimental Flags Recap
+- inline, inlineopen, notitle/noheader (removable without schema changes)
 
-#### [Modern]
-
-Modern style only:
-- MenuWidth = 226..255
-- Corners = rounded | square
-
-## Examples
-
-### Minimal
-
-[General]  
-MenuStyle=modern  
-RecentMax=12  
-PointerRelative=1  
-MenuWidth=240
-
-[Menu]  
-Item1=Settings|URI|ms-settings:  
-Item2=File Explorer|FILE|explorer.exe||%SystemRoot%\\System32\\imageres.dll  
-Item3=Recent|RECENT_SUBMENU  
-Item4=Sleep|POWER_SLEEP  
-Item5=Restart|POWER_RESTART  
-
-### Folder submenu with visibility and click behavior
-
-[General]  
-MenuStyle=modern  
-FolderMaxDepth=2  
-FolderSubmenuOpen=single  
-ShowHidden=0  
-ShowDotfiles=0  
-
-[Menu]  
-Item1=Downloads|FOLDER_SUBMENU|%USERPROFILE%\\Downloads  
-Item2=Documents|FOLDER_SUBMENU|%USERPROFILE%\\Documents  
-Item3=Open Pictures|FOLDER|%USERPROFILE%\\Pictures  
-
-### Placement (edge-based)
-
-[General]  
-PointerRelative=0  
-
-[Placement]  
-HPlacement=Right  
-HOffset=16  
-VPlacement=Bottom  
-VOffset=24  
-
-## Behavior details
-
-- First-letter activation: typing a letter activates the first matching item immediately.
-- Outside click: clicking away dismisses the menu.
-- DPI/scaling: sizes and MenuWidth are DPI-scaled in Modern style.
-- Legacy vs Modern: Legacy uses the system popup renderer; Modern uses owner-draw for a Win11-like look. Legacy ignores MenuWidth and Modern-only options.
-- Icons in Legacy: if LegacyIcons=1, icons attach via MIIM_BITMAP without changing native look.
-- Recent: resolves .lnk targets under the Recent folder; missing targets are skipped.
-- Power actions: Shutdown/Restart attempt to enable the shutdown privilege. Sleep uses SetSuspendState; may be blocked by policy.
-- Single-instance: one instance per INI path (mutex includes the INI path hash). Launching again forwards the request.
+## Behavior Details
+- First-letter activation
+- Outside click dismisses menu
+- DPI-aware scaling via system menu metrics
+- Icons in legacy mode use MIIM_BITMAP, keeping native look (no custom owner-draw)
+- Recent resolves .lnk targets; missing targets skipped
+- Power actions: consistent markers used internally (POWER_MENU aggregates)
+- Single-instance per INI path
+- Second invocation toggle: launching the executable again (e.g., via a Windows key binding in an external tool) sends a toggle message. If the menu is open it closes; if closed it opens at the configured position. This enables assigning the EXE both to open and to dismiss via the same key.
 
 ## Troubleshooting
 
-- Width doesn’t change in Legacy: by design; only Modern honors MenuWidth.
 - Icons look blurry: use 16x16 .ico where possible. Large PNGs in .ico may scale poorly.
 - Folder submenus are slow: contents load lazily on first open; deep folders or network paths can still be slow — reduce FolderMaxDepth.
 
@@ -184,5 +215,4 @@ VOffset=24
 - Update modern style to look like Windows 11 context menu
 - Sub-menus sorting options
 - Different depths level for specific folders
-- Always hide specific file by the name/extension for every folder submenus
 - Possibility to open WinMac menu with right clicking Start button using Open-Shell ([#2286](https://github.com/Open-Shell/Open-Shell-Menu/issues/2286))
