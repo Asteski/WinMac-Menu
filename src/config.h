@@ -28,6 +28,8 @@ typedef struct ConfigItem {
     WCHAR path[MAX_PATH];     // file/folder path or command target
     WCHAR params[256];        // optional params
     WCHAR iconPath[MAX_PATH]; // optional icon path (.ico), 16x16 preferred
+    WCHAR iconPathLight[MAX_PATH]; // optional override icon for light theme
+    WCHAR iconPathDark[MAX_PATH];  // optional override icon for dark theme
     BOOL submenu;             // for folder: display as submenu
     BOOL inlineExpand;        // experimental: for folder, expand contents directly in root menu (params contains "inline")
     BOOL inlineNoHeader;      // when inlineExpand, suppress header even if label present (params contains notitle|noheader)
@@ -52,6 +54,8 @@ typedef struct Config {
     enum { STYLE_LEGACY=0 } menuStyle; // always legacy when modern disabled
 #endif
     WCHAR defaultIconPath[MAX_PATH]; // optional default icon for items without explicit icon
+    WCHAR defaultIconPathLight[MAX_PATH]; // optional default icon for light theme
+    WCHAR defaultIconPathDark[MAX_PATH];  // optional default icon for dark theme
     BOOL showIcons; // show icons in legacy style (previously LegacyIcons)
     // Appearance
     BOOL roundedCorners; // (modern only when enabled) selection corner styling
@@ -60,6 +64,9 @@ typedef struct Config {
     int hOffset; // pixels from left/right when not centered
     enum { VP_TOP=0, VP_CENTER=1, VP_BOTTOM=2 } vPlacement;
     int vOffset; // pixels from top/bottom when not centered
+    // When placement is center on an axis, optionally ignore the corresponding offset
+    BOOL ignoreHOffsetWhenCentered; // [Placement] IgnoreOffsetWhenCentered=true|hoffset|voffset|false
+    BOOL ignoreVOffsetWhenCentered; // derived from the same key
     // Optional: pointer-relative positioning and menu width (modern-only override)
     BOOL pointerRelative; // Position near mouse pointer instead of edges
     int menuWidth; // (modern only) [General] MenuWidth=226..255 (0 = auto). Ignored when modern disabled.
@@ -72,6 +79,9 @@ typedef struct Config {
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
+    // When PointerRelative = true, optionally ignore H/V offsets
+    BOOL ignoreHOffsetWhenRelative; // [Placement] IgnoreOffsetWhenRelative=true|hoffset|voffset|false
+    BOOL ignoreVOffsetWhenRelative; // derived from the same key
     ConfigItem items[64];
     int count;
 } Config;

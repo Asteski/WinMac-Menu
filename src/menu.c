@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <shlobj.h>
+#include <stdlib.h> // _wtoi
 #include "menu.h"
 #include "config.h"
 #include "recent.h"
@@ -63,6 +65,61 @@ static void assign_icon_to_last_popup(HMENU hMenu, HICON hico) {
     mii.fMask = MIIM_BITMAP;
     mii.hbmpItem = hb;
     SetMenuItemInfoW(hMenu, pos, TRUE, &mii);
+}
+
+// Helper: attempt to load an icon from either a direct .ico file path (existing logic)
+// or from a module (DLL/EXE) with an index specified using ",<index>" syntax.
+// Accepted forms:
+//   C:\Windows\System32\shell32.dll,10
+//   shell32.dll,10            (searches System32)
+//   imageres.dll,-3           (negative index still passed through; Windows treats as resource ID)
+// If no comma present, falls back to LoadImageW for .ico file.
+static HICON load_icon_path_or_module(const WCHAR* spec) {
+    HICON hSmall = NULL;
+    HICON hLarge = NULL;
+    const WCHAR* comma;
+    WCHAR module[MAX_PATH];
+    size_t len;
+    const WCHAR* idxStr;
+    int idx;
+    WCHAR expanded[MAX_PATH];
+    UINT extracted;
+
+    if (!spec || !spec[0]) return NULL;
+    comma = wcschr(spec, L',');
+    if (!comma) {
+        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+    }
+    // Copy module portion up to (but not including) comma.
+    len = (size_t)(comma - spec);
+    if (len >= MAX_PATH) len = MAX_PATH - 1;
+    {
+        size_t i;
+        for (i=0;i<len;i++) module[i] = spec[i];
+        module[len] = 0;
+    }
+    idxStr = comma + 1;
+    idx = _wtoi(idxStr); // handles negative values
+    // If no backslash at all, assume System32 for bare module names like 'shell32.dll'.
+    if (!wcschr(module, L'\\')) {
+        WCHAR sysdir[MAX_PATH];
+        if (SHGetSpecialFolderPathW(NULL, sysdir, CSIDL_SYSTEM, FALSE)) {
+            WCHAR combined[MAX_PATH];
+            lstrcpynW(combined, sysdir, ARRAYSIZE(combined));
+            PathAppendW(combined, module);
+            lstrcpynW(module, combined, ARRAYSIZE(module));
+        }
+    }
+    // Expand any environment variables.
+    if (ExpandEnvironmentStringsW(module, expanded, ARRAYSIZE(expanded)) && expanded[0]) {
+        lstrcpynW(module, expanded, ARRAYSIZE(module));
+    }
+    extracted = ExtractIconExW(module, idx, &hLarge, &hSmall, 1);
+    if (extracted == 0) {
+        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+    }
+    if (hLarge) DestroyIcon(hLarge);
+    return hSmall;
 }
 
 static HICON get_system_folder_icon(void) {
@@ -234,12 +291,17 @@ static HMENU build_menu(void) {
         case CI_CMD:
         {
             AppendMenuW(hMenu, MF_STRING, id, it->label[0] ? it->label : it->path);
-            // Pick icon path: per-item or default
+            // Pick icon path with theme awareness: per-item (Light/Dark) -> generic -> default (Light/Dark) -> default generic
+            const BOOL dark = theme_is_dark();
             const WCHAR* ipath = NULL;
-            if (it->iconPath[0]) ipath = it->iconPath;
+            if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+            else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+            else if (it->iconPath[0]) ipath = it->iconPath;
+            else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+            else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
             else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
             if (ipath) {
-                HICON hico = (HICON)LoadImageW(NULL, ipath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+                HICON hico = load_icon_path_or_module(ipath);
                 add_item_icon(id, hico);
                 if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) assign_legacy_item_bitmap(hMenu, id, hico);
             }
@@ -320,18 +382,26 @@ static HMENU build_menu(void) {
                 // No automatic trailing separator; user controls separators explicitly in config.
             } else {
                 AppendMenuW(hMenu, MF_STRING, id, it->label[0] ? it->label : it->path);
+                const BOOL dark = theme_is_dark();
                 const WCHAR* ipath = NULL;
                 HICON hico = NULL;
-                if (it->iconPath[0]) {
-                    ipath = it->iconPath; // explicit per-item icon always wins
-                } else if (g_cfg.showFolderIcons) {
-                    // When showing folder icons, use system folder icon instead of default icon path
-                    hico = get_system_folder_icon();
-                } else if (g_cfg.defaultIconPath[0]) {
-                    ipath = g_cfg.defaultIconPath;
+                // Prefer per-item icon first
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                if (!ipath) {
+                    if (g_cfg.showFolderIcons) {
+                        // When showing folder icons and no per-item icon, use system folder icon
+                        hico = get_system_folder_icon();
+                    } else {
+                        // Fall back to defaults
+                        if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                        else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                        else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                    }
                 }
                 if (!hico && ipath) {
-                    hico = (HICON)LoadImageW(NULL, ipath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+                    hico = load_icon_path_or_module(ipath);
                 }
                 if (hico) {
                     add_item_icon(id, hico);
@@ -348,14 +418,23 @@ static HMENU build_menu(void) {
             attach_menu_data(sub, it->path, 1);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                const BOOL dark = theme_is_dark();
                 HICON hicoF = NULL;
-                if (it->iconPath[0]) {
-                    hicoF = (HICON)LoadImageW(NULL, it->iconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
-                } else if (g_cfg.showFolderIcons) {
-                    hicoF = get_system_folder_icon();
-                } else if (g_cfg.defaultIconPath[0]) {
-                    hicoF = (HICON)LoadImageW(NULL, g_cfg.defaultIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+                const WCHAR* ipath = NULL;
+                // Prefer per-item icon first
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                if (!ipath) {
+                    if (g_cfg.showFolderIcons) {
+                        hicoF = get_system_folder_icon();
+                    } else {
+                        if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                        else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                        else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                    }
                 }
+                if (!hicoF && ipath) hicoF = load_icon_path_or_module(ipath);
                 assign_icon_to_last_popup(hMenu, hicoF);
             }
             MENUITEMINFOW mii = { sizeof(mii) };
@@ -379,12 +458,16 @@ static HMENU build_menu(void) {
             HMENU sub = build_recent_submenu();
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Recent Items");
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                const BOOL dark = theme_is_dark();
                 HICON hicoR = NULL;
-                if (it->iconPath[0]) {
-                    hicoR = (HICON)LoadImageW(NULL, it->iconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
-                } else if (g_cfg.defaultIconPath[0]) {
-                    hicoR = (HICON)LoadImageW(NULL, g_cfg.defaultIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
-                }
+                const WCHAR* ipath = NULL;
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                if (ipath) hicoR = load_icon_path_or_module(ipath);
                 assign_icon_to_last_popup(hMenu, hicoR);
             }
             break;
@@ -401,12 +484,16 @@ static HMENU build_menu(void) {
             AppendMenuW(sub, MF_STRING, id, L"Log off"); map_add(id++, L"POWER_LOGOFF");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Power");
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                const BOOL dark = theme_is_dark();
                 HICON hicoP = NULL;
-                if (it->iconPath[0]) {
-                    hicoP = (HICON)LoadImageW(NULL, it->iconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
-                } else if (g_cfg.defaultIconPath[0]) {
-                    hicoP = (HICON)LoadImageW(NULL, g_cfg.defaultIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
-                }
+                const WCHAR* ipath = NULL;
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                if (ipath) hicoP = load_icon_path_or_module(ipath);
                 assign_icon_to_last_popup(hMenu, hicoP);
             }
             break;
@@ -435,29 +522,35 @@ static POINT compute_menu_pos(HWND owner) {
     RECT wa = mi.rcWork;
     LONG x = 0, y = 0;
     if (g_cfg.pointerRelative) {
-        // Anchor relative to pointer using configured offsets
-        x = cursor.x + g_cfg.hOffset;
-        y = cursor.y + g_cfg.vOffset;
+        // Anchor relative to pointer using configured offsets (optionally ignored per setting)
+        x = cursor.x;
+        y = cursor.y;
+        if (!g_cfg.ignoreHOffsetWhenRelative) x += g_cfg.hOffset;
+        if (!g_cfg.ignoreVOffsetWhenRelative) y += g_cfg.vOffset;
     } else {
     if (g_cfg.hPlacement == 0) {
         x = wa.left + g_cfg.hOffset;
+        if (g_cfg.hOffset < 0) x = wa.left - g_cfg.hOffset; // negative flips semantics for edge padding
     } else if (g_cfg.hPlacement == 1) {
+        // Center horizontally; optionally ignore offset per setting
         x = wa.left + (wa.right - wa.left) / 2;
+        if (!g_cfg.ignoreHOffsetWhenCentered) x += g_cfg.hOffset;
     } else {
         x = wa.right - g_cfg.hOffset;
+        if (g_cfg.hOffset < 0) x = wa.right + g_cfg.hOffset; // negative flips semantics for edge padding
     }
-    if (g_cfg.hPlacement == 0 && g_cfg.hOffset < 0) x = wa.left - g_cfg.hOffset;
-    if (g_cfg.hPlacement == 2 && g_cfg.hOffset < 0) x = wa.right + g_cfg.hOffset;
 
     if (g_cfg.vPlacement == 0) {
         y = wa.top + g_cfg.vOffset;
+        if (g_cfg.vOffset < 0) y = wa.top - g_cfg.vOffset;
     } else if (g_cfg.vPlacement == 1) {
+        // Center vertically; optionally ignore offset per setting
         y = wa.top + (wa.bottom - wa.top) / 2;
+        if (!g_cfg.ignoreVOffsetWhenCentered) y += g_cfg.vOffset;
     } else {
         y = wa.bottom - g_cfg.vOffset;
+        if (g_cfg.vOffset < 0) y = wa.bottom + g_cfg.vOffset;
     }
-    if (g_cfg.vPlacement == 0 && g_cfg.vOffset < 0) y = wa.top - g_cfg.vOffset;
-    if (g_cfg.vPlacement == 2 && g_cfg.vOffset < 0) y = wa.bottom + g_cfg.vOffset;
     }
 
     if (x < wa.left) x = wa.left;
@@ -565,7 +658,20 @@ void ShowWinXMenu(HWND owner, POINT screenPt) {
         screenPt = compute_menu_pos(owner);
     }
     SetForegroundWindow(owner);
-    UINT flags = TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_VERPOSANIMATION | TPM_HORIZONTAL | TPM_RETURNCMD;
+    UINT flags = TPM_RIGHTBUTTON | TPM_VERPOSANIMATION | TPM_HORIZONTAL | TPM_RETURNCMD;
+    if (g_cfg.pointerRelative) {
+        // Anchor at pointer; default to left/top align so menu grows down/right from cursor
+        flags |= TPM_LEFTALIGN | TPM_TOPALIGN;
+    } else {
+        // Align according to configured placement
+        if (g_cfg.hPlacement == 0) flags |= TPM_LEFTALIGN;
+        else if (g_cfg.hPlacement == 1) flags |= TPM_CENTERALIGN;
+        else flags |= TPM_RIGHTALIGN;
+
+        if (g_cfg.vPlacement == 0) flags |= TPM_TOPALIGN;
+        else if (g_cfg.vPlacement == 1) flags |= TPM_VCENTERALIGN;
+        else flags |= TPM_BOTTOMALIGN;
+    }
     int cmd = TrackPopupMenu(hMenu, flags, screenPt.x, screenPt.y, 0, owner, NULL);
     PostMessageW(owner, WM_NULL, 0, 0);
     MenuExecuteCommand(owner, (UINT)cmd);

@@ -13,8 +13,8 @@ A tiny Win32 application that shows a Windows context-like popup menu. It’s co
 - Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
 - Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
-- Icons: per-item icon, optional DefaultIcon fallback, and optional system folder icon retrieval
-- Placement controls (edges or cursor, with offsets), per‑monitor DPI aware
+- Icons: per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
+- Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
 - First-letter activation, outside-click dismissal
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
@@ -33,12 +33,14 @@ Sections
 - [General] global behavior and style
 - [Placement] position rules
 - [Menu] menu items Item1..ItemN
-- [Icons] per-item icon mapping Icon1..IconN
+- [Icons] per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
+- [IconsLight] theme-specific per-item icons for light theme (Icon1..IconN)
+- [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 
 Notes
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
-- Indices N in [Icons] map to ItemN in [Menu].
-- Comments: Lines beginning with `;` or `#` are ignored. Inline (end‑of‑line) comments are not supported—place comments on their own line.
+- Indices N in [Icons]/[IconsLight]/[IconsDark] map to ItemN in [Menu].
+- Generated default INI contains no comments (to keep the file minimal). Comments are still supported by the parser if you add them manually: lines beginning with `;` or `#` are ignored.
 - Duplicate keys: The last occurrence in a section wins (standard Win32 profile API behavior).
 - Unknown keys are ignored.
 
@@ -47,11 +49,13 @@ Notes
 | Section | Key | Values | Default | Notes / Synonyms / Deprecated |
 |---------|-----|--------|---------|--------------------------------|
 | General | RecentMax | integer (1..64) | 12 | Caps recent submenu items |
-| General | FolderSubmenuDepth | 1..4 | 1 | Max recursive depth for folder submenus |
-| General | FolderSubmenuOpen | single \| double | single | single = activate on first click; double = require second click |
+| General | FolderSubmenuDepth | 1..4 | 4 | Max recursive depth for folder submenus |
+| General | FolderSubmenuOpen | single \| double | single | single = activate on first click; double = require second click (omitted from generated INI unless changed) |
 | General | FolderShowOpenEntry | true/false | true | Adds "Open <folder>" entry at top when single-click open enabled |
 | General | MenuStyle | legacy | legacy | modern hidden unless compiled with ENABLE_MODERN_STYLE |
-| General | DefaultIcon | path | (empty) | .ico file; env vars expand |
+| Icons | DefaultIcon | path or module,index | (empty) | Fallback icon when no per-item icon is set; env vars expand |
+| Icons | DefaultIconLight | path or module,index | (empty) | Optional default icon for light theme |
+| Icons | DefaultIconDark | path or module,index | (empty) | Optional default icon for dark theme |
 | General | ShowIcons | true/false | false | LegacyIcons (deprecated) still accepted |
 | General | ShowFolderIcons | true/false | false | Uses system small folder icon (unless per-item icon) |
 | General | ShowExtensions | true/false | true | HideExtensions (deprecated inverse) overrides if present |
@@ -63,29 +67,21 @@ Notes
 | General | LogConfig | off\|basic\|verbose \| 0/1/2/true/false | off | basic=true=1, verbose=2 |
 | General | LogFolder | path | (exe dir) | Dynamic file naming (see logging) |
 | General | MenuWidth | 226..255 | 0 | Modern style only (ignored otherwise) |
-| General | Corners | rounded\|square | rounded | Modern style only (or Modern section) |
-| Placement | PointerRelative | true/false | false | Toggle pointer anchoring |
+| General | Corners | rounded\|square | (n/a) | Modern style only (not written by default) |
+| Placement | PointerRelative | true/false | true | Toggle pointer anchoring |
 | Placement | Horizontal | left\|center\|right | right | Along working area |
-| Placement | HOffset | integer | 16 | Pixels; negative flips semantics |
+| Placement | HOffset | integer | 0 | Pixels; negative flips semantics |
 | Placement | Vertical | top\|center\|bottom | bottom | Along working area |
-| Placement | VOffset | integer | 48 | Pixels; negative flips semantics |
+| Placement | VOffset | integer | 0 | Pixels; negative flips semantics |
+| Placement | IgnoreOffsetWhenCentered | false\|true\|hoffset\|voffset | false | When an axis is centered, ignore its offset (true=both) |
+| Placement | IgnoreOffsetWhenRelative | false\|true\|hoffset\|voffset | false | When PointerRelative=1, ignore offsets per axis (true=both) |
 | Menu | ItemN | see Menu format | (none) | Up to 64 entries |
 | Icons | IconN | path | (none) | Maps to ItemN if item lacks explicit icon |
 | Debug | LogConfig | (same as General) | (fallback) | Used only if not set in General |
 | Debug | LogFolder | path | (fallback) | Used only if not set in General |
 
 ### Comment Syntax
-
-Use `;` or `#` at the start of a line:
-
-```
-; This is a comment
-# Also a comment
-[General]
-ShowIcons=true
-```
-
-Inline comments are not reliably ignored; avoid `Key=Value ; like this` patterns—place comments above.
+The generated default INI is comment-free. If you add comments manually, use `;` or `#` at the start of a line. Inline comments (end‑of‑line) are not supported.
 
 ### [General]
 
@@ -131,21 +127,75 @@ LogFolder | Optional folder path (env vars expand) where a dynamic log file will
 - Folder listings & inline expansions ignore the recent-specific key and use only ShowExtensions (or legacy HideExtensions inversion).
 
 ### Icon Precedence
-For each menu item / popup root:
-1. Explicit per-item icon (fifth field or [Icons] mapping)
-2. (Folders only, when ShowFolderIcons=1) System folder icon
-3. DefaultIcon (if set)
-4. None
+For each menu item / popup root (theme-aware):
+1. Explicit per-item theme override: [IconsDark]/[IconsLight] (current theme wins)
+2. Else explicit per-item generic: fifth field on ItemN or [Icons] mapping
+3. Folders only, when ShowFolderIcons=1: use system folder icon (overrides defaults)
+4. Else default icon theme override: DefaultIconDark/DefaultIconLight (current theme)
+5. Else default icon generic: DefaultIcon
+6. Else none
+
+### Icon Sources (.ico or DLL/EXE resources)
+You can now reference icons embedded in modules (DLL/EXE) using a comma + index syntax:
+
+Examples:
+```
+Item5=Control Panel|FILE|control.exe||shell32.dll,21
+Item6=Downloads|FOLDER|%USERPROFILE%\Downloads|submenu|imageres.dll,184
+DefaultIcon=shell32.dll,167
+DefaultIconLight=imageres.dll,3
+DefaultIconDark=shell32.dll,167
+```
+
+Rules:
+- Syntax: `<modulePath>,<index>` where modulePath ends in `.dll` or `.exe`.
+- If the module path has no backslashes (e.g. `shell32.dll`), the System32 directory is assumed.
+- Environment variables in the module path are expanded.
+- Index can be positive or negative (negative values refer to resource IDs as understood by `ExtractIconExW`).
+- When no comma is present the path is treated as a normal `.ico` file (existing behavior).
+- Small (16x16) icons are extracted; large variant (if any) is discarded.
+- Fallback: if extraction fails the loader attempts to treat the full string as a direct `.ico` path.
 
 Recent submenu root & Power menu root follow: per-item icon > DefaultIcon. The optional "Clear Recent Items" command (when `RecentShowCleanItems=1`) has no icon.
+
+### Theme-specific per-item icons
+You can provide different icons per theme without changing `ItemN` lines using optional sections:
+
+```
+[IconsLight]
+Icon1=C:\Icons\light\app.ico
+Icon2=shell32.dll,46
+
+[IconsDark]
+Icon1=C:\Icons\dark\app.ico
+Icon2=shell32.dll,47
+```
+
+Notes:
+- Keys map by index: `IconN` corresponds to `ItemN` in the [Menu] section.
+- Values accept the same sources as regular icons: `.ico` or `module.dll,index`.
+- Environment variables expand in these paths as well.
 
 ### [Placement]
 Used when PointerRelative = 0.
 
 - HPlacement = Left | Center | Right
-- HOffset   = integer (pixels; negative allowed to invert side padding semantics)
+- HOffset   = integer (pixels; for Left/Right a negative value flips edge padding semantics; for Center it shifts relative to the screen center)
 - VPlacement = Top | Center | Bottom
-- VOffset   = integer
+- VOffset   = integer (same rules as HOffset; for Center it shifts relative to the screen center)
+ - IgnoreOffsetWhenCentered = false|true|hoffset|voffset
+   - false: offsets apply normally even when centered
+   - true (or both): ignore both HOffset and VOffset when the corresponding axis is centered
+   - hoffset: ignore only HOffset when Horizontal=center
+   - voffset: ignore only VOffset when Vertical=center
+
+When PointerRelative = 1 (anchor near cursor):
+
+- IgnoreOffsetWhenRelative = false|true|hoffset|voffset
+  - false: apply both offsets relative to the cursor (default)
+  - true (or both): ignore both offsets; anchor exactly at the cursor
+  - hoffset: ignore only HOffset; apply VOffset
+  - voffset: ignore only VOffset; apply HOffset
 
 ### [Menu]
 
@@ -196,24 +246,21 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 - Second invocation toggle: launching the executable again (e.g., via a Windows key binding in an external tool) sends a toggle message. If the menu is open it closes; if closed it opens at the configured position. This enables assigning the EXE both to open and to dismiss via the same key.
 
 ## Troubleshooting
-
-- Icons look blurry: use 16x16 .ico where possible. Large PNGs in .ico may scale poorly.
-- Folder submenus are slow: contents load lazily on first open; deep folders or network paths can still be slow — reduce FolderMaxDepth.
+- Empty folder submenu: check path, permissions, filters (ShowHidden / ShowDotfiles)
+- No icons: ensure ShowIcons=1 (or LegacyIcons=1 for backward compatibility) and paths are correct
+- Folder icons not appearing: set ShowFolderIcons=1; the system folder icon only shows when no per-item icon exists
 
 ## Notes
-
-- Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
-- This app uses normal popup menus; exact visual parity with the system Win+X menu isn’t guaranteed.
-- It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
-- You can also pin shortcuts to taskbar, or add to Links toolbar. Each shortcut can refer to different config.ini files.
-
 > [!NOTE]
 > **Please be informed that this is a beta version - you're using it at your own risk!**
+- Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
+- This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System for now
+- It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
+- You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files.
 
 ## Future plans
-
 - Run constantly in background as process
 - Sub-menus sorting options
 - Different depths level for specific folders
-- Add modern style to look like Windows 11 context menu
+- Add modern style to follow Fluent Design System principles
 - Possibility to open WinMac menu with right clicking Start button using Open-Shell ([#2286](https://github.com/Open-Shell/Open-Shell-Menu/issues/2286))
