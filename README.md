@@ -55,7 +55,7 @@ Key | Description
 MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
 DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used.
 ShowIcons | `true/false`
-ShowExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
+ShowFileExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
 RecentShowExtensions | `true/false` (default true). When false, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions.
 RecentShowCleanItems | `true/false` (default true). When true adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
 ShowFolderIcons | `true/false` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
@@ -64,7 +64,7 @@ FolderSubmenuDepth | Max nested folder submenu depth (1–4)
 FolderShowOpenEntry | `true/false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
 ShowHidden | Show items with Hidden attribute
 ShowDotfiles | `false/true/filesonly/foldersonly` extended dotfile visibility (dot overrides hidden filter for those names)
-RecentLabel / `fullpath/name` controls label style for recent items (name aliases: filename, file, leaf)
+RecentLabel | `fullpath/name` controls label style for recent items (name aliases: filename, file, leaf)
 PointerRelative | `true/false` position near cursor instead of configured edges
 LogConfig | `off/0/false`, `basic/1/true`, `verbose/2` – logging level (can reside in [General] or [Debug])
 LogFolder | Optional folder path (env vars expand) where a dynamic log file will be created. If omitted, the executable directory is used.
