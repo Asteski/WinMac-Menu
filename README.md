@@ -44,42 +44,6 @@ Notes
 - Duplicate keys: The last occurrence in a section wins (standard Win32 profile API behavior).
 - Unknown keys are ignored.
 
-### Quick Reference (All Keys)
-
-| Section | Key | Values | Default | Notes / Synonyms / Deprecated |
-|---------|-----|--------|---------|--------------------------------|
-| General | RecentMax | integer (1..64) | 12 | Caps recent submenu items |
-| General | FolderSubmenuDepth | 1..4 | 4 | Max recursive depth for folder submenus |
-| General | FolderSubmenuOpen | single \| double | single | single = activate on first click; double = require second click (omitted from generated INI unless changed) |
-| General | FolderShowOpenEntry | true/false | true | Adds "Open <folder>" entry at top when single-click open enabled |
-| General | MenuStyle | legacy | legacy | modern hidden unless compiled with ENABLE_MODERN_STYLE |
-| Icons | DefaultIcon | path or module,index | (empty) | Fallback icon when no per-item icon is set; env vars expand |
-| Icons | DefaultIconLight | path or module,index | (empty) | Optional default icon for light theme |
-| Icons | DefaultIconDark | path or module,index | (empty) | Optional default icon for dark theme |
-| General | ShowIcons | true/false | false | LegacyIcons (deprecated) still accepted |
-| General | ShowFolderIcons | true/false | false | Uses system small folder icon (unless per-item icon) |
-| General | ShowExtensions | true/false | true | HideExtensions (deprecated inverse) overrides if present |
-| General | RecentShowExtensions | true/false | true | RecentHideExtensions (deprecated inverse) overrides if present |
-| General | RecentShowCleanItems | true/false | true | Adds clear command to recent submenu |
-| General | ShowHidden | true/false | false | Hidden attribute files |
-| General | ShowDotfiles | false\|true\|filesonly\|foldersonly | false | true=both; synonyms: files-only/folders-only |
-| General | RecentLabel | fullpath\|name | fullpath | name synonyms: filename,file,leaf |
-| General | LogConfig | off\|basic\|verbose \| 0/1/2/true/false | off | basic=true=1, verbose=2 |
-| General | LogFolder | path | (exe dir) | Dynamic file naming (see logging) |
-| General | MenuWidth | 226..255 | 0 | Modern style only (ignored otherwise) |
-| General | Corners | rounded\|square | (n/a) | Modern style only (not written by default) |
-| Placement | PointerRelative | true/false | true | Toggle pointer anchoring |
-| Placement | Horizontal | left\|center\|right | right | Along working area |
-| Placement | HOffset | integer | 0 | Pixels; negative flips semantics |
-| Placement | Vertical | top\|center\|bottom | bottom | Along working area |
-| Placement | VOffset | integer | 0 | Pixels; negative flips semantics |
-| Placement | IgnoreOffsetWhenCentered | false\|true\|hoffset\|voffset | false | When an axis is centered, ignore its offset (true=both) |
-| Placement | IgnoreOffsetWhenRelative | false\|true\|hoffset\|voffset | false | When PointerRelative=1, ignore offsets per axis (true=both) |
-| Menu | ItemN | see Menu format | (none) | Up to 64 entries |
-| Icons | IconN | path | (none) | Maps to ItemN if item lacks explicit icon |
-| Debug | LogConfig | (same as General) | (fallback) | Used only if not set in General |
-| Debug | LogFolder | path | (fallback) | Used only if not set in General |
-
 ### Comment Syntax
 The generated default INI is comment-free. If you add comments manually, use `;` or `#` at the start of a line. Inline comments (end‑of‑line) are not supported.
 
