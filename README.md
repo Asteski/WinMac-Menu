@@ -2,13 +2,14 @@
 
 A tiny Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, , allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
 
-![WinMacMenu screenshot](assets/winmacmenu-demo.png)
-
-- Windows 10/11, x86 and ARM64 supported
-- No installer, single EXE
-- Low-latency popup that exits after the menu closes
+![WinMacMenu screenshot](assets/winmacmenu-demo-11.png)
+![WinMacMenu screenshot](assets/winmacmenu-demo-10.png)
 
 ## Features
+
+- Windows 10/11, x64 and ARM64
+- No installer, single EXE
+- Low-latency popup that exits after the menu closes
 
 - Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
@@ -22,8 +23,29 @@ A tiny Win32 application that shows a Windows context-like popup menu. It’s co
 
 ## Run
 
-Double‑click the EXE to show the menu. It exits immediately after the menu closes.
-Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+**Quick Start**: Double‑click the EXE. By default, it runs in background mode with a system tray icon.
+
+**Modes**:
+- **Background Mode (default)**: App stays running in background. Launch again to toggle/show menu.
+- **One-shot**: Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
+  - To start silently in background (without showing the menu on first launch), set `ShowOnLaunch=false`.
+
+**Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+
+**Tray Icon**: Right-click for settings menu including:
+- Show menu / Hide tray / Elevate (run as admin)
+- Start on login toggle
+- Show/Hide menu icons (toggles whether icons appear in the popup menu)
+- Settings (opens config.ini) / Help / About
+- Exit
+
+## Security & Privacy
+
+- No telemetry. The app makes no network connections and collects no data.
+- Registry usage: optional HKCU\Software\Microsoft\Windows\CurrentVersion\Run entry when you enable “Start on login” from the tray. It’s off by default and only changed when you toggle it. There is no service or scheduled task.
+- Keyboard/mouse hooks: installed only while the popup menu is visible to allow outside‑click/escape dismissal; they are immediately removed when the menu closes.
+- Recent cleanup: choosing “Clear Recent Items list” deletes shortcut (.lnk) files from your user Recent folder. It doesn’t touch actual documents or programs. There’s no confirmation.
+- Filesystem: reads your config.ini and enumerates folders you explicitly reference in the menu.
 
 ## Configuration
 
@@ -49,6 +71,10 @@ Notes
 | Section | Key | Values | Default | Notes / Synonyms / Deprecated |
 |---------|-----|--------|---------|--------------------------------|
 | General | RecentMax | integer (1..64) | 12 | Caps recent submenu items |
+| General | RunInBackground | true/false | true | Stay running in background; false = exit after menu closes |
+| General | ShowOnLaunch | true/false | true | When in background mode, show menu on first launch (set false to start silently) |
+| General | ShowTrayIcon | true/false | true | Show system tray icon when running in background |
+| General | StartOnLogin | true/false | false | Add to Windows startup (requires elevation to change) |
 | General | FolderSubmenuDepth | 1..4 | 4 | Max recursive depth for folder submenus |
 | General | FolderSubmenuOpen | single \| double | single | single = activate on first click; double = require second click (omitted from generated INI unless changed) |
 | General | FolderShowOpenEntry | true/false | true | Adds "Open <folder>" entry at top when single-click open enabled |
@@ -56,9 +82,9 @@ Notes
 | Icons | DefaultIcon | path or module,index | (empty) | Fallback icon when no per-item icon is set; env vars expand |
 | Icons | DefaultIconLight | path or module,index | (empty) | Optional default icon for light theme |
 | Icons | DefaultIconDark | path or module,index | (empty) | Optional default icon for dark theme |
-| General | ShowIcons | true/false | false | LegacyIcons (deprecated) still accepted |
+| General | ShowIcons | true/false | true | Toggle available from tray menu; LegacyIcons (deprecated) still accepted |
 | General | ShowFolderIcons | true/false | false | Uses system small folder icon (unless per-item icon) |
-| General | ShowExtensions | true/false | true | HideExtensions (deprecated inverse) overrides if present |
+| General | ShowFileExtensions | true/false | true | Back-compat: ShowExtensions; HideExtensions (deprecated inverse) overrides if present |
 | General | RecentShowExtensions | true/false | true | RecentHideExtensions (deprecated inverse) overrides if present |
 | General | RecentShowCleanItems | true/false | true | Adds clear command to recent submenu |
 | General | ShowHidden | true/false | false | Hidden attribute files |
@@ -90,11 +116,14 @@ Key | Description
 MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
 DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used
 ShowIcons | `0|1` (renamed from LegacyIcons; LegacyIcons still accepted for backward compatibility)
-ShowExtensions | `0|1` (default 1). When 0, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode). Deprecated `HideExtensions` (legacy) still honored and inverts this value.
+ShowFileExtensions | `0|1` (default 1). When 0, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode). Back-compat: `ShowExtensions`; deprecated `HideExtensions` still honored and inverts this value.
 RecentShowExtensions | `0|1` (default 1). When 0, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions. Deprecated `RecentHideExtensions` still honored and inverts this value.
 RecentShowCleanItems | `0|1` (default 1). When 1 adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
 ShowFolderIcons | `0|1` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
 RecentMax | Maximum recent entries (default 12)
+RunInBackground | `true|false` (default true). When true, app stays running in background with message loop for instant menu access. When false, app exits after menu closes (legacy behavior).
+ShowTrayIcon | `true|false` (default true). When true and running in background, shows system tray icon with right-click context menu for settings and controls.
+StartOnLogin | `true|false` (default false). When true, adds app to Windows startup via registry Run entry. Requires elevation to change this setting.
 FolderSubmenuDepth | Max nested folder submenu depth (1–4)
 FolderSubmenuOpen | `single|double` click depth-1 submenu folders to open (default single)
 FolderShowOpenEntry | `true|false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
@@ -119,12 +148,12 @@ LogFolder | Optional folder path (env vars expand) where a dynamic log file will
 - Encoding: UTF-8 (no BOM) with newline per entry.
 - Legacy: `LogConfig=true` continues to map to basic. The former `LogFile` key is deprecated and replaced by `LogFolder` + dynamic naming (direct absolute filenames can be simulated by setting a dedicated empty folder path).
 - Dot-prefixed files (like `.gitignore`) are not extension-stripped (mirrors Explorer convention).
-- Keys now use positive logic: ShowExtensions / RecentShowExtensions (older HideExtensions / RecentHideExtensions still parsed and invert).
+- Keys now use positive logic: ShowFileExtensions / RecentShowExtensions (older HideExtensions / RecentHideExtensions still parsed and invert).
 - Precedence for recent items when `RecentLabel=name`:
   1. RecentShowExtensions=0 (or legacy RecentHideExtensions=1) → hide extension
-  2. Else ShowExtensions=0 (or legacy HideExtensions=1) → hide extension
+  2. Else ShowFileExtensions=0 (or legacy HideExtensions=1) → hide extension
   3. Else extension shown
-- Folder listings & inline expansions ignore the recent-specific key and use only ShowExtensions (or legacy HideExtensions inversion).
+- Folder listings & inline expansions ignore the recent-specific key and use only ShowFileExtensions (or legacy HideExtensions inversion).
 
 ### Icon Precedence
 For each menu item / popup root (theme-aware):
@@ -259,7 +288,6 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files.
 
 ## Future plans
-- Run constantly in background as process
 - Sub-menus sorting options
 - Different depths level for specific folders
 - Add modern style to follow Fluent Design System principles

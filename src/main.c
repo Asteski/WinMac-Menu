@@ -17,8 +17,106 @@ static HANDLE g_hSingleInstance = NULL;
 static BOOL g_menuActive = FALSE;
 static BOOL g_menuShowingNow = FALSE; // tracks if a popup is currently displayed (between ShowWinXMenu enter and menu close)
 static HWND g_hMainWnd = NULL;
+static BOOL g_runInBackground = FALSE; // mirror of config for quick checks
+static UINT g_trayMsg = WM_APP + 1; // tray callback message id for Shell_NotifyIcon
+static BOOL g_trayAdded = FALSE;
+static HICON g_hTrayIcon = NULL;
+static HHOOK g_hKbHook = NULL;
+static HHOOK g_hMouseHook = NULL;
+static UINT g_msgTaskbarCreated = 0;
+static HWND g_hHookTargetWnd = NULL; // owner for posting close toggles
 
-// Resident hooks and triggers removed
+#ifndef NIIF_LARGE_ICON
+#define NIIF_LARGE_ICON 0x00000020
+#endif
+
+// Tray helpers
+static void tray_add(HWND hWnd) {
+    if (!g_cfg.showTrayIcon || g_trayAdded) return;
+    if (!g_hTrayIcon) {
+        // Use default application icon (no custom exe icon)
+        g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
+    }
+    NOTIFYICONDATAW nid = {0};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hWnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = g_trayMsg;
+    nid.hIcon = g_hTrayIcon;
+    lstrcpynW(nid.szTip, L"WinMacMenu", ARRAYSIZE(nid.szTip));
+    Shell_NotifyIconW(NIM_ADD, &nid);
+    g_trayAdded = TRUE;
+}
+
+static void tray_remove(HWND hWnd) {
+    if (!g_trayAdded) return;
+    NOTIFYICONDATAW nid = {0};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hWnd;
+    nid.uID = 1;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+    g_trayAdded = FALSE;
+}
+
+static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) {
+    NOTIFYICONDATAW nid = {0};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hWnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_INFO;
+    lstrcpynW(nid.szInfoTitle, title ? title : L"WinMacMenu", ARRAYSIZE(nid.szInfoTitle));
+    lstrcpynW(nid.szInfo, text ? text : L"Running in background", ARRAYSIZE(nid.szInfo));
+    nid.dwInfoFlags = NIIF_INFO | NIIF_LARGE_ICON;
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+// Hook helpers
+static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && g_hHookTargetWnd && g_menuShowingNow) {
+        const KBDLLHOOKSTRUCT* ks = (const KBDLLHOOKSTRUCT*)lParam;
+        if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN || ks->vkCode == VK_ESCAPE || ks->vkCode == VK_MENU)) {
+            PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+        }
+    }
+    return CallNextHookEx(g_hKbHook, nCode, wParam, lParam);
+}
+
+static BOOL is_point_in_menu_window(POINT pt) {
+    HWND hw = WindowFromPoint(pt);
+    if (!hw) return FALSE;
+    WCHAR cls[64];
+    if (GetClassNameW(hw, cls, ARRAYSIZE(cls))) {
+        if (!lstrcmpW(cls, L"#32768")) return TRUE; // menu window class
+    }
+    return FALSE;
+}
+
+static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && g_hHookTargetWnd && g_menuShowingNow) {
+        const MSLLHOOKSTRUCT* ms = (const MSLLHOOKSTRUCT*)lParam;
+        if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN || wParam == WM_MOUSEWHEEL) {
+            if (!is_point_in_menu_window(ms->pt)) {
+                PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+            }
+        }
+    }
+    return CallNextHookEx(g_hMouseHook, nCode, wParam, lParam);
+}
+
+static void install_menu_hooks(HWND hOwner) {
+    g_hHookTargetWnd = hOwner;
+    if (!g_hKbHook) g_hKbHook = SetWindowsHookExW(WH_KEYBOARD_LL, lowlevel_kb_proc, GetModuleHandleW(NULL), 0);
+    if (!g_hMouseHook) g_hMouseHook = SetWindowsHookExW(WH_MOUSE_LL, lowlevel_mouse_proc, GetModuleHandleW(NULL), 0);
+}
+
+static void uninstall_menu_hooks(void) {
+    if (g_hKbHook) { UnhookWindowsHookEx(g_hKbHook); g_hKbHook = NULL; }
+    if (g_hMouseHook) { UnhookWindowsHookEx(g_hMouseHook); g_hMouseHook = NULL; }
+    g_hHookTargetWnd = NULL;
+}
+
+// Background mode: hooks and triggers managed by this process
 
 static DWORD simple_hash_w(const wchar_t* s) {
     DWORD h = 2166136261u; // FNV-1a base
@@ -27,6 +125,140 @@ static DWORD simple_hash_w(const wchar_t* s) {
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE:
+        InitCommonControls();
+        theme_apply_to_window(hWnd);
+        g_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+        if (g_runInBackground && g_cfg.showTrayIcon) tray_add(hWnd);
+        return 0;
+    case WM_DESTROY:
+        if (g_trayAdded) tray_remove(hWnd);
+        PostQuitMessage(0);
+        return 0;
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+        theme_apply_to_window(hWnd);
+        return 0;
+    case WM_DEVICECHANGE: // try to ensure tray is restored on some device changes
+        if (g_runInBackground && g_cfg.showTrayIcon && !g_trayAdded) tray_add(hWnd);
+        break;
+    case WM_ACTIVATEAPP:
+        if (g_menuShowingNow && wParam == FALSE) { EndMenu(); return 0; }
+        break;
+    case WM_CANCELMODE:
+        if (g_menuShowingNow) { EndMenu(); return 0; }
+        break;
+    default:
+        break;
+    }
+    // Handle taskbar recreation (Explorer restart broadcasts this)
+    if (msg == g_msgTaskbarCreated) {
+    if (g_runInBackground && g_cfg.showTrayIcon) {
+            g_trayAdded = FALSE; // force re-add
+            tray_add(hWnd);
+        }
+        return 0;
+    }
+    // Tray callback
+    if (msg == g_trayMsg) {
+        if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) {
+            // Toggle: if menu visible, close; else open
+            if (g_menuShowingNow) { EndMenu(); }
+            else if (!g_menuActive) {
+                g_menuActive = TRUE; g_menuShowingNow = TRUE;
+                install_menu_hooks(hWnd);
+                POINT pt = {0,0}; ShowWinXMenu(hWnd, pt);
+                uninstall_menu_hooks();
+                g_menuShowingNow = FALSE; g_menuActive = FALSE;
+            }
+            return 0;
+        } else if (lParam == WM_RBUTTONUP) {
+            // Small context with Exit
+            POINT pt; GetCursorPos(&pt);
+            HMENU m = CreatePopupMenu();
+            AppendMenuW(m, MF_STRING, 10001, L"Show menu");
+            AppendMenuW(m, MF_STRING, 10003, L"Hide tray");
+            BOOL elevated = is_process_elevated();
+            if (elevated) {
+                AppendMenuW(m, MF_STRING | MF_GRAYED, 10004, L"Elevated");
+            } else {
+                AppendMenuW(m, MF_STRING, 10004, L"Elevate");
+            }
+            AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+            // Toggles with check marks
+            UINT fSOL = (g_cfg.startOnLogin ? MF_CHECKED : MF_UNCHECKED);
+            AppendMenuW(m, MF_STRING | fSOL, 10008, L"Start on login");
+            // ShowIcons toggle with dynamic label
+            WCHAR iconsLabel[64];
+            lstrcpynW(iconsLabel, g_cfg.showIcons ? L"Hide menu icons" : L"Show menu icons", ARRAYSIZE(iconsLabel));
+            AppendMenuW(m, MF_STRING, 10009, iconsLabel);
+            AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(m, MF_STRING, 10005, L"Settings");
+            AppendMenuW(m, MF_STRING, 10006, L"Help");
+            AppendMenuW(m, MF_STRING, 10007, L"About");
+            AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(m, MF_STRING, 10002, L"Exit");
+            SetForegroundWindow(hWnd);
+            UINT cmd = TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hWnd, NULL);
+            DestroyMenu(m);
+            if (cmd == 10001) {
+                PostMessageW(hWnd, WM_APP, 0, 0);
+            } else if (cmd == 10003) {
+                // Hide tray: update INI and remove icon
+                WritePrivateProfileStringW(L"General", L"ShowTrayIcon", L"false", g_cfg.iniPath);
+                g_cfg.showTrayIcon = FALSE;
+                tray_remove(hWnd);
+            } else if (cmd == 10004) {
+                // Elevate: launch same exe with runas and same --config, then exit current
+                WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+                WCHAR params[2048] = L"";
+                if (g_cfg.iniPath[0]) wsprintfW(params, L"--config \"%s\"", g_cfg.iniPath);
+                SHELLEXECUTEINFOW sei = { sizeof(sei) };
+                sei.lpVerb = L"runas";
+                sei.lpFile = exePath;
+                sei.lpParameters = (params[0] ? params : NULL);
+                sei.nShow = SW_SHOWNORMAL;
+                if (ShellExecuteExW(&sei)) {
+                    // Release mutex and exit
+                    if (g_hSingleInstance) { ReleaseMutex(g_hSingleInstance); CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
+                    PostMessageW(hWnd, WM_CLOSE, 0, 0);
+                }
+            } else if (cmd == 10008) {
+                // Toggle StartOnLogin
+                g_cfg.startOnLogin = !g_cfg.startOnLogin;
+                WritePrivateProfileStringW(L"General", L"StartOnLogin", g_cfg.startOnLogin ? L"true" : L"false", g_cfg.iniPath);
+                // Update registry Run entry immediately
+                WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+                WCHAR cmdline[2048];
+                if (g_cfg.iniPath[0]) wsprintfW(cmdline, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
+                else wsprintfW(cmdline, L"\"%s\"", exePath);
+                WCHAR runValName[64]; lstrcpynW(runValName, L"WinMac Menu", ARRAYSIZE(runValName));
+                if (g_cfg.startOnLogin) set_run_at_login(runValName, cmdline); else remove_run_at_login(runValName);
+            } else if (cmd == 10009) {
+                // Toggle ShowIcons (legacy icons in menu)
+                g_cfg.showIcons = !g_cfg.showIcons;
+                WritePrivateProfileStringW(L"General", L"ShowIcons", g_cfg.showIcons ? L"true" : L"false", g_cfg.iniPath);
+            } else if (cmd == 10005) {
+                // Open ini in default app
+                if (g_cfg.iniPath[0]) ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
+            } else if (cmd == 10006) {
+                ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu?tab=readme-ov-file#run", NULL, NULL, SW_SHOWNORMAL);
+            } else if (cmd == 10007) {
+                const WCHAR* about =
+                    L"Version: v0.3.0\n"
+                    L"Created by Asteski\n\n"
+                    L"WinMac Menu is free and open source software!\n"
+                    L"Feel free to redistribute and contribute to the project on GitHub:\n\n"
+                    L"https://github.com/Asteski/WinMac-Menu";
+                MessageBoxW(hWnd, about, L"About WinMac Menu", MB_OK | MB_ICONINFORMATION);
+            } else if (cmd == 10002) {
+                PostMessageW(hWnd, WM_CLOSE, 0, 0);
+            }
+            return 0;
+        }
+    }
+    // Original message handling follows
     switch (msg) {
     case WM_MENUCHAR:
     {
@@ -54,14 +286,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return MAKELRESULT(0, MNC_CLOSE);
     }
-    case WM_CREATE:
-        InitCommonControls();
-        theme_apply_to_window(hWnd);
-        return 0;
-    case WM_SETTINGCHANGE:
-    case WM_THEMECHANGED:
-        theme_apply_to_window(hWnd);
-        return 0;
     case WM_RBUTTONUP:
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
@@ -69,8 +293,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_menuActive) return 0;
         g_menuActive = TRUE;
         g_menuShowingNow = TRUE;
+        install_menu_hooks(hWnd);
         POINT pt = {0,0};
         ShowWinXMenu(hWnd, pt);
+        uninstall_menu_hooks();
         g_menuShowingNow = FALSE;
         g_menuActive = FALSE;
         return 0;
@@ -92,8 +318,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         } else if (!g_menuActive) {
             g_menuActive = TRUE; g_menuShowingNow = TRUE;
+            install_menu_hooks(hWnd);
             POINT pt = {0,0};
             ShowWinXMenu(hWnd, pt);
+            uninstall_menu_hooks();
             g_menuShowingNow = FALSE; g_menuActive = FALSE;
             return 0;
         }
@@ -110,9 +338,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DRAWITEM:
         if (MenuOnDrawItem(hWnd, (const DRAWITEMSTRUCT*)lParam)) return TRUE;
         break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
     }
     return DefWindowProc(hWnd, msg, wParam, lParam);
 }
@@ -160,6 +385,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
         FreeLibrary(hShcore);
     }
 
+    // Load config before creating window so tray-add logic has correct flags
+    config_load(&g_cfg);
+    g_runInBackground = g_cfg.runInBackground;
+
     WNDCLASSEXW wc = { sizeof(wc) };
     wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = WndProc;
@@ -176,11 +405,52 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     g_hMainWnd = hWnd;
 
     // Command line parsing already done above (for mutex)
+    // Honor StartOnLogin by setting/removing HKCU Run entry for this config
+    // Use per-config value name so multiple configs won't collide
+    // Startup Apps title: friendly value name
+    wchar_t runValName[64]; lstrcpynW(runValName, L"WinMac Menu", ARRAYSIZE(runValName));
+    // Build command line: quoted exe path plus optional --config "path"
+    WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+    WCHAR cmd[2048];
+    if (g_cfg.iniPath[0]) {
+        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
+    } else {
+        wsprintfW(cmd, L"\"%s\"", exePath);
+    }
+    if (g_cfg.startOnLogin) {
+        set_run_at_login(runValName, cmd);
+    } else {
+        remove_run_at_login(runValName);
+    }
+    g_runInBackground = g_cfg.runInBackground;
+    // TaskbarCreated broadcast to detect Explorer restarts
+    g_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
-    config_load(&g_cfg);
-    POINT pt = {0,0};
-    ShowWinXMenu(hWnd, pt);
-    DestroyWindow(hWnd);
-    if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
-    return 0;
+    if (g_runInBackground) {
+        // In background mode: optionally show menu on first launch, then stay in message loop
+        if (g_cfg.showOnLaunch) {
+            POINT pt = {0,0};
+            g_menuActive = TRUE; g_menuShowingNow = TRUE;
+            install_menu_hooks(hWnd);
+            ShowWinXMenu(hWnd, pt);
+            uninstall_menu_hooks();
+            g_menuShowingNow = FALSE; g_menuActive = FALSE;
+        }
+        // Message loop
+        MSG msg;
+        while (GetMessageW(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        // Cleanup
+        if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
+        return 0;
+    } else {
+        // One-shot mode: show menu and exit as before
+        POINT pt = {0,0};
+        ShowWinXMenu(hWnd, pt);
+        DestroyWindow(hWnd);
+        if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
+        return 0;
+    }
 }

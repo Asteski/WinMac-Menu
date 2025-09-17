@@ -676,8 +676,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt) {
     PostMessageW(owner, WM_NULL, 0, 0);
     MenuExecuteCommand(owner, (UINT)cmd);
     DestroyMenu(hMenu);
-    // Always exit after menu closes (resident mode removed)
-    PostMessageW(owner, WM_CLOSE, 0, 0);
+    // In background mode the window stays alive; WM_CLOSE is posted by caller when needed.
 }
 
 // ===== Modern owner-draw implementation (compiled only when ENABLE_MODERN_STYLE) =====
