@@ -52,21 +52,20 @@ The generated default INI is comment-free. If you add comments manually, use `;`
 Key | Description
 ----|------------
 MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
-DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used
-ShowIcons | `0|1` (renamed from LegacyIcons; LegacyIcons still accepted for backward compatibility)
-ShowExtensions | `0|1` (default 1). When 0, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode). Deprecated `HideExtensions` (legacy) still honored and inverts this value.
-RecentShowExtensions | `0|1` (default 1). When 0, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions. Deprecated `RecentHideExtensions` still honored and inverts this value.
-RecentShowCleanItems | `0|1` (default 1). When 1 adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
-ShowFolderIcons | `0|1` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
+DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used.
+ShowIcons | `true/false`
+ShowExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
+RecentShowExtensions | `true/false` (default true). When false, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions.
+RecentShowCleanItems | `true/false` (default true). When true adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
+ShowFolderIcons | `true/false` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
 RecentMax | Maximum recent entries (default 12)
 FolderSubmenuDepth | Max nested folder submenu depth (1–4)
-FolderSubmenuOpen | `single|double` click depth-1 submenu folders to open (default single)
-FolderShowOpenEntry | `true|false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
+FolderShowOpenEntry | `true/false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
 ShowHidden | Show items with Hidden attribute
-ShowDotfiles | `false|true|filesonly|foldersonly` extended dotfile visibility (dot overrides hidden filter for those names)
-RecentLabel | `fullpath|name` controls label style for recent items (name aliases: filename, file, leaf)
-PointerRelative | `0|1` position near cursor instead of configured edges
-LogConfig | `off|0|false`, `basic|1|true`, `verbose|2` – logging level (can reside in [General] or [Debug])
+ShowDotfiles | `false/true/filesonly/foldersonly` extended dotfile visibility (dot overrides hidden filter for those names)
+RecentLabel / `fullpath/name` controls label style for recent items (name aliases: filename, file, leaf)
+PointerRelative | `true/false` position near cursor instead of configured edges
+LogConfig | `off/0/false`, `basic/1/true`, `verbose/2` – logging level (can reside in [General] or [Debug])
 LogFolder | Optional folder path (env vars expand) where a dynamic log file will be created. If omitted, the executable directory is used.
 
 (Width / rounded corner settings for a modern style are intentionally omitted unless modern build is enabled.)
@@ -85,8 +84,8 @@ LogFolder | Optional folder path (env vars expand) where a dynamic log file will
 - Dot-prefixed files (like `.gitignore`) are not extension-stripped (mirrors Explorer convention).
 - Keys now use positive logic: ShowExtensions / RecentShowExtensions (older HideExtensions / RecentHideExtensions still parsed and invert).
 - Precedence for recent items when `RecentLabel=name`:
-  1. RecentShowExtensions=0 (or legacy RecentHideExtensions=1) → hide extension
-  2. Else ShowExtensions=0 (or legacy HideExtensions=1) → hide extension
+  1. RecentShowExtensions=false (or legacy RecentHideExtensions=true) → hide extension
+  2. Else ShowExtensions=false (or legacy HideExtensions=true) → hide extension
   3. Else extension shown
 - Folder listings & inline expansions ignore the recent-specific key and use only ShowExtensions (or legacy HideExtensions inversion).
 
@@ -94,7 +93,7 @@ LogFolder | Optional folder path (env vars expand) where a dynamic log file will
 For each menu item / popup root (theme-aware):
 1. Explicit per-item theme override: [IconsDark]/[IconsLight] (current theme wins)
 2. Else explicit per-item generic: fifth field on ItemN or [Icons] mapping
-3. Folders only, when ShowFolderIcons=1: use system folder icon (overrides defaults)
+3. Folders only, when ShowFolderIcons=true: use system folder icon (overrides defaults)
 4. Else default icon theme override: DefaultIconDark/DefaultIconLight (current theme)
 5. Else default icon generic: DefaultIcon
 6. Else none
@@ -120,7 +119,7 @@ Rules:
 - Small (16x16) icons are extracted; large variant (if any) is discarded.
 - Fallback: if extraction fails the loader attempts to treat the full string as a direct `.ico` path.
 
-Recent submenu root & Power menu root follow: per-item icon > DefaultIcon. The optional "Clear Recent Items" command (when `RecentShowCleanItems=1`) has no icon.
+Recent submenu root & Power menu root follow: per-item icon > DefaultIcon. The optional "Clear Recent Items" command (when `RecentShowCleanItems=true`) has no icon.
 
 ### Theme-specific per-item icons
 You can provide different icons per theme without changing `ItemN` lines using optional sections:
@@ -211,8 +210,8 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 
 ## Troubleshooting
 - Empty folder submenu: check path, permissions, filters (ShowHidden / ShowDotfiles)
-- No icons: ensure ShowIcons=1 (or LegacyIcons=1 for backward compatibility) and paths are correct
-- Folder icons not appearing: set ShowFolderIcons=1; the system folder icon only shows when no per-item icon exists
+- No icons: ensure ShowIcons=true (or LegacyIcons=true for backward compatibility) and paths are correct
+- Folder icons not appearing: set ShowFolderIcons=true; the system folder icon only shows when no per-item icon exists
 
 ## Notes
 > [!NOTE]
