@@ -8,6 +8,7 @@
 #include "theme.h"
 #include "util.h"
 #include "config.h"
+#include "resource.h"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -25,6 +26,28 @@ static HHOOK g_hKbHook = NULL;
 static HHOOK g_hMouseHook = NULL;
 static UINT g_msgTaskbarCreated = 0;
 static HWND g_hHookTargetWnd = NULL; // owner for posting close toggles
+// Retrieve FileVersion (e.g., "0.3.0") from the executable's VERSIONINFO
+static void get_file_version_string(wchar_t* out, size_t cchOut) {
+    if (!out || cchOut == 0) return;
+    out[0] = 0;
+    WCHAR path[MAX_PATH];
+    DWORD dummy = 0, size = 0;
+    if (!GetModuleFileNameW(NULL, path, ARRAYSIZE(path))) return;
+    size = GetFileVersionInfoSizeW(path, &dummy);
+    if (size == 0) return;
+    void* data = LocalAlloc(LMEM_FIXED, size);
+    if (!data) return;
+    if (!GetFileVersionInfoW(path, 0, size, data)) { LocalFree(data); return; }
+    VS_FIXEDFILEINFO* fixed = NULL; UINT fixedLen = 0;
+    if (VerQueryValueW(data, L"\\", (LPVOID*)&fixed, &fixedLen) && fixed && fixedLen >= sizeof(VS_FIXEDFILEINFO)) {
+        WORD major = HIWORD(fixed->dwFileVersionMS);
+        WORD minor = LOWORD(fixed->dwFileVersionMS);
+        WORD build = HIWORD(fixed->dwFileVersionLS);
+        // WORD rev = LOWORD(fixed->dwFileVersionLS);
+        wsprintfW(out, L"%u.%u.%u", (unsigned)major, (unsigned)minor, (unsigned)build);
+    }
+    LocalFree(data);
+}
 
 #ifndef NIIF_LARGE_ICON
 #define NIIF_LARGE_ICON 0x00000020
@@ -34,8 +57,23 @@ static HWND g_hHookTargetWnd = NULL; // owner for posting close toggles
 static void tray_add(HWND hWnd) {
     if (!g_cfg.showTrayIcon || g_trayAdded) return;
     if (!g_hTrayIcon) {
-        // Use default application icon (no custom exe icon)
-        g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
+        // Attempt to load exact 16x16 from the multi-size icon resource first.
+        g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
+                                        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        if (!g_hTrayIcon) {
+            // Fallback: let Windows choose best size and then extract a small icon via CopyImage
+            HICON hAny = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_CREATEDIBSECTION);
+            if (hAny) {
+                HICON hSmall = (HICON)CopyImage(hAny, IMAGE_ICON, 16, 16, LR_COPYFROMRESOURCE);
+                if (hSmall) {
+                    g_hTrayIcon = hSmall;
+                    DestroyIcon(hAny);
+                } else {
+                    g_hTrayIcon = hAny; // Use whatever we have; system will scale
+                }
+            }
+        }
+        if (!g_hTrayIcon) g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
     }
     NOTIFYICONDATAW nid = {0};
     nid.cbSize = sizeof(nid);
@@ -44,7 +82,30 @@ static void tray_add(HWND hWnd) {
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = g_trayMsg;
     nid.hIcon = g_hTrayIcon;
-    lstrcpynW(nid.szTip, L"WinMacMenu", ARRAYSIZE(nid.szTip));
+    // New tooltip rules:
+    // 1. If ini file name is exactly config.ini -> "WinMac Menu"
+    // 2. Else -> "WinMac Menu (<filename_without_extension_truncated>)"
+    // Truncate base filename to 256 chars first, then ensure final tooltip fits NOTIFYICONDATAW::szTip (128 wchar incl null).
+    WCHAR path[MAX_PATH]; lstrcpynW(path, g_cfg.iniPath, ARRAYSIZE(path));
+    WCHAR *slash = wcsrchr(path, L'\\'); WCHAR *fname = slash ? slash+1 : path;
+    WCHAR base[512]; lstrcpynW(base, fname, ARRAYSIZE(base));
+    WCHAR *dot = wcsrchr(base, L'.'); if (dot) *dot = 0;
+    if (!lstrcmpiW(base, L"config")) {
+        lstrcpynW(nid.szTip, L"WinMac Menu", ARRAYSIZE(nid.szTip));
+    } else {
+        // Truncate base to 256 chars (defense against extremely long names before we format)
+        WCHAR truncated[257]; truncated[0]=0;
+        if (lstrlenW(base) > 256) {
+            // Copy first 253 and add ellipsis "..."
+            lstrcpynW(truncated, base, 254);
+            lstrcatW(truncated, L"...");
+        } else {
+            lstrcpynW(truncated, base, ARRAYSIZE(truncated));
+        }
+        WCHAR formatted[256]; // intermediate to avoid overflow; we'll clamp when copying to nid.szTip
+        wsprintfW(formatted, L"WinMac Menu (%s)", truncated);
+        lstrcpynW(nid.szTip, formatted, ARRAYSIZE(nid.szTip));
+    }
     Shell_NotifyIconW(NIM_ADD, &nid);
     g_trayAdded = TRUE;
 }
@@ -59,13 +120,21 @@ static void tray_remove(HWND hWnd) {
     g_trayAdded = FALSE;
 }
 
+static void tray_reload(HWND hWnd) {
+    if (!g_cfg.showTrayIcon) return;
+    // Remove existing icon if present
+    if (g_trayAdded) tray_remove(hWnd);
+    if (g_hTrayIcon) { DestroyIcon(g_hTrayIcon); g_hTrayIcon = NULL; }
+    tray_add(hWnd);
+}
+
 static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) {
     NOTIFYICONDATAW nid = {0};
     nid.cbSize = sizeof(nid);
     nid.hWnd = hWnd;
     nid.uID = 1;
     nid.uFlags = NIF_INFO;
-    lstrcpynW(nid.szInfoTitle, title ? title : L"WinMacMenu", ARRAYSIZE(nid.szInfoTitle));
+    lstrcpynW(nid.szInfoTitle, title ? title : L"WinMac Menu", ARRAYSIZE(nid.szInfoTitle));
     lstrcpynW(nid.szInfo, text ? text : L"Running in background", ARRAYSIZE(nid.szInfo));
     nid.dwInfoFlags = NIIF_INFO | NIIF_LARGE_ICON;
     Shell_NotifyIconW(NIM_MODIFY, &nid);
@@ -143,6 +212,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DEVICECHANGE: // try to ensure tray is restored on some device changes
         if (g_runInBackground && g_cfg.showTrayIcon && !g_trayAdded) tray_add(hWnd);
         break;
+    case WM_DPICHANGED:
+        // Reload icons at new DPI (tray + class small) for sharpness
+        if (g_runInBackground && g_cfg.showTrayIcon) {
+            tray_reload(hWnd);
+        }
+        break;
     case WM_ACTIVATEAPP:
         if (g_menuShowingNow && wParam == FALSE) { EndMenu(); return 0; }
         break;
@@ -154,9 +229,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     // Handle taskbar recreation (Explorer restart broadcasts this)
     if (msg == g_msgTaskbarCreated) {
-    if (g_runInBackground && g_cfg.showTrayIcon) {
-            g_trayAdded = FALSE; // force re-add
-            tray_add(hWnd);
+        if (g_runInBackground && g_cfg.showTrayIcon) {
+            tray_reload(hWnd);
         }
         return 0;
     }
@@ -243,14 +317,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Open ini in default app
                 if (g_cfg.iniPath[0]) ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10006) {
-                ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu?tab=readme-ov-file#run", NULL, NULL, SW_SHOWNORMAL);
+                ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
-                const WCHAR* about =
-                    L"Version: v0.3.0\n"
-                    L"Created by Asteski\n\n"
-                    L"WinMac Menu is free and open source software!\n"
-                    L"Feel free to redistribute and contribute to the project on GitHub:\n\n"
-                    L"https://github.com/Asteski/WinMac-Menu";
+                WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
+                WCHAR about[512];
+                wsprintfW(about,
+                    L"Version: v%ls\nCreated by Asteski\n\nWinMac Menu is free and open source software!\nFeel free to redistribute and contribute to the project on GitHub:\n\nhttps://github.com/Asteski/WinMac-Menu",
+                    (ver[0] ? ver : L"0.3.0"));
                 MessageBoxW(hWnd, about, L"About WinMac Menu", MB_OK | MB_ICONINFORMATION);
             } else if (cmd == 10002) {
                 PostMessageW(hWnd, WM_CLOSE, 0, 0);
@@ -394,6 +467,15 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    // Dynamically pick system metrics sizes so on high DPI we request the right resource variant.
+    int bigW = GetSystemMetrics(SM_CXICON);
+    int bigH = GetSystemMetrics(SM_CYICON);
+    int smW  = GetSystemMetrics(SM_CXSMICON);
+    int smH  = GetSystemMetrics(SM_CYSMICON);
+    wc.hIcon = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, bigW, bigH, LR_DEFAULTCOLOR);
+    wc.hIconSm = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, smW, smH, LR_DEFAULTCOLOR);
+    if (!wc.hIcon) wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    if (!wc.hIconSm) wc.hIconSm = (HICON)CopyImage(wc.hIcon, IMAGE_ICON, 16, 16, 0);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
     wc.lpszClassName = WC_APPWND;
 

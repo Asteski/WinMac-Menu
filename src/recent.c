@@ -30,9 +30,15 @@ static int add_from_jump_list(RecentItem **out, int maxItems) {
                 if (SUCCEEDED(IPersistFile_Load(ppf, full, STGM_READ))) {
                     WIN32_FIND_DATAW wfd; WCHAR target[MAX_PATH];
                     if (SUCCEEDED(IShellLinkW_GetPath(psl, target, MAX_PATH, &wfd, SLGP_RAWPATH))) {
-                        lstrcpynW(items[count].path, target, MAX_PATH);
-                        items[count].isFolder = (wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                        count++;
+                        // Skip if empty or target does not exist anymore
+                        if (target[0]) {
+                            DWORD attrs = GetFileAttributesW(target);
+                            if (attrs != INVALID_FILE_ATTRIBUTES) {
+                                lstrcpynW(items[count].path, target, MAX_PATH);
+                                items[count].isFolder = (wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 || (attrs & FILE_ATTRIBUTE_DIRECTORY);
+                                count++;
+                            }
+                        }
                     }
                 }
                 IPersistFile_Release(ppf);
@@ -56,6 +62,9 @@ int recent_get_items(RecentItem **list, int maxItems) {
 
 void recent_open_item(const RecentItem *item) {
     if (!item) return;
+    if (!item->path[0]) return;
+    DWORD attrs = GetFileAttributesW(item->path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return; // silently ignore stale entry
     ShellExecuteW(NULL, L"open", item->path, NULL, NULL, SW_SHOWNORMAL);
 }
 

@@ -167,6 +167,7 @@ static HMENU build_recent_submenu(void) {
         return sub;
     }
     for (int i = 0; i < n; ++i) {
+        if (!items[i].path[0]) continue; // skip empty (defensive)
         WCHAR text[MAX_PATH + 8];
         if (g_cfg.recentLabelMode == 1) {
             // filename only (optionally strip extension)
@@ -581,11 +582,17 @@ void MenuOnMenuSelect(HWND owner, WPARAM wParam, LPARAM lParam) {
 }
 
 void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu) {
-    MENUINFO mi = { sizeof(mi) };
+    UNREFERENCED_PARAMETER(owner);
+    UNREFERENCED_PARAMETER(item);
+    UNREFERENCED_PARAMETER(isSystemMenu);
+    MENUINFO mi; ZeroMemory(&mi, sizeof(mi));
+    mi.cbSize = sizeof(mi);
     mi.fMask = MIM_MENUDATA;
-    if (GetMenuInfo(hMenu, &mi) && mi.dwMenuData) {
+    if (GetMenuInfo(hMenu, &mi) && mi.dwMenuData != 0) {
         FolderMenuData* data = (FolderMenuData*)mi.dwMenuData;
-        populate_folder_menu(hMenu, data);
+        if (data) {
+            populate_folder_menu(hMenu, data);
+        }
     }
 }
 

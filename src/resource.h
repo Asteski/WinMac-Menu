@@ -1,4 +1,3 @@
 #pragma once
-
-// Resource IDs
+// Resource identifiers
 #define IDI_APPICON 101
