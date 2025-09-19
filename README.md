@@ -69,19 +69,20 @@ Key | Description
 RunInBackground | `true/false` (default true). When true, app stays running in background with message loop for instant menu access. When false, app exits after menu closes (legacy behavior).
 ShowTrayIcon | `true/false` (default true). When true and running in background, shows system tray icon with right-click context menu for settings and controls.
 StartOnLogin | `true/false` (default false). When true, adds app to Windows startup via registry Run entry.
+ShowOnLaunch | `true/false` (default true). When false, app doesn't show menu on the first run. Useful when `StartOnLogin` is enabled. 
 ShowIcons | `true/false` (default true). Show or hide menu icons.
 ShowFileExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
 RecentShowExtensions | `true/false` (default true). When false, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions.
 RecentShowCleanItems | `true/false` (default true). When true adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
-ShowFolderIcons | `true/false` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set
-RecentMax | Maximum recent entries (default 12)
-FolderSubmenuDepth | Max nested folder submenu depth (1–4)
-FolderShowOpenEntry | `true/false` show an “Open <folder>” top entry inside folder submenus when single-click open is active
-ShowHidden | Show items with Hidden attribute
-ShowDotfiles | `false/true/filesonly/foldersonly` extended dotfile visibility (dot overrides hidden filter for those names)
-RecentLabel | `fullpath/name` controls label style for recent items (name aliases: filename, file, leaf)
-PointerRelative | `true/false` position near cursor instead of configured edges
-LogConfig | `off/0/false`, `basic/1/true`, `verbose/2` – logging level (can reside in [General] or [Debug])
+ShowFolderIcons | `true/false` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set.
+RecentMax | Maximum recent entries (default 12).
+FolderSubmenuDepth | Max nested folder submenu depth (1–4).
+FolderShowOpenEntry | `true/false` show an “Open <folder>” top entry inside folder submenus when single-click open is active.
+ShowHidden | Show items with Hidden attribute.
+ShowDotfiles | `false/true/filesonly/foldersonly` extended dotfile visibility (dot overrides hidden filter for those names).
+RecentLabel | `fullpath/name` controls label style for recent items (name aliases: filename, file, leaf).
+PointerRelative | `true/false` position near cursor instead of configured edges.
+LogConfig | `off/0/false`, `basic/1/true`, `verbose/2` – logging level (can reside in [General] or [Debug]).
 LogFolder | Optional folder path (env vars expand) where a dynamic log file will be created. If omitted, the executable directory is used.
 
 (Width / rounded corner settings for a modern style are intentionally omitted unless modern build is enabled.)
@@ -236,11 +237,12 @@ IconN | `IconN` maps to `ItemN` if the item itself doesn’t define an icon path
 
 ## Notes
 > [!NOTE]
-> **Please be informed that this is a beta version - you're using it at your own risk!**
+**Please be informed that this is a beta version - you're using it at your own risk!**
 - Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
 - This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System for now
 - It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
-- You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files.
+- You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different file names for ini file.
+- ini file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
 
 ## Future plans
 - Custom activation shortcuts
