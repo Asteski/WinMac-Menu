@@ -23,8 +23,22 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Run
 
-Double‑click the EXE to show the menu. It exits immediately after the menu closes.
-Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+**Quick Start**: Double‑click the EXE. By default, it runs in background mode with a system tray icon.
+
+**Modes**:
+- **Background Mode (default)**: App stays running in background. Launch again to toggle/show menu.
+- **One-shot**: Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
+  - To start silently in background (without showing the menu on first launch), set `ShowOnLaunch=false`.
+
+**Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+
+**Tray Icon**: Right-click for settings menu including:
+- Show menu / Hide tray / Elevate (run as admin)
+- Start on login toggle
+- Show/Hide menu icons (toggles whether icons appear in the popup menu)
+- Settings (opens config.ini) / Help / About
+- Exit
+
 
 ## Configuration
 
@@ -52,9 +66,10 @@ The generated default INI is comment-free. If you add comments manually, use `;`
 
 Key | Description
 ----|------------
-MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
-DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used.
-ShowIcons | `true/false`
+RunInBackground | `true/false` (default true). When true, app stays running in background with message loop for instant menu access. When false, app exits after menu closes (legacy behavior).
+ShowTrayIcon | `true/false` (default true). When true and running in background, shows system tray icon with right-click context menu for settings and controls.
+StartOnLogin | `true/false` (default false). When true, adds app to Windows startup via registry Run entry.
+ShowIcons | `true/false` (default true). Show or hide menu icons.
 ShowFileExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
 RecentShowExtensions | `true/false` (default true). When false, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions.
 RecentShowCleanItems | `true/false` (default true). When true adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
@@ -71,7 +86,6 @@ LogFolder | Optional folder path (env vars expand) where a dynamic log file will
 
 (Width / rounded corner settings for a modern style are intentionally omitted unless modern build is enabled.)
 
-### Extension Visibility Details
 ### Logging Details
 - Lookup order for `LogConfig` and `LogFolder`: `[General]` then `[Debug]` (first non-empty wins).
 - Levels:
@@ -194,7 +208,13 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 - No automatic separator insertion
 
 ### [Icons]
-`IconN` maps to `ItemN` if the item itself doesn’t define an icon path.
+
+Key | Description
+----|------------
+DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used.
+DefaultIconLight | Optional path to a .ico used for light theme OS mode.
+DefaultIconDark | Optional path to a .ico used for dark theme OS mode.
+IconN | `IconN` maps to `ItemN` if the item itself doesn’t define an icon path.
 
 ### Experimental Flags Recap
 - inline, inlineopen, notitle/noheader (removable without schema changes)
