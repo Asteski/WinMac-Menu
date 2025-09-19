@@ -1,6 +1,6 @@
 # WinMac Menu
 
-A tiny Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, , allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
+Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, , allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
 
 ![WinMacMenu screenshot](assets/winmacmenu-demo-11.png)
 ![WinMacMenu screenshot](assets/winmacmenu-demo-10.png)
@@ -223,8 +223,7 @@ Item12=Projects|FOLDER|%USERPROFILE%\Projects|inlineopen|
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files.
 
 ## Future plans
-- Run constantly in background as process
+- Custom activation shortcuts
 - Sub-menus sorting options
 - Different depths level for specific folders
 - Add modern style to follow Fluent Design System principles
-- Possibility to open WinMac menu with right clicking Start button using Open-Shell ([#2286](https://github.com/Open-Shell/Open-Shell-Menu/issues/2286))
