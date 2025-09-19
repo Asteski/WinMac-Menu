@@ -72,8 +72,8 @@ typedef struct Config {
     // Optional: pointer-relative positioning and menu width (modern-only override)
     BOOL pointerRelative; // Position near mouse pointer instead of edges
     int menuWidth; // (modern only) [General] MenuWidth=226..255 (0 = auto). Ignored when modern disabled.
-    BOOL folderShowOpenEntry; // [General] FolderShowOpenEntry=true|false (default true) controls showing "Open <folder>" in submenus when single-click open mode is enabled
-    int logLevel; // 0=off,1=basic,2=verbose (from LogConfig=off|basic|verbose|true|false). Backward compatible: LogConfig=true -> basic.
+    BOOL folderShowOpenEntry; // [General] FolderShowOpenEntry=true/false (default true) controls showing "Open <folder>" in submenus when single-click open mode is enabled
+    int logLevel; // 0=off,1=basic,2=verbose (from LogConfig=off|basic|verbose|true/false). Backward compatible: LogConfig=true -> basic.
     WCHAR logFolderPath[MAX_PATH]; // Base folder for dynamic log file (LogFolder=...)
     WCHAR logFilePath[MAX_PATH];   // Resolved dynamic log file full path (WinMacMenu_<configBase>_<yyMMdd-HHmm>.log)
     int recentLabelMode; // [General] RecentLabel=fullpath|name (0=full path, 1=file name)
