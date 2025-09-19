@@ -46,10 +46,13 @@ static void trim_inplace(WCHAR* s) {
 static void write_default_ini(const WCHAR* path) {
     const char* ini =
         "[General]\r\n"\
+    "RunInBackground=true\r\n"\
+        "ShowOnLaunch=true\r\n"\
+        "ShowTrayIcon=true\r\n"\
         "RecentMax=12\r\n"\
         "FolderSubmenuDepth=4\r\n"\
         "ShowIcons=true\r\n"\
-        "ShowExtensions=true\r\n"\
+    "ShowFileExtensions=true\r\n"\
         "ShowFolderIcons=false\r\n"\
         "RecentShowExtensions=true\r\n"\
         "RecentShowCleanItems=true\r\n"\
@@ -257,10 +260,27 @@ BOOL config_load(Config* out) {
     config_ensure(out);
     // Explicit defaults for control flags so missing keys don't inherit prior memory/state
     // Removed resident/trigger controls
+    // RunInBackground and tray icon
+    WCHAR buf[32];
+    GetPrivateProfileStringW(L"General", L"RunInBackground", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->runInBackground = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    // ShowOnLaunch (default true) controls whether we show the initial menu when starting in background
+    GetPrivateProfileStringW(L"General", L"ShowOnLaunch", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->showOnLaunch = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"General", L"ShowTrayIcon", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->showTrayIcon = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    // Start on login (registry Run entry)
+    GetPrivateProfileStringW(L"General", L"StartOnLogin", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->startOnLogin = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
     out->recentMax = GetPrivateProfileIntW(L"General", L"RecentMax", 12, out->iniPath);
     out->folderMaxDepth = GetPrivateProfileIntW(L"General", L"FolderSubmenuDepth", 4, out->iniPath);
     if (out->folderMaxDepth < 1) out->folderMaxDepth = 1; if (out->folderMaxDepth > 4) out->folderMaxDepth = 4;
-    WCHAR buf[32];
+    
     // Fallback default now single
     GetPrivateProfileStringW(L"General", L"FolderSubmenuOpen", L"single", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -413,13 +433,21 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"RecentLabel", L"fullpath", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!lstrcmpiW(buf, L"name") || !lstrcmpiW(buf, L"filename") || !lstrcmpiW(buf, L"file") || !lstrcmpiW(buf, L"leaf")) out->recentLabelMode = 1; else out->recentLabelMode = 0;
-    // ShowExtensions (default true). Backward compatibility: if HideExtensions present, it overrides ShowExtensions logic.
-    GetPrivateProfileStringW(L"General", L"ShowExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    // ShowFileExtensions (default true). Backward compatibility: ShowExtensions (old) and HideExtensions (legacy inverse).
+    GetPrivateProfileStringW(L"General", L"ShowFileExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     BOOL haveShow = buf[0] != 0;
     BOOL showExt = TRUE; // default
     if (haveShow) {
         showExt = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    } else {
+        WCHAR bufOld[32]; bufOld[0]=0;
+        GetPrivateProfileStringW(L"General", L"ShowExtensions", L"", bufOld, ARRAYSIZE(bufOld), out->iniPath);
+        trim_inplace(bufOld);
+        if (bufOld[0]) {
+            showExt = (!lstrcmpiW(bufOld, L"true") || !lstrcmpiW(bufOld, L"1"));
+            haveShow = TRUE;
+        }
     }
     WCHAR tmpOld[32]; tmpOld[0]=0;
     GetPrivateProfileStringW(L"General", L"HideExtensions", L"", tmpOld, ARRAYSIZE(tmpOld), out->iniPath);

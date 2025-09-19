@@ -2,7 +2,8 @@
 
 A tiny Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, , allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
 
-![WinMacMenu screenshot](assets/winmacmenu-demo.png)
+![WinMacMenu screenshot](assets/winmacmenu-demo-11.png)
+![WinMacMenu screenshot](assets/winmacmenu-demo-10.png)
 
 - Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
@@ -54,7 +55,7 @@ Key | Description
 MenuStyle | `legacy` (modern hidden unless compiled with ENABLE_MODERN_STYLE)
 DefaultIcon | Optional path to a .ico used when an item has no explicit icon and (for folders) system folder icon isn’t used.
 ShowIcons | `true/false`
-ShowExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
+ShowFileExtensions | `true/false` (default true). When false, file extensions are hidden in folder listings, inline expansions, and recent items (filename mode).
 RecentShowExtensions | `true/false` (default true). When false, extensions are hidden in the Recent submenu (filename mode) regardless of ShowExtensions.
 RecentShowCleanItems | `true/false` (default true). When true adds a separator + "Clear Recent Items" entry at the bottom of the Recent submenu that deletes all .lnk entries from the system Recent folder.
 ShowFolderIcons | `true/false` when true uses the system small folder icon for folder items/submenus instead of DefaultIcon unless a per-item icon is set

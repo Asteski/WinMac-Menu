@@ -40,6 +40,8 @@ typedef struct Config {
     WCHAR iniPath[MAX_PATH];
     int recentMax;
     int folderMaxDepth; // 1..4 depth for nested folder submenus
+    // When true, keep the app running in background mode with a hidden window and message loop
+    BOOL runInBackground;
     // Whether folder submenus should offer single-click open of the folder itself
     BOOL folderSingleClickOpen; // General: FolderSubmenuOpen = single|double
     // Visibility options
@@ -75,13 +77,18 @@ typedef struct Config {
     WCHAR logFolderPath[MAX_PATH]; // Base folder for dynamic log file (LogFolder=...)
     WCHAR logFilePath[MAX_PATH];   // Resolved dynamic log file full path (WinMacMenu_<configBase>_<yyMMdd-HHmm>.log)
     int recentLabelMode; // [General] RecentLabel=fullpath|name (0=full path, 1=file name)
-    BOOL showExtensions; // [General] ShowExtensions=true keeps file extensions visible (inverse of deprecated HideExtensions)
+    BOOL showExtensions; // [General] ShowFileExtensions=true keeps file extensions visible (back-compat: ShowExtensions, inverse of deprecated HideExtensions)
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
     // When PointerRelative = true, optionally ignore H/V offsets
     BOOL ignoreHOffsetWhenRelative; // [Placement] IgnoreOffsetWhenRelative=true|hoffset|voffset|false
     BOOL ignoreVOffsetWhenRelative; // derived from the same key
+    // Tray icon
+    BOOL showTrayIcon; // [General] ShowTrayIcon=true shows system tray icon while running in background
+    BOOL startOnLogin; // [General] StartOnLogin=true adds/removes HKCU Run entry for this config
+    // When running in background mode, optionally show the menu immediately on first launch
+    BOOL showOnLaunch; // [General] ShowOnLaunch=true|false (default true)
     ConfigItem items[64];
     int count;
 } Config;

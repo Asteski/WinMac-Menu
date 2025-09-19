@@ -167,6 +167,7 @@ static HMENU build_recent_submenu(void) {
         return sub;
     }
     for (int i = 0; i < n; ++i) {
+        if (!items[i].path[0]) continue; // skip empty (defensive)
         WCHAR text[MAX_PATH + 8];
         if (g_cfg.recentLabelMode == 1) {
             // filename only (optionally strip extension)
@@ -581,11 +582,17 @@ void MenuOnMenuSelect(HWND owner, WPARAM wParam, LPARAM lParam) {
 }
 
 void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu) {
-    MENUINFO mi = { sizeof(mi) };
+    UNREFERENCED_PARAMETER(owner);
+    UNREFERENCED_PARAMETER(item);
+    UNREFERENCED_PARAMETER(isSystemMenu);
+    MENUINFO mi; ZeroMemory(&mi, sizeof(mi));
+    mi.cbSize = sizeof(mi);
     mi.fMask = MIM_MENUDATA;
-    if (GetMenuInfo(hMenu, &mi) && mi.dwMenuData) {
+    if (GetMenuInfo(hMenu, &mi) && mi.dwMenuData != 0) {
         FolderMenuData* data = (FolderMenuData*)mi.dwMenuData;
-        populate_folder_menu(hMenu, data);
+        if (data) {
+            populate_folder_menu(hMenu, data);
+        }
     }
 }
 
@@ -676,8 +683,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt) {
     PostMessageW(owner, WM_NULL, 0, 0);
     MenuExecuteCommand(owner, (UINT)cmd);
     DestroyMenu(hMenu);
-    // Always exit after menu closes (resident mode removed)
-    PostMessageW(owner, WM_CLOSE, 0, 0);
+    // In background mode the window stays alive; WM_CLOSE is posted by caller when needed.
 }
 
 // ===== Modern owner-draw implementation (compiled only when ENABLE_MODERN_STYLE) =====
