@@ -2,12 +2,15 @@
 
 Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, , allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
 
-![WinMacMenu screenshot](assets/winmacmenu-demo-11.png)
-![WinMacMenu screenshot](assets/winmacmenu-demo-10.png)
 
 - Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
 - Low-latency popup
+
+### Windows 11:
+![WinMacMenu screenshot](img/winmacmenu-demo-11.png)
+### Windows 10:
+![WinMacMenu screenshot](img/winmacmenu-demo-10.png)
 
 ## Features
 
