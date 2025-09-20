@@ -50,6 +50,8 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [IconsLight] theme-specific per-item icons for light theme (Icon1..IconN)
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 
+You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
+
 ## Behavior Details
 - First-letter activation
 - Outside click dismisses menu
