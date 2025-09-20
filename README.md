@@ -85,5 +85,4 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 ## Future plans
 - Custom activation shortcuts
 - Sub-menus sorting options
-- Different depths level for specific folders
 - Add modern style to follow Fluent Design System principles
