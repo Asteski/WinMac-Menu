@@ -80,7 +80,7 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System for now
 - It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different file names for ini file.
-- ini file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
+- INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
 
 ## Future plans
 - Custom activation shortcuts
