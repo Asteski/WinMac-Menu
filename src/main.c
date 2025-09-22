@@ -365,12 +365,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             } else if (cmd == 10006) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
-                // Reverted to simple MessageBox-based About dialog
+                // About dialog using custom application icon instead of default information icon.
+                // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                // Use explicit Unicode escape for copyright symbol to prevent mojibake (e.g. stray 'Â')
                 wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.4.0"));
-                MessageBoxW(hWnd, msg, L"About WinMac Menu", MB_OK | MB_ICONINFORMATION);
+                MSGBOXPARAMSW mbp = {0};
+                mbp.cbSize = sizeof(mbp);
+                mbp.hwndOwner = hWnd;
+                mbp.hInstance = GetModuleHandleW(NULL);
+                mbp.lpszText = msg;
+                mbp.lpszCaption = L"About WinMac Menu";
+                mbp.dwStyle = MB_OK | MB_USERICON; // custom icon style
+                mbp.lpszIcon = MAKEINTRESOURCEW(IDI_APPICON); // use app icon resource
+                mbp.dwLanguageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
+                MessageBoxIndirectW(&mbp);
             } else if (cmd == 10002) {
                 PostMessageW(hWnd, WM_CLOSE, 0, 0);
             }
