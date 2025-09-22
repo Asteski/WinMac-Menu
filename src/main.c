@@ -13,6 +13,19 @@
 #pragma comment(lib, "comctl32.lib")
 
 static const wchar_t *WC_APPWND = L"WinMacMenuWnd";
+// Helper builds a unique window title for this config so multiple configs can run simultaneously.
+// Default config.ini uses plain "WinMacMenu" title for backward compatibility; custom ini yields "WinMacMenu::<basename>".
+static void build_window_title(const Config* cfg, wchar_t* out, size_t cchOut) {
+    if (!out || cchOut==0) return;
+    out[0]=0;
+    if (!cfg || !cfg->iniPath[0]) { lstrcpynW(out, L"WinMacMenu", (int)cchOut); return; }
+    WCHAR path[MAX_PATH]; lstrcpynW(path, cfg->iniPath, ARRAYSIZE(path));
+    WCHAR *slash = wcsrchr(path, L'\\'); WCHAR *fname = slash ? slash+1 : path;
+    WCHAR base[256]; lstrcpynW(base, fname, ARRAYSIZE(base));
+    WCHAR *dot = wcsrchr(base, L'.'); if (dot) *dot = 0;
+    if (!lstrcmpiW(base, L"config")) { lstrcpynW(out, L"WinMacMenu", (int)cchOut); }
+    else { wsprintfW(out, L"WinMacMenu::%s", base); }
+}
 static Config g_cfg; // global config
 static HANDLE g_hSingleInstance = NULL;
 static BOOL g_menuActive = FALSE;
@@ -22,11 +35,13 @@ static BOOL g_runInBackground = FALSE; // mirror of config for quick checks
 static UINT g_trayMsg = WM_APP + 1; // tray callback message id for Shell_NotifyIcon
 static BOOL g_trayAdded = FALSE;
 static HICON g_hTrayIcon = NULL;
+static HICON g_hTrayIconLight = NULL; // cached themed variants
+static HICON g_hTrayIconDark = NULL;
 static HHOOK g_hKbHook = NULL;
 static HHOOK g_hMouseHook = NULL;
 static UINT g_msgTaskbarCreated = 0;
 static HWND g_hHookTargetWnd = NULL; // owner for posting close toggles
-// Retrieve FileVersion (e.g., "0.3.0") from the executable's VERSIONINFO
+// Retrieve FileVersion (e.g., "0.4.0") from the executable's VERSIONINFO
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
     out[0] = 0;
@@ -56,23 +71,38 @@ static void get_file_version_string(wchar_t* out, size_t cchOut) {
 // Tray helpers
 static void tray_add(HWND hWnd) {
     if (!g_cfg.showTrayIcon || g_trayAdded) return;
-    if (!g_hTrayIcon) {
-        // Attempt to load exact 16x16 from the multi-size icon resource first.
-        g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
-                                        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-        if (!g_hTrayIcon) {
-            // Fallback: let Windows choose best size and then extract a small icon via CopyImage
-            HICON hAny = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_CREATEDIBSECTION);
-            if (hAny) {
-                HICON hSmall = (HICON)CopyImage(hAny, IMAGE_ICON, 16, 16, LR_COPYFROMRESOURCE);
-                if (hSmall) {
-                    g_hTrayIcon = hSmall;
-                    DestroyIcon(hAny);
-                } else {
-                    g_hTrayIcon = hAny; // Use whatever we have; system will scale
-                }
-            }
+    BOOL dark = theme_is_dark();
+    // Lazy load themed icons (file paths override resource)
+    if (!g_hTrayIconLight) {
+        if (g_cfg.trayIconPathLight[0]) {
+            g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPathLight, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
         }
+        if (!g_hTrayIconLight && g_cfg.trayIconPath[0]) {
+            g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+        }
+        if (!g_hTrayIconLight) {
+            g_hTrayIconLight = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_LIGHT), IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        }
+    }
+    if (!g_hTrayIconDark) {
+        if (g_cfg.trayIconPathDark[0]) {
+            g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPathDark, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+        }
+        if (!g_hTrayIconDark && g_cfg.trayIconPath[0]) {
+            g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+        }
+        if (!g_hTrayIconDark) {
+            g_hTrayIconDark = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_DARK), IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        }
+    }
+    if (dark) g_hTrayIcon = g_hTrayIconDark ? g_hTrayIconDark : g_hTrayIconLight;
+    else g_hTrayIcon = g_hTrayIconLight ? g_hTrayIconLight : g_hTrayIconDark;
+    if (!g_hTrayIcon) {
+        // Fallback to embedded resource
+        g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
         if (!g_hTrayIcon) g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
     }
     NOTIFYICONDATAW nid = {0};
@@ -124,7 +154,8 @@ static void tray_reload(HWND hWnd) {
     if (!g_cfg.showTrayIcon) return;
     // Remove existing icon if present
     if (g_trayAdded) tray_remove(hWnd);
-    if (g_hTrayIcon) { DestroyIcon(g_hTrayIcon); g_hTrayIcon = NULL; }
+    // Do not destroy themed cache icons—they may be reused; only clear selection handle
+    g_hTrayIcon = NULL;
     tray_add(hWnd);
 }
 
@@ -208,6 +239,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
         theme_apply_to_window(hWnd);
+        if (g_runInBackground && g_cfg.showTrayIcon) tray_reload(hWnd); // ensure themed tray icon updates
         return 0;
     case WM_DEVICECHANGE: // try to ensure tray is restored on some device changes
         if (g_runInBackground && g_cfg.showTrayIcon && !g_trayAdded) tray_add(hWnd);
@@ -260,6 +292,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 AppendMenuW(m, MF_STRING, 10004, L"Elevate");
             }
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+            // Insert Reload option (restart the application) before Start on login per request
+            AppendMenuW(m, MF_STRING, 10010, L"Reload");
             // Toggles with check marks
             UINT fSOL = (g_cfg.startOnLogin ? MF_CHECKED : MF_UNCHECKED);
             AppendMenuW(m, MF_STRING | fSOL, 10008, L"Start on login");
@@ -298,6 +332,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (g_hSingleInstance) { ReleaseMutex(g_hSingleInstance); CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
                     PostMessageW(hWnd, WM_CLOSE, 0, 0);
                 }
+            } else if (cmd == 10010) {
+                // Reload: relaunch same executable (non-elevated) with same config path, then exit
+                WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+                WCHAR cmdline[4096];
+                if (g_cfg.iniPath[0]) wsprintfW(cmdline, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
+                else wsprintfW(cmdline, L"\"%s\"", exePath);
+                STARTUPINFOW si = { sizeof(si) }; PROCESS_INFORMATION pi = {0};
+                if (CreateProcessW(exePath, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+                    if (g_hSingleInstance) { ReleaseMutex(g_hSingleInstance); CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
+                    PostMessageW(hWnd, WM_CLOSE, 0, 0);
+                }
             } else if (cmd == 10008) {
                 // Toggle StartOnLogin
                 g_cfg.startOnLogin = !g_cfg.startOnLogin;
@@ -319,12 +365,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             } else if (cmd == 10006) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
+                // Reverted to simple MessageBox-based About dialog
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
-                WCHAR about[512];
-                wsprintfW(about,
-                    L"Version: v%ls\nCreated by Asteski\n\nWinMac Menu is free and open source software!\nFeel free to redistribute and contribute to the project on GitHub:\n\nhttps://github.com/Asteski/WinMac-Menu",
-                    (ver[0] ? ver : L"0.3.0"));
-                MessageBoxW(hWnd, about, L"About WinMac Menu", MB_OK | MB_ICONINFORMATION);
+                WCHAR msg[512];
+                // Use explicit Unicode escape for copyright symbol to prevent mojibake (e.g. stray 'Â')
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.4.0"));
+                MessageBoxW(hWnd, msg, L"About WinMac Menu", MB_OK | MB_ICONINFORMATION);
             } else if (cmd == 10002) {
                 PostMessageW(hWnd, WM_CLOSE, 0, 0);
             }
@@ -430,24 +476,22 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     }
     if (argv) LocalFree(argv);
 
-    // Single instance per config: mutex name includes hash of ini path (or default path)
+    // Single instance per config remains enforced via mutex hash of ini path.
     Config tmp = {0}; config_ensure(&tmp);
     DWORD h = simple_hash_w(tmp.iniPath);
     wchar_t mname[128]; wsprintfW(mname, L"Local\\WinMacMenu.SingleInstance.%08X", h);
     g_hSingleInstance = CreateMutexW(NULL, TRUE, mname);
     if (g_hSingleInstance && GetLastError() == ERROR_ALREADY_EXISTS) {
-        // Another instance exists: signal it to show the menu and exit
+        // Another instance with SAME config exists: find its window title for this config and signal.
+        wchar_t title[260]; build_window_title(&tmp, title, ARRAYSIZE(title));
         HWND hExisting = NULL;
         for (int i = 0; i < 10; ++i) { // retry up to ~1s to allow window creation
-            hExisting = FindWindowW(WC_APPWND, L"WinMacMenu");
+            hExisting = FindWindowW(WC_APPWND, title);
             if (hExisting) break;
             Sleep(100);
         }
-        if (hExisting) {
-            PostMessageW(hExisting, WM_APP, 0, 0);
-        }
-        // No need to keep this process
-        return 0;
+        if (hExisting) PostMessageW(hExisting, WM_APP, 0, 0);
+        return 0; // exit; other instance will handle showing menu
     }
     // DPI awareness for crisp menu sizing
     HMODULE hShcore = LoadLibraryW(L"Shcore.dll");
@@ -481,7 +525,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
 
     if (!RegisterClassExW(&wc)) return 0;
 
-    HWND hWnd = CreateWindowExW(WS_EX_TOOLWINDOW, WC_APPWND, L"WinMacMenu",
+    wchar_t windowTitle[260]; build_window_title(&g_cfg, windowTitle, ARRAYSIZE(windowTitle));
+    HWND hWnd = CreateWindowExW(WS_EX_TOOLWINDOW, WC_APPWND, windowTitle,
         WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT, 200, 200, NULL, NULL, hInstance, NULL);
     if (!hWnd) return 0;
     g_hMainWnd = hWnd;
