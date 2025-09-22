@@ -88,9 +88,6 @@ static void write_default_ini(const WCHAR* path) {
         "Item19=Lock Screen|POWER_LOCK|\r\n"\
         "Item20=Log Out %USERNAME%|POWER_LOGOFF|\r\n"\
         "[Icons]\r\n"\
-        "DefaultIcon=\r\n"\
-        "DefaultIconLight=\r\n"\
-        "DefaultIconDark=\r\n"\
         "Icon1=%WINMAC_PATH%\\icons\\appsandfeatures.ico\r\n"\
         "Icon2=%WINMAC_PATH%\\icons\\about.ico\r\n"\
         "Icon4=%WINMAC_PATH%\\icons\\settings.ico\r\n"\
@@ -482,6 +479,14 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"RecentShowCleanItems", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->recentShowCleanItems = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    // Themed tray icon optional paths
+    out->trayIconPath[0]=0; out->trayIconPathLight[0]=0; out->trayIconPathDark[0]=0;
+    GetPrivateProfileStringW(L"General", L"TrayIcon", L"", out->trayIconPath, ARRAYSIZE(out->trayIconPath), out->iniPath);
+    GetPrivateProfileStringW(L"General", L"TrayIconLight", L"", out->trayIconPathLight, ARRAYSIZE(out->trayIconPathLight), out->iniPath);
+    GetPrivateProfileStringW(L"General", L"TrayIconDark", L"", out->trayIconPathDark, ARRAYSIZE(out->trayIconPathDark), out->iniPath);
+    if (out->trayIconPath[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPath, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPath, ex, ARRAYSIZE(out->trayIconPath)); }
+    if (out->trayIconPathLight[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathLight, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathLight, ex, ARRAYSIZE(out->trayIconPathLight)); }
+    if (out->trayIconPathDark[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathDark, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathDark, ex, ARRAYSIZE(out->trayIconPathDark)); }
     parse_menu(out);
     parse_icons(out);
     if (out->logLevel > 0) {
