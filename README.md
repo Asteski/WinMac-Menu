@@ -14,7 +14,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
-- Set up the app using either a simple INI file or the built-in GUI for live editing.
+- Configure the menu using either a simple INI file or the built-in GUI for live editing.
 - Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
 - Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
