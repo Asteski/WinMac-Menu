@@ -66,6 +66,13 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - Single-instance per INI path
 - Second invocation toggle: launching the executable again (e.g., via a Windows key binding in an external tool) sends a toggle message. If the menu is open it closes; if closed it opens at the configured position. This enables assigning the EXE both to open and to dismiss via the same key.
 
+## Security & Privacy
+- No telemetry. The app makes no network connections and collects no data.
+- Registry usage: optional HKCU\Software\Microsoft\Windows\CurrentVersion\Run entry when you enable “Start on login” from the tray. It’s off by default and only changed when you toggle it. There is no service or scheduled task.
+- Keyboard/mouse hooks: installed only while the popup menu is visible to allow outside‑click/escape dismissal; they are immediately removed when the menu closes.
+- Recent cleanup: choosing “Clear Recent Items list” deletes shortcut (.lnk) files from your user Recent folder. It doesn’t touch actual documents or programs. There’s no confirmation.
+- Filesystem: reads your config.ini and enumerates folders you explicitly reference in the menu.
+
 ## Troubleshooting
 - Empty folder submenu: check path, permissions, filters (ShowHidden / ShowDotfiles)
 - No icons: ensure ShowIcons=true (or LegacyIcons=true for backward compatibility) and paths are correct
