@@ -88,17 +88,17 @@ static void write_default_ini(const WCHAR* path) {
         "Item19=Lock Screen|POWER_LOCK|\r\n"\
         "Item20=Log Out %USERNAME%|POWER_LOGOFF|\r\n"\
         "[Icons]\r\n"\
-        "Icon1=%WINMAC_PATH%\\icons\\appsandfeatures.ico\r\n"\
-        "Icon2=%WINMAC_PATH%\\icons\\about.ico\r\n"\
-        "Icon4=%WINMAC_PATH%\\icons\\settings.ico\r\n"\
-        "Icon9=%WINMAC_PATH%\\icons\\explorer.ico\r\n"\
-        "Icon15=%WINMAC_PATH%\\icons\\eventvwr.ico\r\n"\
-        "Icon16=%WINMAC_PATH%\\icons\\taskschd.ico\r\n"\
-        "Icon17=%WINMAC_PATH%\\icons\\taskmgr.ico\r\n"\
+    "Icon1=%WINMAC%\\icons\\appsandfeatures.ico\r\n"\
+    "Icon2=%WINMAC%\\icons\\about.ico\r\n"\
+    "Icon4=%WINMAC%\\icons\\settings.ico\r\n"\
+    "Icon9=%WINMAC%\\icons\\explorer.ico\r\n"\
+    "Icon15=%WINMAC%\\icons\\eventvwr.ico\r\n"\
+    "Icon16=%WINMAC%\\icons\\taskschd.ico\r\n"\
+    "Icon17=%WINMAC%\\icons\\taskmgr.ico\r\n"\
         "[IconsLight]\r\n"\
-        "Icon5=%WINMAC_PATH%\\icons\\store_light.ico\r\n"\
+    "Icon5=%WINMAC%\\icons\\store_light.ico\r\n"\
         "[IconsDark]\r\n"\
-        "Icon5=%WINMAC_PATH%\\icons\\store_dark.ico\r\n";
+    "Icon5=%WINMAC%\\icons\\store_dark.ico\r\n";
 
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hf != INVALID_HANDLE_VALUE) {
@@ -143,6 +143,7 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"POWER_RESTART")) return CI_POWER_RESTART;
     if (!lstrcmpiW(s, L"POWER_LOCK")) return CI_POWER_LOCK;
     if (!lstrcmpiW(s, L"POWER_LOGOFF")) return CI_POWER_LOGOFF;
+    if (!lstrcmpiW(s, L"POWER_HIBERNATE")) return CI_POWER_HIBERNATE;
     if (!lstrcmpiW(s, L"RECENT_SUBMENU")) return CI_RECENT_SUBMENU;
     if (!lstrcmpiW(s, L"POWER_MENU")) return CI_POWER_MENU;
     return CI_SEPARATOR;
@@ -489,6 +490,21 @@ BOOL config_load(Config* out) {
     if (out->trayIconPathDark[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathDark, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathDark, ex, ARRAYSIZE(out->trayIconPathDark)); }
     parse_menu(out);
     parse_icons(out);
+    // Power menu exclusions (default all FALSE). Support legacy Exclude* keys and new inclusion model.
+    out->excludeSleep = GetPrivateProfileIntW(L"Power", L"ExcludeSleep", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeShutdown = GetPrivateProfileIntW(L"Power", L"ExcludeShutdown", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeRestart = GetPrivateProfileIntW(L"Power", L"ExcludeRestart", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeLock = GetPrivateProfileIntW(L"Power", L"ExcludeLock", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeLogoff = GetPrivateProfileIntW(L"Power", L"ExcludeLogoff", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeHibernate = GetPrivateProfileIntW(L"Power", L"ExcludeHibernate", 0, out->iniPath) ? TRUE : FALSE;
+    // New style: only write option when excluded as Name=0; if present with value 0, mark excluded.
+    // If both legacy and new keys exist, new key overrides.
+    if (GetPrivateProfileIntW(L"Power", L"Sleep", 1, out->iniPath) == 0) out->excludeSleep = TRUE;
+    if (GetPrivateProfileIntW(L"Power", L"Hibernate", 1, out->iniPath) == 0) out->excludeHibernate = TRUE;
+    if (GetPrivateProfileIntW(L"Power", L"Shutdown", 1, out->iniPath) == 0) out->excludeShutdown = TRUE;
+    if (GetPrivateProfileIntW(L"Power", L"Restart", 1, out->iniPath) == 0) out->excludeRestart = TRUE;
+    if (GetPrivateProfileIntW(L"Power", L"Lock", 1, out->iniPath) == 0) out->excludeLock = TRUE;
+    if (GetPrivateProfileIntW(L"Power", L"Logoff", 1, out->iniPath) == 0) out->excludeLogoff = TRUE;
     if (out->logLevel > 0) {
         WCHAR msg[4096];
         wsprintfW(msg,

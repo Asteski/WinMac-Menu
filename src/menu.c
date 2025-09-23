@@ -454,6 +454,9 @@ static HMENU build_menu(void) {
         case CI_POWER_LOGOFF:
             AppendMenuW(hMenu, MF_STRING, id++, it->label);
             break;
+        case CI_POWER_HIBERNATE:
+            AppendMenuW(hMenu, MF_STRING, id++, it->label);
+            break;
     case CI_RECENT_SUBMENU:
         {
             HMENU sub = build_recent_submenu();
@@ -476,13 +479,23 @@ static HMENU build_menu(void) {
         case CI_POWER_MENU:
         {
             HMENU sub = CreatePopupMenu();
-            // Order: Sleep, Shutdown, Restart, Lock, Log off
-            AppendMenuW(sub, MF_STRING, id, L"Sleep"); map_add(id++, L"POWER_SLEEP");
-            AppendMenuW(sub, MF_STRING, id, L"Shut down"); map_add(id++, L"POWER_SHUTDOWN");
-            AppendMenuW(sub, MF_STRING, id, L"Restart"); map_add(id++, L"POWER_RESTART");
-            AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(sub, MF_STRING, id, L"Lock"); map_add(id++, L"POWER_LOCK");
-            AppendMenuW(sub, MF_STRING, id, L"Log off"); map_add(id++, L"POWER_LOGOFF");
+            // Order: Sleep, Hibernate, Shutdown, Restart, Lock, Log off (group with separator before lock group)
+            BOOL firstGroupAdded = FALSE;
+            if (!g_cfg.excludeSleep) { AppendMenuW(sub, MF_STRING, id, L"Sleep"); map_add(id++, L"POWER_SLEEP"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeHibernate) { AppendMenuW(sub, MF_STRING, id, L"Hibernate"); map_add(id++, L"POWER_HIBERNATE"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeShutdown) { AppendMenuW(sub, MF_STRING, id, L"Shut down"); map_add(id++, L"POWER_SHUTDOWN"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeRestart) { AppendMenuW(sub, MF_STRING, id, L"Restart"); map_add(id++, L"POWER_RESTART"); firstGroupAdded=TRUE; }
+            BOOL secondGroup = FALSE;
+            if (!g_cfg.excludeLock || !g_cfg.excludeLogoff) {
+                if (firstGroupAdded) AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
+                secondGroup = TRUE;
+            }
+            if (!g_cfg.excludeLock) { AppendMenuW(sub, MF_STRING, id, L"Lock"); map_add(id++, L"POWER_LOCK"); }
+            if (!g_cfg.excludeLogoff) { AppendMenuW(sub, MF_STRING, id, L"Log off"); map_add(id++, L"POWER_LOGOFF"); }
+            // If everything excluded, show placeholder disabled item
+            if (!firstGroupAdded && !secondGroup) {
+                AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
+            }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Power");
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
                 const BOOL dark = theme_is_dark();
@@ -606,6 +619,7 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             if (!lstrcmpiW(g_map[i].path, L"POWER_RESTART")) { system_shutdown(TRUE); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOCK")) { LockWorkStation(); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { ExitWindowsEx(EWX_LOGOFF, 0); return; }
+        if (!lstrcmpiW(g_map[i].path, L"POWER_HIBERNATE")) { system_hibernate(); return; }
             open_shell_item(g_map[i].path); return; }
     }
     if (cmd >= IDM_RECENT_BASE && cmd < IDM_RECENT_BASE + 1000) {
@@ -653,6 +667,8 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             if (id == cmd) { LockWorkStation(); return; } id++; break;
         case CI_POWER_LOGOFF:
             if (id == cmd) { ExitWindowsEx(EWX_LOGOFF, 0); return; } id++; break;
+        case CI_POWER_HIBERNATE:
+            if (id == cmd) { system_hibernate(); return; } id++; break;
         case CI_RECENT_SUBMENU:
             break;
         }

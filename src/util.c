@@ -67,6 +67,11 @@ void system_logoff() {
     ExitWindowsEx(EWX_LOGOFF | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER);
 }
 
+void system_hibernate() {
+    // TRUE indicates hibernate, second param forceCritical FALSE, disableWakeEvent FALSE
+    SetSuspendState(TRUE, FALSE, FALSE);
+}
+
 static const WCHAR* RUN_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 BOOL set_run_at_login(LPCWSTR valueName, LPCWSTR commandLine) {
