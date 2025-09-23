@@ -17,6 +17,7 @@ typedef enum {
     CI_POWER_RESTART,
     CI_POWER_LOCK,
     CI_POWER_LOGOFF,
+    CI_POWER_HIBERNATE,
     CI_RECENT_SUBMENU,
     CI_POWER_MENU
 } ConfigItemType;
@@ -93,6 +94,13 @@ typedef struct Config {
     WCHAR trayIconPath[MAX_PATH];
     WCHAR trayIconPathLight[MAX_PATH];
     WCHAR trayIconPathDark[MAX_PATH];
+    // Power menu exclusion flags (Advanced tab): when TRUE, corresponding action is hidden from POWER_MENU aggregate
+    BOOL excludeSleep;
+    BOOL excludeShutdown;
+    BOOL excludeRestart;
+    BOOL excludeLock;
+    BOOL excludeLogoff;
+    BOOL excludeHibernate;
     ConfigItem items[64];
     int count;
 } Config;

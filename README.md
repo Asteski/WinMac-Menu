@@ -14,6 +14,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
+- Set up the app using either a simple INI file or the built-in GUI for live editing.
 - Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
 - Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
@@ -37,9 +38,10 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 **Tray Icon**: Right-click for settings menu including:
 - Show menu / Hide tray / Elevate (run as admin)
+- Reload
 - Start on login toggle
 - Show/Hide menu icons (toggles whether icons appear in the popup menu)
-- Settings (opens config.ini) / Help / About
+- Settings (opens GUI) / Help / About
 - Exit
 
 ## Sections
@@ -49,6 +51,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [Icons] per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
 - [IconsLight] theme-specific per-item icons for light theme (Icon1..IconN)
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
+- [Power] exclude specific power options
 - [Logging]
 
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
@@ -73,6 +76,7 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 **Please be informed that this is a beta version - you're using it at your own risk!**
 - WinMacMenu reads an INI. If missing, a default (config.ini) is created.
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
+- Settings GUI window is still in experimental phase, so I can't promise its stability for now.
 - Indices N in [Icons]/[IconsLight]/[IconsDark] map to ItemN in [Menu].
 - Generated default INI contains no comments (to keep the file minimal). Comments are still supported by the parser if you add them manually: lines beginning with `;` or `#` are ignored.
 - Duplicate keys: The last occurrence in a section wins (standard Win32 profile API behavior).

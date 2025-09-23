@@ -9,6 +9,7 @@
 #include "util.h"
 #include "config.h"
 #include "resource.h"
+#include "settings.h"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -360,8 +361,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_cfg.showIcons = !g_cfg.showIcons;
                 WritePrivateProfileStringW(L"General", L"ShowIcons", g_cfg.showIcons ? L"true" : L"false", g_cfg.iniPath);
             } else if (cmd == 10005) {
-                // Open ini in default app
-                if (g_cfg.iniPath[0]) ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
+                // Show settings dialog (replaces opening raw INI)
+                Config before = g_cfg; // snapshot
+                if (ShowSettingsDialog(hWnd, &g_cfg)) {
+                    // Apply changes that need runtime updates
+                    g_runInBackground = g_cfg.runInBackground;
+                    if (g_cfg.showTrayIcon != before.showTrayIcon) {
+                        if (g_cfg.showTrayIcon) tray_add(hWnd); else tray_remove(hWnd);
+                    } else if (g_cfg.showTrayIcon) {
+                        // Reload to reflect possible theme/tooltip changes
+                        tray_reload(hWnd);
+                    }
+                }
             } else if (cmd == 10006) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
@@ -369,7 +380,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.4.0"));
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.5.0"));
                 MSGBOXPARAMSW mbp = {0};
                 mbp.cbSize = sizeof(mbp);
                 mbp.hwndOwner = hWnd;
@@ -377,7 +388,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 mbp.lpszText = msg;
                 mbp.lpszCaption = L"About WinMac Menu";
                 mbp.dwStyle = MB_OK | MB_USERICON; // custom icon style
-                mbp.lpszIcon = MAKEINTRESOURCEW(IDI_APPICON); // use app icon resource
+                mbp.lpszIcon = MAKEINTRESOURCEW(IDI_ABOUT_ICON); // use about-specific icon resource
                 mbp.dwLanguageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
                 MessageBoxIndirectW(&mbp);
             } else if (cmd == 10002) {
