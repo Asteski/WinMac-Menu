@@ -97,4 +97,3 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 ## Future plans
 - Custom activation shortcuts
 - Sub-menus sorting options
-- Add modern style to follow Fluent Design System principles
