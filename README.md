@@ -1,6 +1,6 @@
 # WinMac Menu
 
-Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, and many more!
+Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items submenu, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
 
 
 - Windows 10/11, x86 and ARM64 supported
@@ -23,6 +23,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - First-letter activation, outside-click dismissal
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
+- Sorting of folder content by name, date, size and type
 - Granular extension hiding (global + recent-only override)
 
 ## Run
@@ -52,6 +53,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [IconsLight] theme-specific per-item icons for light theme (Icon1..IconN)
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 - [Power] exclude specific power options
+- [Sorting] sort folder content
 - [Logging]
 
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.

@@ -11,7 +11,7 @@
 typedef struct SettingsState {
     Config* cfg;
     HWND hTabs;
-    HWND pages[5]; // General, Placement, Menu, Icons, Advanced
+    HWND pages[6]; // General, Placement, Menu, Icons, Sorting, Advanced
     // Working copy of menu/icon items so Apply/Save commits atomically
     ConfigItem workingItems[64];
     int workingCount;
@@ -27,6 +27,8 @@ static void refresh_lists(SettingsState* st);
 static void working_clone(SettingsState* st);
 static void working_commit(SettingsState* st);
 static BOOL Icons_Save(HWND pg, Config* c);
+static void Sorting_Load(HWND pg, Config* c);
+static BOOL Sorting_Save(HWND pg, Config* c);
 
 // Generic child page dialog procedure: forward button commands to main dialog
 static INT_PTR CALLBACK PageDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
@@ -179,6 +181,53 @@ static BOOL Placement_Save(HWND pg, Config* c){
         wsprintfW(buf,L"%d",c->vOffset); WritePrivateProfileStringW(L"Placement",L"VOffset",buf,c->iniPath);
         const WCHAR* cen=L"false"; if(c->ignoreHOffsetWhenCentered&&c->ignoreVOffsetWhenCentered) cen=L"true"; else if(c->ignoreHOffsetWhenCentered) cen=L"HOffset"; else if(c->ignoreVOffsetWhenCentered) cen=L"VOffset"; WritePrivateProfileStringW(L"Placement",L"IgnoreOffsetWhenCentered",cen,c->iniPath);
         const WCHAR* rel=L"false"; if(c->ignoreHOffsetWhenRelative&&c->ignoreVOffsetWhenRelative) rel=L"true"; else if(c->ignoreHOffsetWhenRelative) rel=L"HOffset"; else if(c->ignoreVOffsetWhenRelative) rel=L"VOffset"; WritePrivateProfileStringW(L"Placement",L"IgnoreOffsetWhenRelative",rel,c->iniPath);
+    }
+    return TRUE;
+}
+
+// -------- Sorting Page --------
+static void Sorting_Load(HWND pg, Config* c){
+    HWND hCombo=GetDlgItem(pg,IDC_SORT_FIELD);
+    if(hCombo){
+        SendMessageW(hCombo,CB_RESETCONTENT,0,0);
+        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Name");
+        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Date Modified");
+        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Date Created");
+        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Size");
+        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Type");
+        SendMessageW(hCombo,CB_SETCURSEL,c->sortField,0);
+    }
+    set_check(pg,IDC_SORT_DESCENDING,c->sortDescending);
+    set_check(pg,IDC_SORT_FOLDERSFIRST,c->sortFoldersFirst);
+    set_int(pg,IDC_MAXITEMS_EDIT,c->maxItems);
+    SendDlgItemMessageW(pg,IDC_MAXITEMS_SPIN,UDM_SETRANGE,0,MAKELPARAM(999,1));
+}
+
+static BOOL Sorting_Save(HWND pg, Config* c){
+    BOOL ch=FALSE; BOOL b;
+    int v;
+    
+    v=(int)SendDlgItemMessageW(pg,IDC_SORT_FIELD,CB_GETCURSEL,0,0);
+    if(v>=0 && v!=c->sortField){c->sortField=v;ch=TRUE;}
+    
+    b=get_check(pg,IDC_SORT_DESCENDING); if(c->sortDescending!=b){c->sortDescending=b;ch=TRUE;}
+    b=get_check(pg,IDC_SORT_FOLDERSFIRST); if(c->sortFoldersFirst!=b){c->sortFoldersFirst=b;ch=TRUE;}
+    
+    v=get_int(pg,IDC_MAXITEMS_EDIT,c->maxItems); if(v!=c->maxItems){c->maxItems=v;ch=TRUE;}
+    
+    if(!ch) return FALSE;
+    
+    if(c->iniPath[0]){
+        const WCHAR* fields[] = {L"name", L"date", L"created", L"size", L"type"};
+        if(c->sortField >= 0 && c->sortField < 5)
+            WritePrivateProfileStringW(L"General",L"Sort",fields[c->sortField],c->iniPath);
+            
+        WritePrivateProfileStringW(L"General",L"SortDescending",c->sortDescending?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"SortFoldersFirst",c->sortFoldersFirst?L"true":L"false",c->iniPath);
+        
+        WCHAR buf[32];
+        wsprintfW(buf,L"%d",c->maxItems);
+        WritePrivateProfileStringW(L"General",L"MaxItems",buf,c->iniPath);
     }
     return TRUE;
 }
@@ -519,8 +568,8 @@ static void refresh_lists(SettingsState* st){
 static void init_tabs(HWND dlg, SettingsState* st){
     st->hTabs=GetDlgItem(dlg,IDC_SETTINGS_TABS);
     TCITEMW ti; ZeroMemory(&ti,sizeof(ti)); ti.mask=TCIF_TEXT; WCHAR label[32];
-    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Advanced"};
-    for(int i=0;i<5;i++){
+    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Sorting",L"Advanced"};
+    for(int i=0;i<6;i++){
         lstrcpynW(label,names[i],ARRAYSIZE(label));
         ti.pszText=label;
         TabCtrl_InsertItem(st->hTabs,i,&ti);
@@ -553,16 +602,18 @@ static void init_tabs(HWND dlg, SettingsState* st){
     st->pages[1]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_PLACEMENT),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[1],NULL,x,y,w,h,SWP_HIDEWINDOW);
     st->pages[2]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_MENU),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[2],NULL,x,y,w,h,SWP_HIDEWINDOW);
     st->pages[3]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ICONS),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[3],NULL,x,y,w,h,SWP_HIDEWINDOW);
-    st->pages[4]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ADVANCED),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[4],NULL,x,y,w,h,SWP_HIDEWINDOW);
+    st->pages[4]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_SORTING),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[4],NULL,x,y,w,h,SWP_HIDEWINDOW);
+    st->pages[5]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ADVANCED),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[5],NULL,x,y,w,h,SWP_HIDEWINDOW);
 
     // Attach st pointer to parent dialog for child retrieval (used in loads)
     SetWindowLongPtrW(dlg,GWLP_USERDATA,(LONG_PTR)st);
     working_clone(st);
     General_Load(st->pages[0],st->cfg);
     Placement_Load(st->pages[1],st->cfg);
-    Advanced_Load(st->pages[4],st->cfg);
     Menu_Load(st->pages[2],st->cfg);
     Icons_Load(st->pages[3],st->cfg);
+    Sorting_Load(st->pages[4],st->cfg);
+    Advanced_Load(st->pages[5],st->cfg);
 }
 // Re-layout controls inside a page (currently only Menu & Icons) when page resized
 static void relayout_page(HWND page, int w, int h){
@@ -609,8 +660,8 @@ static void relayout_page(HWND page, int w, int h){
         return;
     }
 }
-static void show_page(SettingsState* st,int idx){ for(int i=0;i<5;i++){ if(st->pages[i]) ShowWindow(st->pages[i], i==idx?SW_SHOW:SW_HIDE); } }
-static BOOL save_all(SettingsState* st){ if(!st) return FALSE; if(st->workingDirty){ working_commit(st); } BOOL any=FALSE; any|=General_Save(st->pages[0],st->cfg); any|=Placement_Save(st->pages[1],st->cfg); any|=Advanced_Save(st->pages[4],st->cfg); any|=Menu_Save(st->pages[2],st->cfg); any|=Icons_Save(st->pages[3],st->cfg); return any; }
+static void show_page(SettingsState* st,int idx){ for(int i=0;i<6;i++){ if(st->pages[i]) ShowWindow(st->pages[i], i==idx?SW_SHOW:SW_HIDE); } }
+static BOOL save_all(SettingsState* st){ if(!st) return FALSE; if(st->workingDirty){ working_commit(st); } BOOL any=FALSE; any|=General_Save(st->pages[0],st->cfg); any|=Placement_Save(st->pages[1],st->cfg); any|=Advanced_Save(st->pages[5],st->cfg); any|=Menu_Save(st->pages[2],st->cfg); any|=Icons_Save(st->pages[3],st->cfg); any|=Sorting_Save(st->pages[4],st->cfg); return any; }
 
 static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
     static SettingsState* st=NULL;
@@ -686,7 +737,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 // Compute consistent padding like in init_tabs
                 RECT rItem0; if(TabCtrl_GetItemRect(hTabs,0,&rItem0)){ MapWindowPoints(hTabs,dlg,(POINT*)&rItem0,2);} int headerBottom=rItem0.bottom; int gapBelowTabs=6; int leftPadding=12; int rightPadding=8; int bottomPadding=8;
                 int x = rcDisplay.left + leftPadding; int y = headerBottom + gapBelowTabs; int w = (rcDisplay.right - leftPadding) - rightPadding - rcDisplay.left; int h = (rcDisplay.bottom - bottomPadding) - y; if(h<0) h=0;
-                for(int i=0;i<5;i++){ if(st->pages[i]){ SetWindowPos(st->pages[i],NULL,x,y,w,h,SWP_NOZORDER); relayout_page(st->pages[i],w,h); } }
+                for(int i=0;i<6;i++){ if(st->pages[i]){ SetWindowPos(st->pages[i],NULL,x,y,w,h,SWP_NOZORDER); relayout_page(st->pages[i],w,h); } }
             }
         }
         return 0;
