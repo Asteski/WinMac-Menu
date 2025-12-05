@@ -58,6 +58,11 @@ static void write_default_ini(const WCHAR* path) {
         "RecentShowCleanItems=true\r\n"\
         "ShowHidden=false\r\n"\
         "ShowDotfiles=false\r\n"\
+        "MaxItems=40\r\n"\
+    "[Sorting]\r\n"\
+    "SortBy=name\r\n"\
+    "SortDirection=ascending\r\n"\
+    "FoldersFirst=true\r\n"\
     "[Placement]\r\n"\
     "PointerRelative=true\r\n"\
         "Horizontal=center\r\n"\
@@ -98,7 +103,10 @@ static void write_default_ini(const WCHAR* path) {
         "[IconsLight]\r\n"\
     "Icon5=%WINMAC%\\icons\\store_light.ico\r\n"\
         "[IconsDark]\r\n"\
-    "Icon5=%WINMAC%\\icons\\store_dark.ico\r\n";
+    "Icon5=%WINMAC%\\icons\\store_dark.ico\r\n"\
+        "[Control]\r\n"\
+        "LeftClick=WinMacMenu\r\n"\
+        "WindowsKey=WinMacMenu\r\n";
 
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hf != INVALID_HANDLE_VALUE) {
@@ -147,6 +155,15 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"RECENT_SUBMENU")) return CI_RECENT_SUBMENU;
     if (!lstrcmpiW(s, L"POWER_MENU")) return CI_POWER_MENU;
     return CI_SEPARATOR;
+}
+
+static ControlActionType parse_control_action(const WCHAR* s) {
+    if (!s) return CA_NOTHING;
+    if (!lstrcmpiW(s, L"Nothing")) return CA_NOTHING;
+    if (!lstrcmpiW(s, L"WinMacMenu") || !lstrcmpiW(s, L"WinMac Menu")) return CA_WINMAC_MENU;
+    if (!lstrcmpiW(s, L"WindowsMenu") || !lstrcmpiW(s, L"Windows Menu") || !lstrcmpiW(s, L"WindowsStartMenu") || !lstrcmpiW(s, L"Windows Start Menu")) return CA_WINDOWS_MENU;
+    if (!lstrcmpiW(s, L"CustomCommand") || !lstrcmpiW(s, L"Custom Command") || !lstrcmpiW(s, L"Command")) return CA_CUSTOM_COMMAND;
+    return CA_NOTHING;
 }
 
 static int parse_menu(Config* cfg) {
@@ -287,7 +304,26 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"FolderShowOpenEntry", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->folderShowOpenEntry = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
-    // Sorting options omitted (reverted)
+    
+    // Sorting options
+    GetPrivateProfileStringW(L"Sorting", L"SortBy", L"name", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!lstrcmpiW(buf, L"date_modified") || !lstrcmpiW(buf, L"datemodified") || !lstrcmpiW(buf, L"modified")) out->sortField = SORT_DATE_MODIFIED;
+    else if (!lstrcmpiW(buf, L"date_created") || !lstrcmpiW(buf, L"datecreated") || !lstrcmpiW(buf, L"created")) out->sortField = SORT_DATE_CREATED;
+    else if (!lstrcmpiW(buf, L"type")) out->sortField = SORT_TYPE;
+    else if (!lstrcmpiW(buf, L"size")) out->sortField = SORT_SIZE;
+    else out->sortField = SORT_NAME;
+
+    GetPrivateProfileStringW(L"Sorting", L"SortDirection", L"ascending", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->sortDescending = (!lstrcmpiW(buf, L"descending") || !lstrcmpiW(buf, L"desc"));
+
+    GetPrivateProfileStringW(L"Sorting", L"FoldersFirst", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->sortFoldersFirst = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    out->maxItems = GetPrivateProfileIntW(L"General", L"MaxItems", 40, out->iniPath);
+
     GetPrivateProfileStringW(L"General", L"ShowHidden", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->showHidden = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
@@ -488,6 +524,33 @@ BOOL config_load(Config* out) {
     if (out->trayIconPath[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPath, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPath, ex, ARRAYSIZE(out->trayIconPath)); }
     if (out->trayIconPathLight[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathLight, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathLight, ex, ARRAYSIZE(out->trayIconPathLight)); }
     if (out->trayIconPathDark[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathDark, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathDark, ex, ARRAYSIZE(out->trayIconPathDark)); }
+    
+    // Parse Control section
+    WCHAR controlBuf[256];
+    GetPrivateProfileStringW(L"Control", L"LeftClick", L"WinMacMenu", controlBuf, ARRAYSIZE(controlBuf), out->iniPath);
+    trim_inplace(controlBuf);
+    out->leftClickAction = parse_control_action(controlBuf);
+    
+    GetPrivateProfileStringW(L"Control", L"LeftClickCommand", L"", out->leftClickCommand, ARRAYSIZE(out->leftClickCommand), out->iniPath);
+    trim_inplace(out->leftClickCommand);
+    if (out->leftClickCommand[0]) {
+        WCHAR expanded[MAX_PATH];
+        expand_env(out->leftClickCommand, expanded, ARRAYSIZE(expanded));
+        lstrcpynW(out->leftClickCommand, expanded, ARRAYSIZE(out->leftClickCommand));
+    }
+    
+    GetPrivateProfileStringW(L"Control", L"WindowsKey", L"WinMacMenu", controlBuf, ARRAYSIZE(controlBuf), out->iniPath);
+    trim_inplace(controlBuf);
+    out->windowsKeyAction = parse_control_action(controlBuf);
+    
+    GetPrivateProfileStringW(L"Control", L"WindowsKeyCommand", L"", out->windowsKeyCommand, ARRAYSIZE(out->windowsKeyCommand), out->iniPath);
+    trim_inplace(out->windowsKeyCommand);
+    if (out->windowsKeyCommand[0]) {
+        WCHAR expanded[MAX_PATH];
+        expand_env(out->windowsKeyCommand, expanded, ARRAYSIZE(expanded));
+        lstrcpynW(out->windowsKeyCommand, expanded, ARRAYSIZE(out->windowsKeyCommand));
+    }
+    
     parse_menu(out);
     parse_icons(out);
     // Power menu exclusions (default all FALSE). Support legacy Exclude* keys and new inclusion model.

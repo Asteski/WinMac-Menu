@@ -4,14 +4,42 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <commctrl.h>
+#include <stdio.h>
+#include <io.h>
+#include <fcntl.h>
 #include "menu.h"
 #include "theme.h"
 #include "util.h"
 #include "config.h"
 #include "resource.h"
 #include "settings.h"
+#include "controls.h"
+#include "taskbar_hook.h"
 
 #pragma comment(lib, "comctl32.lib")
+
+// CLI operation modes
+typedef enum {
+    CLI_MODE_NORMAL = 0,    // Regular GUI mode
+    CLI_MODE_LIST,          // List all sessions
+    CLI_MODE_RELOAD,        // Reload specific PID
+    CLI_MODE_SHUTDOWN,      // Shutdown specific PID
+    CLI_MODE_SETTINGS,      // Open settings for specific PID
+    CLI_MODE_HELP           // Show help
+} CliModeType;
+
+// Output format modes for --list
+typedef enum {
+    OUTPUT_FORMAT_LIST = 0,     // Default list format
+    OUTPUT_FORMAT_TABLE         // Table format
+} OutputFormat;
+
+typedef struct {
+    CliModeType mode;
+    DWORD targetPid;        // For reload/shutdown/settings operations
+    WCHAR configPath[MAX_PATH];
+    OutputFormat outputFormat; // For --list command
+} CliArgs;
 
 static const wchar_t *WC_APPWND = L"WinMacMenuWnd";
 // Helper builds a unique window title for this config so multiple configs can run simultaneously.
@@ -27,7 +55,7 @@ static void build_window_title(const Config* cfg, wchar_t* out, size_t cchOut) {
     if (!lstrcmpiW(base, L"config")) { lstrcpynW(out, L"WinMacMenu", (int)cchOut); }
     else { wsprintfW(out, L"WinMacMenu::%s", base); }
 }
-static Config g_cfg; // global config
+Config g_cfg; // global config
 static HANDLE g_hSingleInstance = NULL;
 static BOOL g_menuActive = FALSE;
 static BOOL g_menuShowingNow = FALSE; // tracks if a popup is currently displayed (between ShowWinXMenu enter and menu close)
@@ -41,7 +69,8 @@ static HICON g_hTrayIconDark = NULL;
 static HHOOK g_hKbHook = NULL;
 static HHOOK g_hMouseHook = NULL;
 static UINT g_msgTaskbarCreated = 0;
-static HWND g_hHookTargetWnd = NULL; // owner for posting close toggles
+static HWND g_hHookTargetWnd = NULL;
+static UINT g_winKeyHotkeyId = 0; // owner for posting close toggles
 // Retrieve FileVersion (e.g., "0.4.0") from the executable's VERSIONINFO
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
@@ -63,6 +92,258 @@ static void get_file_version_string(wchar_t* out, size_t cchOut) {
         wsprintfW(out, L"%u.%u.%u", (unsigned)major, (unsigned)minor, (unsigned)build);
     }
     LocalFree(data);
+}
+
+// CLI helper: Find WinMacMenu window by PID
+static BOOL find_winmacmenu_window_by_pid(DWORD pid, HWND* outHwnd, WCHAR* outTitle, size_t titleSize) {
+    if (!outHwnd) return FALSE;
+    *outHwnd = NULL;
+    if (outTitle && titleSize > 0) outTitle[0] = 0;
+    
+    // Enumerate all windows with our window class
+    HWND hwnd = FindWindowW(WC_APPWND, NULL);
+    while (hwnd) {
+        DWORD windowPid = 0;
+        GetWindowThreadProcessId(hwnd, &windowPid);
+        
+        if (windowPid == pid) {
+            *outHwnd = hwnd;
+            if (outTitle && titleSize > 0) {
+                GetWindowTextW(hwnd, outTitle, (int)titleSize);
+            }
+            return TRUE;
+        }
+        
+        hwnd = FindWindowExW(NULL, hwnd, WC_APPWND, NULL);
+    }
+    
+    return FALSE;
+}
+
+// CLI helper: Get config path from window title
+static void get_config_from_title(const WCHAR* title, WCHAR* configPath, size_t configPathSize) {
+    if (!title || !configPath || configPathSize == 0) return;
+    configPath[0] = 0;
+    
+    if (!lstrcmpW(title, L"WinMacMenu")) {
+        // Default config
+        lstrcpynW(configPath, L"config.ini", (int)configPathSize);
+    } else if (wcsstr(title, L"WinMacMenu::")) {
+        // Custom config, extract basename
+        const WCHAR* basename = title + lstrlenW(L"WinMacMenu::");
+        wsprintfW(configPath, L"%s.ini", basename);
+    }
+}
+
+// CLI implementation: List all WinMacMenu sessions
+static BOOL cli_list_sessions(OutputFormat outputFormat) {
+    BOOL foundAny = FALSE;
+    HWND hwnd = FindWindowW(WC_APPWND, NULL);
+    
+    // For table format, we need to collect all data first to format properly
+    typedef struct {
+        DWORD pid;
+        WCHAR title[260];
+        WCHAR configName[MAX_PATH];
+        WCHAR fullConfigPath[MAX_PATH];
+        BOOL showOnLaunch;
+        BOOL showTrayIcon;
+        BOOL configLoaded;
+    } SessionInfo;
+    
+    SessionInfo sessions[32]; // Max 32 sessions
+    int sessionCount = 0;
+    
+    while (hwnd && sessionCount < 32) {
+        SessionInfo* session = &sessions[sessionCount];
+        
+        GetWindowThreadProcessId(hwnd, &session->pid);
+        GetWindowTextW(hwnd, session->title, ARRAYSIZE(session->title));
+        get_config_from_title(session->title, session->configName, ARRAYSIZE(session->configName));
+        
+        // Try to get full config path by opening the process
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, session->pid);
+        if (hProcess) {
+            if (!lstrcmpW(session->configName, L"config.ini")) {
+                lstrcpynW(session->fullConfigPath, L"<default>\\config.ini", ARRAYSIZE(session->fullConfigPath));
+            } else {
+                lstrcpynW(session->fullConfigPath, session->configName, ARRAYSIZE(session->fullConfigPath));
+            }
+            CloseHandle(hProcess);
+        }
+        
+        // Load config to get ShowOnLaunch and ShowTrayIcon values
+        Config tempConfig = {0};
+        WCHAR tempConfigPath[MAX_PATH];
+        
+        // Build full path for config loading
+        if (!lstrcmpW(session->configName, L"config.ini")) {
+            config_ensure(&tempConfig);
+            session->configLoaded = config_load(&tempConfig);
+        } else {
+            wsprintfW(tempConfigPath, L"%s", session->configName);
+            config_set_path(&tempConfig, tempConfigPath);
+            session->configLoaded = config_load(&tempConfig);
+        }
+        
+        if (session->configLoaded) {
+            session->showOnLaunch = tempConfig.showOnLaunch;
+            session->showTrayIcon = tempConfig.showTrayIcon;
+        } else {
+            session->showOnLaunch = FALSE;
+            session->showTrayIcon = FALSE;
+        }
+        
+        sessionCount++;
+        foundAny = TRUE;
+        
+        hwnd = FindWindowExW(NULL, hwnd, WC_APPWND, NULL);
+    }
+    
+    if (!foundAny) {
+        // No output when no sessions found - just return silently
+        return TRUE;
+    }
+    
+    // Output the results in the requested format
+    if (outputFormat == OUTPUT_FORMAT_TABLE) {
+        // Table format - column headers, Window Title first
+        wprintf(L"%-20s %-8s %-20s %-12s %-12s %s\n", 
+                L"Window Title", L"PID", L"Config File", L"ShowOnLaunch", L"ShowTrayIcon", L"Config Path");
+        wprintf(L"%-20s %-8s %-20s %-12s %-12s %s\n", 
+                L"--------------------", L"--------", L"--------------------", L"------------", L"------------", L"--------------------");
+        
+        for (int i = 0; i < sessionCount; i++) {
+            SessionInfo* s = &sessions[i];
+            WCHAR showOnLaunchStr[16], showTrayIconStr[16];
+            
+            if (s->configLoaded) {
+                lstrcpynW(showOnLaunchStr, s->showOnLaunch ? L"true" : L"false", ARRAYSIZE(showOnLaunchStr));
+                lstrcpynW(showTrayIconStr, s->showTrayIcon ? L"true" : L"false", ARRAYSIZE(showTrayIconStr));
+            } else {
+                lstrcpynW(showOnLaunchStr, L"<unknown>", ARRAYSIZE(showOnLaunchStr));
+                lstrcpynW(showTrayIconStr, L"<unknown>", ARRAYSIZE(showTrayIconStr));
+            }
+            
+            // Truncate long strings for table display
+            WCHAR titleDisplay[21], configDisplay[21], pathDisplay[41];
+            lstrcpynW(titleDisplay, s->title, ARRAYSIZE(titleDisplay));
+            lstrcpynW(configDisplay, s->configName, ARRAYSIZE(configDisplay));
+            lstrcpynW(pathDisplay, s->fullConfigPath[0] ? s->fullConfigPath : L"<unknown>", ARRAYSIZE(pathDisplay));
+            
+            wprintf(L"%-20s %-8lu %-20s %-12s %-12s %s\n", 
+                    titleDisplay, s->pid, configDisplay, showOnLaunchStr, showTrayIconStr, pathDisplay);
+        }
+    } else {
+        // List format (default) - no headers, Window Title first
+        for (int i = 0; i < sessionCount; i++) {
+            SessionInfo* s = &sessions[i];
+            
+            wprintf(L"Window Title: %s\n", s->title);
+            wprintf(L"PID: %lu\n", s->pid);
+            wprintf(L"Config File: %s\n", s->configName);
+            wprintf(L"Config Path: %s\n", s->fullConfigPath[0] ? s->fullConfigPath : L"<unknown>");
+            
+            if (s->configLoaded) {
+                wprintf(L"ShowOnLaunch: %s\n", s->showOnLaunch ? L"true" : L"false");
+                wprintf(L"ShowTrayIcon: %s\n", s->showTrayIcon ? L"true" : L"false");
+            } else {
+                wprintf(L"ShowOnLaunch: <unable to load>\n");
+                wprintf(L"ShowTrayIcon: <unable to load>\n");
+            }
+            
+            wprintf(L"\n");
+        }
+    }
+    
+    return TRUE;
+}
+
+// CLI implementation: Reload specific PID
+static BOOL cli_reload_pid(DWORD pid) {
+    HWND hwnd = NULL;
+    WCHAR title[260] = {0};
+    
+    if (!find_winmacmenu_window_by_pid(pid, &hwnd, title, ARRAYSIZE(title))) {
+        wprintf(L"Error: No WinMacMenu session found with PID %lu\n", pid);
+        return FALSE;
+    }
+    
+    wprintf(L"Reloading WinMacMenu session (PID: %lu, Title: %s)...\n", pid, title);
+    
+    // Send the reload command directly using WM_COMMAND with the reload menu ID
+    // From the code, reload is menu item 10010
+    PostMessageW(hwnd, WM_COMMAND, 10010, 0);
+    
+    wprintf(L"Reload signal sent successfully.\n");
+    return TRUE;
+}
+
+// CLI implementation: Shutdown specific PID
+static BOOL cli_shutdown_pid(DWORD pid) {
+    HWND hwnd = NULL;
+    WCHAR title[260] = {0};
+    
+    if (!find_winmacmenu_window_by_pid(pid, &hwnd, title, ARRAYSIZE(title))) {
+        wprintf(L"Error: No WinMacMenu session found with PID %lu\n", pid);
+        return FALSE;
+    }
+    
+    wprintf(L"Shutting down WinMacMenu session (PID: %lu, Title: %s)...\n", pid, title);
+    
+    // Send close message
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    
+    wprintf(L"Shutdown signal sent successfully.\n");
+    return TRUE;
+}
+
+// CLI implementation: Open settings for specific PID
+static BOOL cli_settings_pid(DWORD pid) {
+    HWND hwnd = NULL;
+    WCHAR title[260] = {0};
+    
+    if (!find_winmacmenu_window_by_pid(pid, &hwnd, title, ARRAYSIZE(title))) {
+        wprintf(L"Error: No WinMacMenu session found with PID %lu\n", pid);
+        return FALSE;
+    }
+    
+    wprintf(L"Opening settings for WinMacMenu session (PID: %lu, Title: %s)...\n", pid, title);
+    
+    // Send the settings command directly using WM_COMMAND
+    // From the code, settings is menu item 10005
+    PostMessageW(hwnd, WM_COMMAND, 10005, 0);
+    
+    wprintf(L"Settings dialog request sent successfully.\n");
+    return TRUE;
+}
+
+// CLI implementation: Show help
+static void cli_show_help(void) {
+    wprintf(L"WinMacMenu - Command Line Interface\n");
+    wprintf(L"===================================\n\n");
+    wprintf(L"Usage: WinMacMenu.exe [options]\n\n");
+    wprintf(L"Options:\n");
+    wprintf(L"  --config <path>         Use specific config file\n");
+    wprintf(L"  --list, -l              List all running WinMacMenu sessions\n");
+    wprintf(L"  --output <format>       Output format for --list: 'list' (default) or 'table'\n");
+    wprintf(L"  --reload <pid>, -r      Reload specific session by PID\n");
+    wprintf(L"  --shutdown <pid>, -k    Shutdown specific session by PID\n");
+    wprintf(L"  --settings <pid>, -s    Open settings for specific session by PID\n");
+    wprintf(L"  --help, -h, /?          Show this help message\n\n");
+    wprintf(L"Examples:\n");
+    wprintf(L"  WinMacMenu.exe --list\n");
+    wprintf(L"  WinMacMenu.exe -l\n");
+    wprintf(L"  WinMacMenu.exe --list --output table\n");
+    wprintf(L"  WinMacMenu.exe -l --output list\n");
+    wprintf(L"  WinMacMenu.exe --reload 1234\n");
+    wprintf(L"  WinMacMenu.exe -r 1234\n");
+    wprintf(L"  WinMacMenu.exe --shutdown 1234\n");
+    wprintf(L"  WinMacMenu.exe -k 1234\n");
+    wprintf(L"  WinMacMenu.exe --settings 1234\n");
+    wprintf(L"  WinMacMenu.exe -s 1234\n");
+    wprintf(L"  WinMacMenu.exe --config \"custom.ini\"\n\n");
+    wprintf(L"When run without CLI options, WinMacMenu starts normally in GUI mode.\n");
 }
 
 #ifndef NIIF_LARGE_ICON
@@ -174,10 +455,14 @@ static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) 
 
 // Hook helpers
 static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION && g_hHookTargetWnd && g_menuShowingNow) {
+    if (nCode == HC_ACTION && g_hHookTargetWnd) {
         const KBDLLHOOKSTRUCT* ks = (const KBDLLHOOKSTRUCT*)lParam;
-        if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN || ks->vkCode == VK_ESCAPE || ks->vkCode == VK_MENU)) {
-            PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+        
+        if (g_menuShowingNow) {
+            // When menu is showing, handle escape and Windows key to close menu
+            if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN || ks->vkCode == VK_ESCAPE || ks->vkCode == VK_MENU)) {
+                PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+            }
         }
     }
     return CallNextHookEx(g_hKbHook, nCode, wParam, lParam);
@@ -193,9 +478,42 @@ static BOOL is_point_in_menu_window(POINT pt) {
     return FALSE;
 }
 
+#ifndef MN_GETHMENU
+#define MN_GETHMENU 0x01E1
+#endif
+
+#include "util.h"
+
 static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && g_hHookTargetWnd && g_menuShowingNow) {
         const MSLLHOOKSTRUCT* ms = (const MSLLHOOKSTRUCT*)lParam;
+        
+        if (wParam == WM_LBUTTONUP) {
+            HWND hMenuWnd = WindowFromPoint(ms->pt);
+            WCHAR cls[64];
+            if (hMenuWnd && GetClassNameW(hMenuWnd, cls, ARRAYSIZE(cls)) && !lstrcmpW(cls, L"#32768")) {
+                HMENU hMenu = (HMENU)SendMessageW(hMenuWnd, MN_GETHMENU, 0, 0);
+                if (hMenu) {
+                    int pos = MenuItemFromPoint(hMenuWnd, hMenu, ms->pt);
+                    if (pos != -1) {
+                        MENUITEMINFOW mii = { sizeof(mii) };
+                        mii.fMask = MIIM_DATA | MIIM_SUBMENU;
+                        if (GetMenuItemInfoW(hMenu, pos, TRUE, &mii)) {
+                            // If it has a submenu (is a folder) and has data (path), open it
+                            if (mii.hSubMenu && mii.dwItemData) {
+                                WCHAR* path = (WCHAR*)mii.dwItemData;
+                                if (path && path[0]) {
+                                    open_shell_item(path);
+                                    PostMessageW(g_hHookTargetWnd, WM_CANCELMODE, 0, 0); // Close menu
+                                    return 1; // Swallow click
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN || wParam == WM_MOUSEWHEEL) {
             if (!is_point_in_menu_window(ms->pt)) {
                 PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
@@ -256,6 +574,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     case WM_CANCELMODE:
         if (g_menuShowingNow) { EndMenu(); return 0; }
+        break;
+    case WM_HOTKEY:
+        // Handle registered Windows key hotkey
+        if (wParam == g_winKeyHotkeyId && g_runInBackground) {
+            WCHAR debug[256];
+            wsprintfW(debug, L"WM_HOTKEY Windows key received, action=%d\n", g_cfg.windowsKeyAction);
+            OutputDebugStringW(debug);
+            
+            // Windows key was pressed - execute configured action
+            ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, hWnd);
+            return 0;
+        }
+        break;
+    case WM_SYSCOMMAND:
+        // Handle Windows key press via SC_TASKLIST (fallback approach)
+        if ((wParam & 0xFFF0) == SC_TASKLIST && g_runInBackground && g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
+            WCHAR debug[256];
+            wsprintfW(debug, L"WM_SYSCOMMAND SC_TASKLIST received, action=%d\n", g_cfg.windowsKeyAction);
+            OutputDebugStringW(debug);
+            
+            // Windows key was pressed - execute configured action
+            ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, hWnd);
+            return 0;
+        }
         break;
     default:
         break;
@@ -380,7 +722,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.5.0"));
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.6.0"));
                 MSGBOXPARAMSW mbp = {0};
                 mbp.cbSize = sizeof(mbp);
                 mbp.hwndOwner = hWnd;
@@ -426,8 +768,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return MAKELRESULT(0, MNC_CLOSE);
     }
     case WM_RBUTTONUP:
-    case WM_LBUTTONUP:
     case WM_MBUTTONUP:
+    {
+        if (g_menuActive) return 0;
+        g_menuActive = TRUE;
+        g_menuShowingNow = TRUE;
+        install_menu_hooks(hWnd);
+        POINT pt = {0,0};
+        ShowWinXMenu(hWnd, pt);
+        uninstall_menu_hooks();
+        g_menuShowingNow = FALSE;
+        g_menuActive = FALSE;
+        return 0;
+    }
+    case WM_LBUTTONUP:
     {
         if (g_menuActive) return 0;
         g_menuActive = TRUE;
@@ -448,6 +802,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         break;
     case WM_COMMAND:
+        // Handle CLI commands
+        if (LOWORD(wParam) == 10010) {
+            // Reload command from CLI
+            WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+            WCHAR cmdline[4096];
+            if (g_cfg.iniPath[0]) wsprintfW(cmdline, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
+            else wsprintfW(cmdline, L"\"%s\"", exePath);
+            STARTUPINFOW si = { sizeof(si) }; PROCESS_INFORMATION pi = {0};
+            if (CreateProcessW(exePath, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+                CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+                if (g_hSingleInstance) { ReleaseMutex(g_hSingleInstance); CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
+                PostMessageW(hWnd, WM_CLOSE, 0, 0);
+            }
+            return 0;
+        } else if (LOWORD(wParam) == 10005) {
+            // Settings command from CLI
+            Config before = g_cfg; // snapshot
+            if (ShowSettingsDialog(hWnd, &g_cfg)) {
+                // Apply changes that need runtime updates
+                g_runInBackground = g_cfg.runInBackground;
+                if (g_cfg.showTrayIcon != before.showTrayIcon) {
+                    if (g_cfg.showTrayIcon) tray_add(hWnd); else tray_remove(hWnd);
+                } else if (g_cfg.showTrayIcon) {
+                    // Reload to reflect possible theme/tooltip changes
+                    tray_reload(hWnd);
+                }
+            }
+            return 0;
+        }
         MenuExecuteCommand(hWnd, (UINT)LOWORD(wParam));
         return 0;
     case WM_APP:
@@ -481,20 +864,147 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProc(hWnd, msg, wParam, lParam);
 }
 
-int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, int nCmdShow) {
-    // Parse optional --config "path" from command line early so mutex name is per-config
-    WCHAR cfgPath[MAX_PATH] = {0};
-    int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv && argc >= 3) {
-        for (int i = 1; i < argc - 1; ++i) {
-            if (!lstrcmpiW(argv[i], L"--config")) {
-                lstrcpynW(cfgPath, argv[i+1], ARRAYSIZE(cfgPath));
-                config_set_default_path(cfgPath);
+// Forward declarations for CLI functions
+static BOOL cli_list_sessions(OutputFormat outputFormat);
+static BOOL cli_reload_pid(DWORD pid);
+static BOOL cli_shutdown_pid(DWORD pid);
+static BOOL cli_settings_pid(DWORD pid);
+static void cli_show_help(void);
+static BOOL find_winmacmenu_window_by_pid(DWORD pid, HWND* outHwnd, WCHAR* outTitle, size_t titleSize);
+
+// Parse command line arguments
+static BOOL parse_cli_args(CliArgs* args) {
+    ZeroMemory(args, sizeof(*args));
+    args->mode = CLI_MODE_NORMAL;
+    args->outputFormat = OUTPUT_FORMAT_LIST; // Default format
+    
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return FALSE;
+    
+    BOOL result = TRUE;
+    
+    for (int i = 1; i < argc; ++i) {
+        if (!lstrcmpiW(argv[i], L"--config") && i + 1 < argc) {
+            lstrcpynW(args->configPath, argv[i + 1], ARRAYSIZE(args->configPath));
+            ++i; // Skip next argument
+        }
+        else if (!lstrcmpiW(argv[i], L"--list") || !lstrcmpiW(argv[i], L"-l")) {
+            args->mode = CLI_MODE_LIST;
+        }
+        else if ((!lstrcmpiW(argv[i], L"--reload") || !lstrcmpiW(argv[i], L"-r")) && i + 1 < argc) {
+            args->mode = CLI_MODE_RELOAD;
+            args->targetPid = _wtoi(argv[i + 1]);
+            if (args->targetPid == 0) {
+                wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
+                result = FALSE;
                 break;
             }
+            ++i; // Skip next argument
+        }
+        else if ((!lstrcmpiW(argv[i], L"--shutdown") || !lstrcmpiW(argv[i], L"-k")) && i + 1 < argc) {
+            args->mode = CLI_MODE_SHUTDOWN;
+            args->targetPid = _wtoi(argv[i + 1]);
+            if (args->targetPid == 0) {
+                wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
+                result = FALSE;
+                break;
+            }
+            ++i; // Skip next argument
+        }
+        else if ((!lstrcmpiW(argv[i], L"--settings") || !lstrcmpiW(argv[i], L"-s")) && i + 1 < argc) {
+            args->mode = CLI_MODE_SETTINGS;
+            args->targetPid = _wtoi(argv[i + 1]);
+            if (args->targetPid == 0) {
+                wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
+                result = FALSE;
+                break;
+            }
+            ++i; // Skip next argument
+        }
+        else if (!lstrcmpiW(argv[i], L"--help") || !lstrcmpiW(argv[i], L"-h") || !lstrcmpiW(argv[i], L"/?")) {
+            args->mode = CLI_MODE_HELP;
+        }
+        else if (!lstrcmpiW(argv[i], L"--output") && i + 1 < argc) {
+            if (!lstrcmpiW(argv[i + 1], L"table")) {
+                args->outputFormat = OUTPUT_FORMAT_TABLE;
+            } else if (!lstrcmpiW(argv[i + 1], L"list")) {
+                args->outputFormat = OUTPUT_FORMAT_LIST;
+            } else {
+                wprintf(L"Error: Invalid output format '%s'. Valid options: table, list\n", argv[i + 1]);
+                result = FALSE;
+                break;
+            }
+            ++i; // Skip next argument
         }
     }
-    if (argv) LocalFree(argv);
+    
+    LocalFree(argv);
+    return result;
+}
+
+int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, int nCmdShow) {
+    // Parse command line arguments
+    CliArgs cliArgs;
+    if (!parse_cli_args(&cliArgs)) {
+        return 1; // Error in parsing
+    }
+    
+    // Handle CLI modes
+    if (cliArgs.mode != CLI_MODE_NORMAL) {
+        // Try to attach to parent console first, then allocate if needed
+        BOOL hasConsole = FALSE;
+        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+            hasConsole = TRUE;
+        } else if (AllocConsole()) {
+            hasConsole = TRUE;
+        }
+        
+        if (hasConsole) {
+            // Redirect stdout and stderr to console
+            FILE* pCout;
+            FILE* pCerr;
+            freopen_s(&pCout, "CONOUT$", "w", stdout);
+            freopen_s(&pCerr, "CONOUT$", "w", stderr);
+            SetConsoleOutputCP(CP_UTF8);
+        }
+        
+        BOOL success = FALSE;
+        switch (cliArgs.mode) {
+            case CLI_MODE_LIST:
+                success = cli_list_sessions(cliArgs.outputFormat);
+                break;
+            case CLI_MODE_RELOAD:
+                success = cli_reload_pid(cliArgs.targetPid);
+                break;
+            case CLI_MODE_SHUTDOWN:
+                success = cli_shutdown_pid(cliArgs.targetPid);
+                break;
+            case CLI_MODE_SETTINGS:
+                success = cli_settings_pid(cliArgs.targetPid);
+                break;
+            case CLI_MODE_HELP:
+                cli_show_help();
+                success = TRUE;
+                break;
+        }
+        
+        // Flush output
+        fflush(stdout);
+        fflush(stderr);
+        
+        // Brief pause to ensure output is visible
+        if (hasConsole) {
+            Sleep(100);
+        }
+        
+        return success ? 0 : 1;
+    }
+    
+    // Set config path if provided
+    if (cliArgs.configPath[0]) {
+        config_set_default_path(cliArgs.configPath);
+    }
 
     // Single instance per config remains enforced via mutex hash of ini path.
     Config tmp = {0}; config_ensure(&tmp);
@@ -574,7 +1084,26 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     g_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     if (g_runInBackground) {
-        // In background mode: optionally show menu on first launch, then stay in message loop
+        // Initialize taskbar hook to intercept start button clicks
+        if (!InitTaskbarHook()) {
+            OutputDebugStringW(L"Warning: Failed to initialize taskbar hook\n");
+        }
+        
+        // Register Windows key hotkey if the action is not to show Windows menu
+        if (g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
+            g_winKeyHotkeyId = GlobalAddAtom(L"WinMacMenu.WinKey");
+            if (g_winKeyHotkeyId && RegisterHotKey(hWnd, g_winKeyHotkeyId, MOD_WIN, 0)) {
+                OutputDebugStringW(L"Windows key hotkey registered successfully\n");
+            } else {
+                OutputDebugStringW(L"Warning: Failed to register Windows key hotkey\n");
+                if (g_winKeyHotkeyId) {
+                    GlobalDeleteAtom(g_winKeyHotkeyId);
+                    g_winKeyHotkeyId = 0;
+                }
+            }
+        }
+        
+        // Optionally show menu on first launch
         if (g_cfg.showOnLaunch) {
             POINT pt = {0,0};
             g_menuActive = TRUE; g_menuShowingNow = TRUE;
@@ -590,6 +1119,12 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
             DispatchMessageW(&msg);
         }
         // Cleanup
+        ShutdownTaskbarHook();
+        if (g_winKeyHotkeyId) {
+            UnregisterHotKey(hWnd, g_winKeyHotkeyId);
+            GlobalDeleteAtom(g_winKeyHotkeyId);
+            g_winKeyHotkeyId = 0;
+        }
         if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
         return 0;
     } else {

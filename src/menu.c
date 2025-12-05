@@ -17,8 +17,9 @@
 
 #define IDM_DYNAMIC_BASE  1000
 #define IDM_RECENT_BASE   2000
-#define IDM_FOLDER_BASE   5000
 #define IDM_SIZER         9000
+
+BOOL g_shouldReopenMenu = FALSE;
 
 typedef struct MapEntry {
     UINT id;
@@ -28,7 +29,12 @@ typedef struct MapEntry {
 typedef struct FolderMenuData {
     WCHAR path[MAX_PATH];
     int depth;
+    int offset;
 } FolderMenuData;
+
+// Forward declaration
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset);
+
 
 static Config g_cfg; // loaded on demand
 static MapEntry g_map[4096];
@@ -141,11 +147,12 @@ static void map_add(UINT id, const WCHAR* path) {
     }
 }
 
-static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth) {
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset) {
     FolderMenuData* data = (FolderMenuData*)LocalAlloc(LMEM_FIXED|LMEM_ZEROINIT, sizeof(FolderMenuData));
     if (!data) return;
     lstrcpynW(data->path, path, ARRAYSIZE(data->path));
     data->depth = depth;
+    data->offset = offset;
     MENUINFO mi = { sizeof(mi) };
     mi.fMask = MIM_MENUDATA;
     mi.dwMenuData = (ULONG_PTR)data;
@@ -206,6 +213,194 @@ static void get_name_from_path(const WCHAR* full, WCHAR* name, size_t cch) {
     }
 }
 
+typedef struct FileItem {
+    WCHAR name[MAX_PATH];
+    WCHAR fullPath[MAX_PATH];
+    BOOL isDir;
+    FILETIME ftLastWrite;
+    FILETIME ftCreation;
+    unsigned long long fileSize;
+} FileItem;
+
+static int compare_files(const void* a, const void* b) {
+    const FileItem* fa = (const FileItem*)a;
+    const FileItem* fb = (const FileItem*)b;
+
+    // Folders first logic
+    if (g_cfg.sortFoldersFirst) {
+        if (fa->isDir && !fb->isDir) return -1;
+        if (!fa->isDir && fb->isDir) return 1;
+    }
+
+    int res = 0;
+    switch (g_cfg.sortField) {
+        case SORT_DATE_MODIFIED:
+            res = CompareFileTime(&fa->ftLastWrite, &fb->ftLastWrite);
+            break;
+        case SORT_DATE_CREATED:
+            res = CompareFileTime(&fa->ftCreation, &fb->ftCreation);
+            break;
+        case SORT_SIZE:
+            if (fa->fileSize < fb->fileSize) res = -1;
+            else if (fa->fileSize > fb->fileSize) res = 1;
+            break;
+        case SORT_TYPE:
+        {
+            const WCHAR* extA = wcsrchr(fa->name, L'.');
+            const WCHAR* extB = wcsrchr(fb->name, L'.');
+            if (!extA) extA = L"";
+            if (!extB) extB = L"";
+            res = lstrcmpiW(extA, extB);
+            break;
+        }
+        case SORT_NAME:
+        default:
+            res = lstrcmpiW(fa->name, fb->name);
+            break;
+    }
+
+    if (g_cfg.sortDescending) res = -res;
+    
+    // Fallback to name if equal (always ascending for stability)
+    if (res == 0) {
+        res = lstrcmpiW(fa->name, fb->name);
+    }
+    return res;
+}
+
+static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset) {
+    WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
+    PathCombineW(pattern, path, L"*");
+    HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    if (h == INVALID_HANDLE_VALUE) {
+        InsertMenuW(hMenu, insertPos, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(Empty)");
+        return 1;
+    }
+
+    // Collect items
+    FileItem* items = NULL;
+    int count = 0;
+    int capacity = 0;
+
+    do {
+        if (!lstrcmpW(fd.cFileName, L".") || !lstrcmpW(fd.cFileName, L"..")) continue;
+        BOOL isDot = (fd.cFileName[0] == L'.');
+        if (!g_cfg.showHidden && (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)) {
+            if (!(isDot && g_cfg.dotMode > 0)) continue;
+        }
+        if (isDot) {
+            if (g_cfg.dotMode == 0) continue;
+            BOOL isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (isDir && g_cfg.dotMode == 1) continue;
+            if (!isDir && g_cfg.dotMode == 2) continue;
+        }
+
+        if (count >= capacity) {
+            capacity = (capacity == 0) ? 16 : capacity * 2;
+            FileItem* newItems = (FileItem*)LocalAlloc(LMEM_FIXED, capacity * sizeof(FileItem));
+            if (items) {
+                memcpy(newItems, items, count * sizeof(FileItem));
+                LocalFree(items);
+            }
+            items = newItems;
+        }
+        
+        lstrcpynW(items[count].name, fd.cFileName, ARRAYSIZE(items[count].name));
+        PathCombineW(items[count].fullPath, path, fd.cFileName);
+        items[count].isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        items[count].ftLastWrite = fd.ftLastWriteTime;
+        items[count].ftCreation = fd.ftCreationTime;
+        items[count].fileSize = ((unsigned long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        count++;
+
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+
+    if (count == 0) {
+        InsertMenuW(hMenu, insertPos, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(Empty)");
+        if (items) LocalFree(items);
+        return 1;
+    }
+
+    // Sort
+    qsort(items, count, sizeof(FileItem), compare_files);
+
+    // Paging
+    int max = g_cfg.maxItems;
+    if (max <= 0) max = 999999;
+    
+    int start = offset;
+    int end = offset + max;
+    if (start > count) start = count;
+    if (end > count) end = count;
+
+    int added = 0;
+
+    // Populate
+    for (int i = start; i < end; ++i) {
+        if (items[i].isDir) {
+            WCHAR name[260]; get_name_from_path(items[i].fullPath, name, ARRAYSIZE(name));
+            if (depth < g_cfg.folderMaxDepth) {
+                HMENU sub = CreatePopupMenu();
+                AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
+                attach_menu_data(sub, items[i].fullPath, depth + 1, 0);
+                
+                MENUITEMINFOW mii = { sizeof(mii) };
+                mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA;
+                mii.dwTypeData = name;
+                mii.hSubMenu = sub;
+                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+                if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
+                InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+            } else {
+                MENUITEMINFOW mii = { sizeof(mii) };
+                mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
+                mii.dwTypeData = name;
+                mii.wID = g_nextFolderId++;
+                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+                if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
+                InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+                map_add(mii.wID, items[i].fullPath);
+            }
+        } else {
+            WCHAR name[260]; get_name_from_path(items[i].fullPath, name, ARRAYSIZE(name));
+            MENUITEMINFOW mii = { sizeof(mii) };
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
+            mii.dwTypeData = name;
+            mii.wID = g_nextFolderId++;
+            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+            if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
+            InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+            map_add(mii.wID, items[i].fullPath);
+        }
+        added++;
+    }
+
+    if (end < count) {
+        // Show More Items
+        HMENU sub = CreatePopupMenu();
+        AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
+        attach_menu_data(sub, path, depth, end);
+        
+        InsertMenuW(hMenu, insertPos + added, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
+        added++;
+
+        MENUITEMINFOW mii = { sizeof(mii) };
+        mii.fMask = MIIM_STRING | MIIM_SUBMENU;
+        mii.dwTypeData = L"Show more items...";
+        mii.hSubMenu = sub;
+        InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+        added++;
+    }
+
+    if (items) LocalFree(items);
+    return added;
+}
+
+void MenuPerformScroll(HMENU hMenu, HWND hMenuWnd, const WCHAR* path, BOOL up) {
+    // Removed
+}
+
 // Populate a folder submenu lazily (filters only, no sorting)
 static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
     if (!data) return;
@@ -219,60 +414,7 @@ static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
         while (GetMenuItemCount(parent) > 0) DeleteMenu(parent, 0, MF_BYPOSITION);
     }
 
-    if (g_cfg.folderSingleClickOpen && g_cfg.folderShowOpenEntry) {
-        WCHAR name[260]; get_name_from_path(data->path, name, ARRAYSIZE(name));
-        WCHAR label[300]; wsprintfW(label, L"Open %s", name);
-        AppendMenuW(parent, MF_STRING, g_nextFolderId, label); map_add(g_nextFolderId++, data->path);
-        AppendMenuW(parent, MF_SEPARATOR, 0, NULL);
-    }
-
-    WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
-    PathCombineW(pattern, data->path, L"*");
-    HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
-    if (h == INVALID_HANDLE_VALUE) {
-        AppendMenuW(parent, MF_STRING | MF_GRAYED, 0, L"(Empty)");
-        return;
-    }
-    BOOL any = FALSE;
-    do {
-        if (!lstrcmpW(fd.cFileName, L".") || !lstrcmpW(fd.cFileName, L"..")) continue;
-        BOOL isDot = (fd.cFileName[0] == L'.');
-        if (!g_cfg.showHidden && (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)) {
-            // Allow hidden dot items if dotMode permits them; else skip
-            if (!(isDot && g_cfg.dotMode > 0)) continue;
-        }
-        if (isDot) {
-            if (g_cfg.dotMode == 0) continue; // none
-            BOOL isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            if (isDir && g_cfg.dotMode == 1) continue; // files only, skip dot folders
-            if (!isDir && g_cfg.dotMode == 2) continue; // folders only, skip dot files
-        }
-        WCHAR full[MAX_PATH]; PathCombineW(full, data->path, fd.cFileName);
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            WCHAR name[260]; get_name_from_path(full, name, ARRAYSIZE(name));
-            if (data->depth < g_cfg.folderMaxDepth) {
-                HMENU sub = CreatePopupMenu();
-                AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, full, data->depth + 1);
-                AppendMenuW(parent, MF_POPUP, (UINT_PTR)sub, name);
-                MENUITEMINFOW mii = { sizeof(mii) };
-                mii.fMask = MIIM_DATA | MIIM_SUBMENU;
-                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(full) + 1) * sizeof(WCHAR));
-                if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, full);
-                mii.hSubMenu = sub;
-                int pos = GetMenuItemCount(parent) - 1;
-                SetMenuItemInfoW(parent, pos, TRUE, &mii);
-            } else {
-                AppendMenuW(parent, MF_STRING, g_nextFolderId, name); map_add(g_nextFolderId++, full);
-            }
-        } else {
-            WCHAR name[260]; get_name_from_path(full, name, ARRAYSIZE(name));
-            AppendMenuW(parent, MF_STRING, g_nextFolderId, name); map_add(g_nextFolderId++, full);
-        }
-        any = TRUE;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    if (!any) AppendMenuW(parent, MF_STRING | MF_GRAYED, 0, L"(Empty)");
+    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset);
 }
 
 static HMENU build_menu(void) {
@@ -315,7 +457,7 @@ static HMENU build_menu(void) {
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, it->path, 1);
+                attach_menu_data(sub, it->path, 1, 0);
                 AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_DATA | MIIM_SUBMENU;
@@ -326,8 +468,6 @@ static HMENU build_menu(void) {
                 SetMenuItemInfoW(hMenu, pos, TRUE, &mii);
             } else if (it->inlineExpand) {
                 // Inline expand: inject folder entries directly at root at this position
-                // Strategy: enumerate folder (depth=1), apply same filters as populate_folder_menu, no recursion beyond first level
-                WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
                 // Optional header (may be suppressed by future flag)
                 if (it->label[0] && !it->inlineNoHeader) {
                     if (it->inlineOpen) {
@@ -338,48 +478,9 @@ static HMENU build_menu(void) {
                         AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
                     }
                 }
-                PathCombineW(pattern, it->path, L"*");
-                HANDLE hfind = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
-                if (hfind == INVALID_HANDLE_VALUE) {
-                    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"(Empty)");
-                } else {
-                    BOOL any = FALSE;
-                    do {
-                        if (!lstrcmpW(fd.cFileName, L".") || !lstrcmpW(fd.cFileName, L"..")) continue;
-                        BOOL isDot2 = (fd.cFileName[0] == L'.');
-                        if (!g_cfg.showHidden && (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)) {
-                            if (!(isDot2 && g_cfg.dotMode > 0)) continue;
-                        }
-                        if (isDot2) {
-                            if (g_cfg.dotMode == 0) continue;
-                            BOOL isDir2 = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                            if (isDir2 && g_cfg.dotMode == 1) continue;
-                            if (!isDir2 && g_cfg.dotMode == 2) continue;
-                        }
-                        WCHAR full[MAX_PATH]; PathCombineW(full, it->path, fd.cFileName);
-                        WCHAR name[260]; lstrcpynW(name, fd.cFileName, ARRAYSIZE(name));
-                        if (!g_cfg.showExtensions && name[0] != L'.') { WCHAR* dot = wcsrchr(name, L'.'); if (dot) *dot = 0; }
-                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                            // For directories: create a lazy submenu like a normal folder submenu node
-                            HMENU sub = CreatePopupMenu();
-                            AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                            attach_menu_data(sub, full, 2); // depth=2 relative to root expansion
-                            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, name);
-                            MENUITEMINFOW mii = { sizeof(mii) };
-                            mii.fMask = MIIM_DATA | MIIM_SUBMENU;
-                            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(full) + 1) * sizeof(WCHAR));
-                            if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, full);
-                            mii.hSubMenu = sub;
-                            int pos = GetMenuItemCount(hMenu) - 1;
-                            SetMenuItemInfoW(hMenu, pos, TRUE, &mii);
-                        } else {
-                            AppendMenuW(hMenu, MF_STRING, g_nextFolderId, name); map_add(g_nextFolderId++, full);
-                        }
-                        any = TRUE;
-                    } while (FindNextFileW(hfind, &fd));
-                    FindClose(hfind);
-                    if (!any) AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"(Empty)");
-                }
+                
+                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0);
+                
                 // No automatic trailing separator; user controls separators explicitly in config.
             } else {
                 AppendMenuW(hMenu, MF_STRING, id, it->label[0] ? it->label : it->path);
@@ -416,7 +517,7 @@ static HMENU build_menu(void) {
         {
             HMENU sub = CreatePopupMenu();
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-            attach_menu_data(sub, it->path, 1);
+            attach_menu_data(sub, it->path, 1, 0);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
                 const BOOL dark = theme_is_dark();

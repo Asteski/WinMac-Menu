@@ -1,0 +1,209 @@
+#include <windows.h>
+#include "src/resource.h"
+
+// Application icon
+IDI_APPICON ICON "res/app.ico"
+// Themed tray icon variants (now using distinct files). Provide your light/dark artwork here.
+// Ensure both ICOs include at least 16x16 (and optionally 32x32, 48x48) for DPI clarity.
+// Updated tray icons (2025-09-22) — ensure new .ico artwork is embedded
+IDI_TRAY_LIGHT ICON "res/tray_light.ico"
+IDI_TRAY_DARK ICON "res/tray_dark.ico"
+// About dialog specific icon
+IDI_ABOUT_ICON ICON "res/about.ico"
+
+// Version information block
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,6,0,0
+ PRODUCTVERSION 0,6,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName", "Asteski"
+			VALUE "FileDescription", "WinMac Menu"
+			VALUE "FileVersion", "0.6.0"
+			VALUE "InternalName", "WinMacMenu.exe"
+			VALUE "OriginalFilename", "WinMacMenu.exe"
+			VALUE "ProductName", "WinMac Menu"
+			VALUE "ProductVersion", "0.6.0"
+			// Use hex escape for © to avoid potential encoding issues adding stray characters
+			VALUE "LegalCopyright", "\xA9 2025 Asteski"
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x0409, 1200
+	END
+END
+
+// Settings dialog (basic subset of INI options)
+IDD_SETTINGS DIALOGEX 0, 0, 315, 252
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX
+CAPTION "WinMac Menu Settings"
+FONT 9, "Segoe UI", 0, 0, 0x0
+BEGIN
+	CONTROL         "", IDC_SETTINGS_TABS, "SysTabControl32", WS_TABSTOP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 6, 6, 303, 200
+	DEFPUSHBUTTON   "Apply", IDC_APPLY, 120, 217, 60, 16
+	PUSHBUTTON      "Save && Close", IDC_SAVEEXIT, 184, 217, 80, 16
+	PUSHBUTTON      "Cancel", IDC_CANCEL, 268, 217, 44, 16
+END
+
+// General Page
+IDD_PAGE_GENERAL DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	// Single-column general options (more compact)
+	CONTROL         "Run in background", IDC_RUNINBACKGROUND, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 6, 150, 10
+	CONTROL         "Show on launch", IDC_SHOWONLAUNCH, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 18, 150, 10
+	CONTROL         "Start on login", IDC_STARTONLOGIN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 30, 150, 10
+	CONTROL         "Show tray icon", IDC_SHOWTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 42, 150, 10
+	CONTROL         "Show menu icons", IDC_SHOWICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 54, 150, 10
+	CONTROL         "Show folder icons", IDC_SHOWFOLDERICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 66, 150, 10
+	CONTROL         "Show file extensions", IDC_SHOWEXTENSIONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 78, 150, 10
+
+	// Folder depth moved just below list (left column)
+	LTEXT           "Folder depth:", -1, 8, 100, 60, 8
+	EDITTEXT        IDC_FOLDERDEPTH_EDIT, 72, 98, 34, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL         "", IDC_FOLDERDEPTH_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 106, 98, 12, 12
+
+	// Single-line config file label: description + italic filename label adjacent
+	// Tightened spacing between label and filename (reduced width & shifted filename left)
+	LTEXT           "Config file used:", -1, 8, 138, 78, 8
+	LTEXT           "(none)", IDC_CONFIG_FILE_LABEL, 88, 138, 180, 8
+	PUSHBUTTON      "Show config folder", IDC_OPEN_CONFIG_FOLDER, 8, 154, 140, 14
+END
+
+// Placement Page
+IDD_PAGE_PLACEMENT DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+    CONTROL         "Pointer relative", IDC_POINTERRELATIVE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 6, 95, 10
+    LTEXT           "Horizontal:", -1, 8, 22, 50, 8
+    COMBOBOX        IDC_HPLACEMENT_COMBO, 64, 20, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Vertical:", -1, 8, 38, 50, 8
+    COMBOBOX        IDC_VPLACEMENT_COMBO, 64, 36, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "HOffset:", -1, 8, 54, 50, 8
+    EDITTEXT        IDC_HOFFSET_EDIT, 64, 52, 50, 12, ES_NUMBER | WS_TABSTOP
+    LTEXT           "VOffset:", -1, 8, 70, 50, 8
+    EDITTEXT        IDC_VOFFSET_EDIT, 64, 68, 50, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL         "Ignore HOffset when centered", IDC_IGNORE_H_CENTERED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 86, 150, 10
+	CONTROL         "Ignore VOffset when centered", IDC_IGNORE_V_CENTERED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 98, 150, 10
+	CONTROL         "Ignore HOffset when relative", IDC_IGNORE_H_REL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 110, 150, 10
+	CONTROL         "Ignore VOffset when relative", IDC_IGNORE_V_REL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 122, 150, 10
+END
+
+// Menu Page
+IDD_PAGE_MENU DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	// Geometry matched exactly to Icons page: list 220 wide, buttons at x=232 width=82
+	CONTROL         "", IDC_MENU_LIST, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 6, 10, 220, 146
+	PUSHBUTTON      "Add", IDC_MENU_ADD, 232, 10, 82, 20
+	PUSHBUTTON      "Edit", IDC_MENU_EDIT, 232, 34, 82, 20
+	PUSHBUTTON      "Delete", IDC_MENU_DELETE, 232, 58, 82, 20
+	PUSHBUTTON      "Up", IDC_MENU_UP, 232, 92, 82, 20
+	PUSHBUTTON      "Down", IDC_MENU_DOWN, 232, 116, 82, 20
+END
+
+// Icons Page
+IDD_PAGE_ICONS DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	CONTROL         "", IDC_ICONS_LIST, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 6, 10, 220, 146
+	PUSHBUTTON      "Browse main", IDC_ICON_BROWSE_FILE, 232, 10, 82, 20
+	PUSHBUTTON      "Browse light", IDC_ICON_BROWSE_LIGHT, 232, 34, 82, 20
+	PUSHBUTTON      "Browse dark", IDC_ICON_BROWSE_DARK, 232, 58, 82, 20
+	PUSHBUTTON      "Clear", IDC_ICON_CLEAR, 232, 82, 82, 20
+END
+
+// Sorting Page
+IDD_PAGE_SORTING DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "Sort by:", -1, 8, 10, 40, 8
+    COMBOBOX        IDC_SORT_FIELD, 56, 8, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    
+    CONTROL         "Descending order", IDC_SORT_DESCENDING, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 30, 150, 10
+    CONTROL         "Folders first", IDC_SORT_FOLDERSFIRST, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 44, 150, 10
+    
+    LTEXT           "Max items per page:", -1, 8, 64, 80, 8
+    EDITTEXT        IDC_MAXITEMS_EDIT, 96, 62, 40, 12, ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_MAXITEMS_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 136, 62, 12, 12
+END
+
+// Advanced Page
+IDD_PAGE_ADVANCED DIALOGEX 0,0,295,202
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	// Top border for Recent Items section
+	LTEXT          "Recent Items", -1, 6, 8, 60, 8
+	CONTROL        "", -1, "Static", SS_ETCHEDHORZ, 6, 16, 283, 1
+	CONTROL        "Show file extensions", IDC_RECENT_SHOW_EXT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 24, 120, 10
+	CONTROL        "Show 'Clean Recent Items'", IDC_RECENT_SHOW_CLEAN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 38, 140, 10
+	LTEXT          "Recent max:", -1, 150, 24, 50, 8
+	EDITTEXT       IDC_RECENTMAX_EDIT, 210, 22, 34, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL        "", IDC_RECENTMAX_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 244, 22, 12, 12
+	LTEXT          "Name display:", -1, 150, 38, 54, 8
+	COMBOBOX       1702, 210, 36, 46, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+	// Power Options exclusion section (moved up)
+	LTEXT          "Power Menu", -1, 6, 68, 60, 8
+	CONTROL        "", -1, "Static", SS_ETCHEDHORZ, 6, 76, 283, 1
+	LTEXT          "Include power options:", -1, 14, 84, 120, 8
+	CONTROL        "Sleep", IDC_EXCL_SLEEP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 96, 60, 10
+	CONTROL        "Hibernate", IDC_EXCL_HIBERNATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 90, 96, 70, 10
+	CONTROL        "Shut down", IDC_EXCL_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 170, 96, 65, 10
+	CONTROL        "Restart", IDC_EXCL_RESTART, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 110, 60, 10
+	CONTROL        "Lock", IDC_EXCL_LOCK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 90, 110, 50, 10
+	CONTROL        "Log off", IDC_EXCL_LOGOFF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 170, 110, 60, 10
+
+	// Default Icons section (pushed down)
+	LTEXT          "Default Icons", -1, 6, 128, 60, 8
+	CONTROL        "", -1, "Static", SS_ETCHEDHORZ, 6, 136, 283, 1
+	LTEXT          "Default:", -1, 14, 148, 48, 8
+	EDITTEXT       IDC_DEFAULT_ICON, 66, 146, 190, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	PUSHBUTTON     "...", IDC_DEFAULT_BROWSE, 260, 146, 24, 12
+	LTEXT          "Light:", -1, 14, 164, 48, 8
+	EDITTEXT       IDC_DEFAULT_ICON_LIGHT, 66, 162, 190, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	PUSHBUTTON     "...", IDC_DEFAULT_BROWSE_LIGHT, 260, 162, 24, 12
+	LTEXT          "Dark:", -1, 14, 180, 48, 8
+	EDITTEXT       IDC_DEFAULT_ICON_DARK, 66, 178, 190, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	PUSHBUTTON     "...", IDC_DEFAULT_BROWSE_DARK, 260, 178, 24, 12
+	LTEXT          "Leave blank to use embedded app icon.", -1, 14, 194, 220, 8
+END
+
+
+// Item Edit Dialog
+IDD_ITEM_EDIT DIALOGEX 0,0,220,132
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU | WS_VISIBLE
+CAPTION "Edit Item"
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT           "Type:", -1, 6, 8, 40, 8
+	COMBOBOX        IDC_ITEM_TYPE_COMBO, 50, 6, 160, 72, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT           "Label:", -1, 6, 26, 40, 8
+	EDITTEXT        IDC_ITEM_LABEL, 50, 24, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	LTEXT           "Path / URI:", -1, 6, 44, 48, 8
+	EDITTEXT        IDC_ITEM_PATH, 50, 42, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	LTEXT           "Params:", -1, 6, 62, 40, 8
+	EDITTEXT        IDC_ITEM_PARAMS, 50, 60, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	DEFPUSHBUTTON   "OK", IDOK, 70, 100, 40, 14
+	PUSHBUTTON      "Cancel", IDCANCEL, 120, 100, 40, 14
+END

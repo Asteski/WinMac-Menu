@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "generator": "Visual Studio 18 2026",
+      "architecture": {
+        "value": "x64"
+      },
+      "binaryDir": "${sourceDir}/build-x64"
+    },
+    {
+      "name": "arm64-release",
+      "displayName": "ARM64 Release",
+      "generator": "Visual Studio 18 2026",
+      "architecture": {
+        "value": "ARM64"
+      },
+      "binaryDir": "${sourceDir}/build-arm64"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-release",
+  "configurePreset": "x64-release",
+  "configuration": "Release"
+    },
+    {
+      "name": "arm64-release",
+  "configurePreset": "arm64-release",
+  "configuration": "Release"
+    }
+  ]
+}

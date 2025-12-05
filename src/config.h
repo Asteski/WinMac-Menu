@@ -22,6 +22,13 @@ typedef enum {
     CI_POWER_MENU
 } ConfigItemType;
 
+typedef enum {
+    CA_NOTHING = 0,     // Do nothing
+    CA_WINMAC_MENU,     // Show WinMac Menu
+    CA_WINDOWS_MENU,    // Show Windows Start Menu
+    CA_CUSTOM_COMMAND   // Run custom command
+} ControlActionType;
+
 typedef struct ConfigItem {
     WCHAR name[64];
     WCHAR label[128];
@@ -50,6 +57,15 @@ typedef struct Config {
     BOOL showDotfiles; // show items whose name starts with '.'
     // Extended dotfile visibility mode: 0 = none, 1 = files only, 2 = folders only, 3 = both
     int dotMode; // derived from ShowDotfiles string: false=0, true=3, filesonly=1, foldersonly=2
+    
+    // Sorting for inline folders
+    enum { SORT_NAME=0, SORT_DATE_MODIFIED, SORT_DATE_CREATED, SORT_TYPE, SORT_SIZE } sortField;
+    BOOL sortDescending;
+    BOOL sortFoldersFirst;
+    
+    // Paging
+    int maxItems; // Maximum items to show per folder page (0 = unlimited)
+
     // Styles (modern style compiled only when ENABLE_MODERN_STYLE defined)
 #ifdef ENABLE_MODERN_STYLE
     enum { STYLE_LEGACY=0, STYLE_MODERN=1 } menuStyle;
@@ -101,6 +117,11 @@ typedef struct Config {
     BOOL excludeLock;
     BOOL excludeLogoff;
     BOOL excludeHibernate;
+    // Control actions configuration (based on Open-Shell-Menu controls)
+    ControlActionType leftClickAction;     // Left click action
+    WCHAR leftClickCommand[MAX_PATH];      // Custom command for left click (when action = CA_CUSTOM_COMMAND)
+    ControlActionType windowsKeyAction;    // Windows key action
+    WCHAR windowsKeyCommand[MAX_PATH];     // Custom command for Windows key (when action = CA_CUSTOM_COMMAND)
     ConfigItem items[64];
     int count;
 } Config;

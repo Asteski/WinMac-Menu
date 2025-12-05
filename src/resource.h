@@ -45,6 +45,7 @@
 #define IDD_PAGE_ICONS          1202
 #define IDD_PAGE_ADVANCED       1203
 #define IDD_PAGE_PLACEMENT      1204 // new placement page
+#define IDD_PAGE_SORTING        1205 // new sorting page
 
 // Menu page controls
 #define IDC_MENU_LIST           1300
@@ -89,4 +90,11 @@
 #define IDC_EXCL_RESTART        1903
 #define IDC_EXCL_LOCK           1904
 #define IDC_EXCL_LOGOFF         1905
+
+// Sorting page controls
+#define IDC_SORT_FIELD          1600
+#define IDC_SORT_DESCENDING     1601
+#define IDC_SORT_FOLDERSFIRST   1602
+#define IDC_MAXITEMS_EDIT       1603
+#define IDC_MAXITEMS_SPIN       1604
 
