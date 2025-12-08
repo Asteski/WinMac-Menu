@@ -19,7 +19,8 @@ typedef enum {
     CI_POWER_LOGOFF,
     CI_POWER_HIBERNATE,
     CI_RECENT_SUBMENU,
-    CI_POWER_MENU
+    CI_POWER_MENU,
+    CI_TASKKILL
 } ConfigItemType;
 
 typedef enum {
@@ -75,7 +76,7 @@ typedef struct Config {
     WCHAR defaultIconPath[MAX_PATH]; // optional default icon for items without explicit icon
     WCHAR defaultIconPathLight[MAX_PATH]; // optional default icon for light theme
     WCHAR defaultIconPathDark[MAX_PATH];  // optional default icon for dark theme
-    BOOL showIcons; // show icons in legacy style (previously LegacyIcons)
+    int showIcons; // show icons in legacy style (0=false, 1=true, 2=other/mixed)
     // Appearance
     BOOL roundedCorners; // (modern only when enabled) selection corner styling
     // Placement settings
@@ -98,6 +99,14 @@ typedef struct Config {
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
+    BOOL recentShowIcons;      // [General] RecentShowIcons=true shows file icons in recent submenu
+    
+    // TaskKill defaults
+    int taskKillMax;
+    BOOL taskKillIgnoreSystem;
+    BOOL taskKillShowIcons;
+    WCHAR taskKillExcludes[512];
+
     // When PointerRelative = true, optionally ignore H/V offsets
     BOOL ignoreHOffsetWhenRelative; // [Placement] IgnoreOffsetWhenRelative=true|hoffset|voffset|false
     BOOL ignoreVOffsetWhenRelative; // derived from the same key
