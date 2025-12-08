@@ -64,6 +64,7 @@ static void write_default_ini(const WCHAR* path) {
         "TaskKillMax=10\r\n"\
         "TaskKillIgnoreSystem=true\r\n"\
         "TaskKillShowIcons=true\r\n"\
+        "TaskKillListWindows=false\r\n"\
         "TaskKillExcludes=NeXus,NxDock\r\n"\
         "[Placement]\r\n"\
         "PointerRelative=false\r\n"\
@@ -101,6 +102,9 @@ static void write_default_ini(const WCHAR* path) {
         "Icon5=imageres.dll,-5325\r\n"\
         "Icon7=shell32.dll,-327\r\n"\
         "Icon9=shell32.dll,-240\r\n"\
+        "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
+        "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
+        "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
         "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
         "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
         "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
@@ -342,6 +346,10 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"TaskKillShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"General", L"TaskKillListWindows", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillListWindows = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"General", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
 

@@ -105,6 +105,7 @@ typedef struct Config {
     int taskKillMax;
     BOOL taskKillIgnoreSystem;
     BOOL taskKillShowIcons;
+    BOOL taskKillListWindows;
     WCHAR taskKillExcludes[512];
 
     // When PointerRelative = true, optionally ignore H/V offsets

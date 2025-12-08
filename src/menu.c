@@ -453,7 +453,12 @@ typedef struct TaskKillData {
     BOOL showIcons;
     WCHAR** excludes;
     int excludeCount;
+    BOOL listWindows;
+    WCHAR addedNames[64][64];
+    int addedNamesCount;
 } TaskKillData;
+
+static HICON load_icon_path_or_module(const WCHAR* spec);
 
 static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     TaskKillData* data = (TaskKillData*)lParam;
@@ -462,8 +467,10 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     if (!IsWindowVisible(hwnd)) return TRUE;
     
     WCHAR cls[64];
+    BOOL isExplorer = FALSE;
     if (GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) {
         if (lstrcmpiW(cls, L"Shell_TrayWnd") == 0 || lstrcmpiW(cls, L"Progman") == 0) return TRUE;
+        if (lstrcmpiW(cls, L"CabinetWClass") == 0) isExplorer = TRUE;
     }
 
     WCHAR title[256];
@@ -491,13 +498,85 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         DWORD pid = 0;
         GetWindowThreadProcessId(hwnd, &pid);
         
+        WCHAR label[256];
+        lstrcpynW(label, title, ARRAYSIZE(label));
+
+        if (!data->listWindows) {
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (hProcess) {
+                WCHAR path[MAX_PATH];
+                DWORD size = ARRAYSIZE(path);
+                if (QueryFullProcessImageNameW(hProcess, 0, path, &size)) {
+                    // Try to get File Description
+                    DWORD handle;
+                    DWORD verSize = GetFileVersionInfoSizeW(path, &handle);
+                    BOOL gotDescription = FALSE;
+                    if (verSize > 0) {
+                        void* verData = malloc(verSize);
+                        if (verData) {
+                            if (GetFileVersionInfoW(path, handle, verSize, verData)) {
+                                struct LANGANDCODEPAGE {
+                                    WORD wLanguage;
+                                    WORD wCodePage;
+                                } *lpTranslate;
+                                UINT cbTranslate;
+
+                                // Read the list of languages and code pages.
+                                if (VerQueryValueW(verData, L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate)) {
+                                    // Read the file description for each language and code page.
+                                    for( unsigned int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
+                                        WCHAR subBlock[50];
+                                        wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
+                                        
+                                        WCHAR* description = NULL;
+                                        UINT descLen = 0;
+                                        if (VerQueryValueW(verData, subBlock, (LPVOID*)&description, &descLen) && descLen > 0) {
+                                            lstrcpynW(label, description, ARRAYSIZE(label));
+                                            gotDescription = TRUE;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            free(verData);
+                        }
+                    }
+
+                    WCHAR* name = PathFindFileNameW(path);
+                    if (!gotDescription) {
+                        lstrcpynW(label, name, ARRAYSIZE(label));
+                    }
+                    
+                    if (lstrcmpiW(name, L"explorer.exe") == 0) isExplorer = TRUE;
+
+                    // Check duplicates
+                    for (int i = 0; i < data->addedNamesCount; i++) {
+                        if (lstrcmpiW(data->addedNames[i], label) == 0) {
+                            CloseHandle(hProcess);
+                            return TRUE; // Skip duplicate
+                        }
+                    }
+                    
+                    if (data->addedNamesCount < 64) {
+                        lstrcpynW(data->addedNames[data->addedNamesCount++], label, 64);
+                    }
+                }
+                CloseHandle(hProcess);
+            }
+        }
+
         WCHAR cmd[64];
         wsprintfW(cmd, L"TASKKILL:%u", pid);
         
-        AppendMenuW(data->hMenu, MF_STRING, *data->pId, title);
+        AppendMenuW(data->hMenu, MF_STRING, *data->pId, label);
         
         if (data->showIcons) {
-            HICON hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
+            HICON hIcon = NULL;
+            if (isExplorer) {
+                hIcon = load_icon_path_or_module(L"imageres.dll,-5325");
+            }
+
+            if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
             if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);
             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
@@ -521,10 +600,10 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
-static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount) {
+static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows) {
     HMENU sub = CreatePopupMenu();
     UINT id = IDM_TASKKILL_BASE;
-    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount };
+    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, {{0}}, 0 };
     EnumWindows(EnumWindowsProc, (LPARAM)&data);
     if (data.count == 0) {
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
@@ -734,6 +813,7 @@ static HMENU build_menu(void) {
             int max = g_cfg.taskKillMax;
             BOOL ignoreSystem = g_cfg.taskKillIgnoreSystem;
             BOOL showIcons = g_cfg.taskKillShowIcons;
+            BOOL listWindows = g_cfg.taskKillListWindows;
             WCHAR* excludes[32];
             int excludeCount = 0;
             
@@ -784,6 +864,28 @@ static HMENU build_menu(void) {
                                 
                                 if (comma) {
                                     p = comma + 1;
+                                    
+                                    // Check for optional ListWindows boolean
+                                    comma = wcschr(p, L',');
+                                    if (comma) *comma = 0;
+                                    BOOL isBool2 = (lstrcmpiW(p, L"true") == 0 || lstrcmpiW(p, L"false") == 0 || 
+                                                   lstrcmpiW(p, L"1") == 0 || lstrcmpiW(p, L"0") == 0);
+                                    
+                                    if (isBool2) {
+                                        if (lstrcmpiW(p, L"false") == 0 || lstrcmpiW(p, L"0") == 0) listWindows = FALSE;
+                                        else listWindows = TRUE;
+                                        
+                                        if (comma) {
+                                            p = comma + 1;
+                                        } else {
+                                            p = NULL;
+                                        }
+                                    } else {
+                                        // Not a bool, so it's an exclude
+                                        excludes[excludeCount++] = p;
+                                        if (comma) p = comma + 1;
+                                        else p = NULL;
+                                    }
                                 } else {
                                     p = NULL;
                                 }
@@ -809,7 +911,7 @@ static HMENU build_menu(void) {
                 }
             }
             if (max <= 0) max = 10;
-            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount);
+            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Task Kill");
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
