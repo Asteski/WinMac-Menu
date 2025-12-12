@@ -4,7 +4,9 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
+#include <dwmapi.h>
 #include <stdlib.h> // _wtoi
+#pragma comment(lib, "Dwmapi.lib")
 #include "menu.h"
 #include "config.h"
 #include "recent.h"
@@ -17,6 +19,7 @@
 
 #define IDM_DYNAMIC_BASE  1000
 #define IDM_RECENT_BASE   2000
+#define IDM_TASKKILL_BASE 3000
 #define IDM_SIZER         9000
 
 BOOL g_shouldReopenMenu = FALSE;
@@ -59,13 +62,21 @@ static HICON get_item_icon(UINT id) {
     return NULL;
 }
 
+static int get_preferred_icon_size() {
+    HDC hdc = GetDC(NULL);
+    int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+    ReleaseDC(NULL, hdc);
+    return MulDiv(16, dpi, 96);
+}
+
 // Assign an icon (converted to bitmap) to the most recently added item (typically a popup root)
 static void assign_icon_to_last_popup(HMENU hMenu, HICON hico) {
     if (!hico) return;
     int count = GetMenuItemCount(hMenu);
     if (count <= 0) return;
     int pos = count - 1;
-    HBITMAP hb = icon_to_hbmp(hico, 16, 16);
+    int size = get_preferred_icon_size();
+    HBITMAP hb = icon_to_hbmp(hico, size, size);
     if (!hb) return;
     MENUITEMINFOW mii = { sizeof(mii) };
     mii.fMask = MIIM_BITMAP;
@@ -90,11 +101,12 @@ static HICON load_icon_path_or_module(const WCHAR* spec) {
     int idx;
     WCHAR expanded[MAX_PATH];
     UINT extracted;
+    int size = get_preferred_icon_size();
 
     if (!spec || !spec[0]) return NULL;
     comma = wcschr(spec, L',');
     if (!comma) {
-        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE|LR_SHARED);
     }
     // Copy module portion up to (but not including) comma.
     len = (size_t)(comma - spec);
@@ -122,7 +134,7 @@ static HICON load_icon_path_or_module(const WCHAR* spec) {
     }
     extracted = ExtractIconExW(module, idx, &hLarge, &hSmall, 1);
     if (extracted == 0) {
-        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, 16, 16, LR_LOADFROMFILE|LR_SHARED);
+        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE|LR_SHARED);
     }
     if (hLarge) DestroyIcon(hLarge);
     return hSmall;
@@ -157,6 +169,14 @@ static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offs
     mi.fMask = MIM_MENUDATA;
     mi.dwMenuData = (ULONG_PTR)data;
     SetMenuInfo(hMenu, &mi);
+}
+
+static HICON get_file_icon(const WCHAR* path) {
+    SHFILEINFOW sfi = {0};
+    if (SHGetFileInfoW(path, 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
+        return sfi.hIcon;
+    }
+    return NULL;
 }
 
 static HMENU build_recent_submenu(void) {
@@ -195,6 +215,15 @@ static HMENU build_recent_submenu(void) {
             lstrcpynW(text, items[i].path, ARRAYSIZE(text));
         }
         AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + i, text);
+        if (g_cfg.recentShowIcons) {
+            HICON hIcon = get_file_icon(items[i].path);
+            if (hIcon) {
+                add_item_icon(IDM_RECENT_BASE + i, hIcon);
+                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                    assign_legacy_item_bitmap(sub, IDM_RECENT_BASE + i, hIcon);
+                }
+            }
+        }
     }
     if (items) LocalFree(items);
     if (g_cfg.recentShowCleanItems) {
@@ -417,10 +446,200 @@ static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
     fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset);
 }
 
+typedef struct TaskKillData {
+    HMENU hMenu;
+    int count;
+    int max;
+    UINT* pId;
+    BOOL ignoreSystem;
+    BOOL showIcons;
+    WCHAR** excludes;
+    int excludeCount;
+    BOOL listWindows;
+    WCHAR addedNames[64][64];
+    int addedNamesCount;
+} TaskKillData;
+
+static HICON load_icon_path_or_module(const WCHAR* spec);
+
+static BOOL is_user_visible_window(HWND hwnd) {
+    if (!IsWindowVisible(hwnd)) return FALSE;
+
+    LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if ((exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)) return FALSE;
+
+    HWND owner = GetWindow(hwnd, GW_OWNER);
+    if (owner && IsWindowVisible(owner) && !(exStyle & WS_EX_APPWINDOW)) return FALSE;
+
+    BOOL cloaked = FALSE;
+    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) {
+        return FALSE;
+    }
+
+    RECT rc;
+    if (GetWindowRect(hwnd, &rc)) {
+        if ((rc.right - rc.left) <= 1 || (rc.bottom - rc.top) <= 1) return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
+    TaskKillData* data = (TaskKillData*)lParam;
+    if (data->count >= data->max) return FALSE;
+
+    if (!is_user_visible_window(hwnd)) return TRUE;
+    
+    WCHAR cls[64];
+    BOOL isExplorer = FALSE;
+    if (GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) {
+        if (lstrcmpiW(cls, L"Shell_TrayWnd") == 0 || lstrcmpiW(cls, L"Progman") == 0) return TRUE;
+        if (lstrcmpiW(cls, L"CabinetWClass") == 0) isExplorer = TRUE;
+    }
+
+    WCHAR title[256];
+    if (GetWindowTextW(hwnd, title, ARRAYSIZE(title)) > 0) {
+        if (lstrcmpW(title, L"Program Manager") == 0) return TRUE;
+        
+        if (data->ignoreSystem) {
+            if (lstrcmpiW(title, L"Start") == 0) return TRUE;
+            if (lstrcmpiW(title, L"Windows Input Experience") == 0) return TRUE;
+            if (lstrcmpiW(title, L"Search") == 0) return TRUE;
+            if (lstrcmpiW(title, L"Cortana") == 0) return TRUE;
+            // Filter UWP/System classes if needed, but title check covers user request
+            if (lstrcmpiW(cls, L"Windows.UI.Core.CoreWindow") == 0 && 
+               (lstrcmpiW(title, L"Start") == 0 || lstrcmpiW(title, L"Search") == 0 || lstrcmpiW(title, L"Windows Input Experience") == 0)) {
+                return TRUE;
+            }
+        }
+
+        if (data->excludeCount > 0 && data->excludes) {
+            for (int i = 0; i < data->excludeCount; i++) {
+                if (lstrcmpiW(title, data->excludes[i]) == 0) return TRUE;
+            }
+        }
+
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        
+        WCHAR label[256];
+        lstrcpynW(label, title, ARRAYSIZE(label));
+
+        if (!data->listWindows) {
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (hProcess) {
+                WCHAR path[MAX_PATH];
+                DWORD size = ARRAYSIZE(path);
+                if (QueryFullProcessImageNameW(hProcess, 0, path, &size)) {
+                    // Try to get File Description
+                    DWORD handle;
+                    DWORD verSize = GetFileVersionInfoSizeW(path, &handle);
+                    BOOL gotDescription = FALSE;
+                    if (verSize > 0) {
+                        void* verData = malloc(verSize);
+                        if (verData) {
+                            if (GetFileVersionInfoW(path, handle, verSize, verData)) {
+                                struct LANGANDCODEPAGE {
+                                    WORD wLanguage;
+                                    WORD wCodePage;
+                                } *lpTranslate;
+                                UINT cbTranslate;
+
+                                // Read the list of languages and code pages.
+                                if (VerQueryValueW(verData, L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate)) {
+                                    // Read the file description for each language and code page.
+                                    for( unsigned int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
+                                        WCHAR subBlock[50];
+                                        wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
+                                        
+                                        WCHAR* description = NULL;
+                                        UINT descLen = 0;
+                                        if (VerQueryValueW(verData, subBlock, (LPVOID*)&description, &descLen) && descLen > 0) {
+                                            lstrcpynW(label, description, ARRAYSIZE(label));
+                                            gotDescription = TRUE;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            free(verData);
+                        }
+                    }
+
+                    WCHAR* name = PathFindFileNameW(path);
+                    if (!gotDescription) {
+                        lstrcpynW(label, name, ARRAYSIZE(label));
+                    }
+                    
+                    if (lstrcmpiW(name, L"explorer.exe") == 0) isExplorer = TRUE;
+
+                    // Check duplicates
+                    for (int i = 0; i < data->addedNamesCount; i++) {
+                        if (lstrcmpiW(data->addedNames[i], label) == 0) {
+                            CloseHandle(hProcess);
+                            return TRUE; // Skip duplicate
+                        }
+                    }
+                    
+                    if (data->addedNamesCount < 64) {
+                        lstrcpynW(data->addedNames[data->addedNamesCount++], label, 64);
+                    }
+                }
+                CloseHandle(hProcess);
+            }
+        }
+
+        WCHAR cmd[64];
+        wsprintfW(cmd, L"TASKKILL:%u", pid);
+        
+        AppendMenuW(data->hMenu, MF_STRING, *data->pId, label);
+        
+        if (data->showIcons) {
+            HICON hIcon = NULL;
+            if (isExplorer && !data->listWindows) {
+                hIcon = load_icon_path_or_module(L"imageres.dll,-5325");
+            }
+
+            if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
+            if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
+            if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);
+            if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
+
+            if (hIcon) {
+                HICON hCopy = CopyIcon(hIcon);
+                if (hCopy) {
+                    add_item_icon(*data->pId, hCopy);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                        assign_legacy_item_bitmap(data->hMenu, *data->pId, hCopy);
+                    }
+                }
+            }
+        }
+        
+        map_add(*data->pId, cmd);
+        
+        (*data->pId)++;
+        data->count++;
+    }
+    return TRUE;
+}
+
+static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows) {
+    HMENU sub = CreatePopupMenu();
+    UINT id = IDM_TASKKILL_BASE;
+    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, {{0}}, 0 };
+    EnumWindows(EnumWindowsProc, (LPARAM)&data);
+    if (data.count == 0) {
+        AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
+    }
+    return sub;
+}
+
 static HMENU build_menu(void) {
     config_load(&g_cfg);
     HMENU hMenu = CreatePopupMenu();
     g_mapCount = 0; // reset mapping for this menu build
+    g_itemIconCount = 0; // reset icons
     g_nextFolderId = IDM_FOLDER_BASE;
     UINT id = IDM_DYNAMIC_BASE;
     for (int i = 0; i < g_cfg.count; ++i) {
@@ -446,7 +665,7 @@ static HMENU build_menu(void) {
             if (ipath) {
                 HICON hico = load_icon_path_or_module(ipath);
                 add_item_icon(id, hico);
-                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) assign_legacy_item_bitmap(hMenu, id, hico);
+                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) assign_legacy_item_bitmap(hMenu, id, hico);
             }
             id++;
             break;
@@ -507,7 +726,7 @@ static HMENU build_menu(void) {
                 }
                 if (hico) {
                     add_item_icon(id, hico);
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) assign_legacy_item_bitmap(hMenu, id, hico);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) assign_legacy_item_bitmap(hMenu, id, hico);
                 }
                 id++;
             }
@@ -519,7 +738,7 @@ static HMENU build_menu(void) {
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
             attach_menu_data(sub, it->path, 1, 0);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoF = NULL;
                 const WCHAR* ipath = NULL;
@@ -562,7 +781,7 @@ static HMENU build_menu(void) {
         {
             HMENU sub = build_recent_submenu();
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Recent Items");
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoR = NULL;
                 const WCHAR* ipath = NULL;
@@ -598,7 +817,7 @@ static HMENU build_menu(void) {
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
             }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Power");
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoP = NULL;
                 const WCHAR* ipath = NULL;
@@ -610,6 +829,123 @@ static HMENU build_menu(void) {
                 else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                 if (ipath) hicoP = load_icon_path_or_module(ipath);
                 assign_icon_to_last_popup(hMenu, hicoP);
+            }
+            break;
+        }
+        case CI_TASKKILL:
+        {
+            int max = g_cfg.taskKillMax;
+            BOOL ignoreSystem = g_cfg.taskKillIgnoreSystem;
+            BOOL showIcons = g_cfg.taskKillShowIcons;
+            BOOL listWindows = g_cfg.taskKillListWindows;
+            WCHAR* excludes[32];
+            int excludeCount = 0;
+            
+            // Parse global excludes
+            WCHAR globalBuf[512];
+            lstrcpynW(globalBuf, g_cfg.taskKillExcludes, ARRAYSIZE(globalBuf));
+            
+            WCHAR* p = globalBuf;
+            while (*p && excludeCount < 32) {
+                WCHAR* next = wcschr(p, L',');
+                if (next) *next = 0;
+                if (*p) excludes[excludeCount++] = p;
+                if (!next) break;
+                p = next + 1;
+            }
+
+            // Override with item params if present
+            if (it->params[0]) {
+                excludeCount = 0; // Reset excludes if params provided
+                
+                WCHAR buf[256];
+                lstrcpynW(buf, it->params, ARRAYSIZE(buf));
+                p = buf;
+
+                if (*p) {
+                    WCHAR* next = wcschr(p, L',');
+                    if (next) *next = 0;
+                    max = _wtoi(p);
+                    if (next) {
+                        p = next + 1;
+                        next = wcschr(p, L',');
+                        if (next) *next = 0;
+                        if (lstrcmpiW(p, L"true") == 0 || lstrcmpiW(p, L"1") == 0) ignoreSystem = TRUE;
+                        else if (lstrcmpiW(p, L"false") == 0 || lstrcmpiW(p, L"0") == 0) ignoreSystem = FALSE;
+                        
+                        if (next) {
+                            p = next + 1;
+                            
+                            // Check for optional ShowIcons boolean
+                            WCHAR* comma = wcschr(p, L',');
+                            if (comma) *comma = 0;
+                            BOOL isBool = (lstrcmpiW(p, L"true") == 0 || lstrcmpiW(p, L"false") == 0 || 
+                                           lstrcmpiW(p, L"1") == 0 || lstrcmpiW(p, L"0") == 0);
+                            
+                            if (isBool) {
+                                if (lstrcmpiW(p, L"false") == 0 || lstrcmpiW(p, L"0") == 0) showIcons = FALSE;
+                                else showIcons = TRUE;
+                                
+                                if (comma) {
+                                    p = comma + 1;
+                                    
+                                    // Check for optional ListWindows boolean
+                                    comma = wcschr(p, L',');
+                                    if (comma) *comma = 0;
+                                    BOOL isBool2 = (lstrcmpiW(p, L"true") == 0 || lstrcmpiW(p, L"false") == 0 || 
+                                                   lstrcmpiW(p, L"1") == 0 || lstrcmpiW(p, L"0") == 0);
+                                    
+                                    if (isBool2) {
+                                        if (lstrcmpiW(p, L"false") == 0 || lstrcmpiW(p, L"0") == 0) listWindows = FALSE;
+                                        else listWindows = TRUE;
+                                        
+                                        if (comma) {
+                                            p = comma + 1;
+                                        } else {
+                                            p = NULL;
+                                        }
+                                    } else {
+                                        // Not a bool, so it's an exclude
+                                        excludes[excludeCount++] = p;
+                                        if (comma) p = comma + 1;
+                                        else p = NULL;
+                                    }
+                                } else {
+                                    p = NULL;
+                                }
+                            } else {
+                                if (comma) {
+                                    excludes[excludeCount++] = p;
+                                    p = comma + 1;
+                                } else {
+                                    excludes[excludeCount++] = p;
+                                    p = NULL;
+                                }
+                            }
+
+                            while (p && *p && excludeCount < 32) {
+                                next = wcschr(p, L',');
+                                if (next) *next = 0;
+                                excludes[excludeCount++] = p;
+                                if (!next) break;
+                                p = next + 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if (max <= 0) max = 10;
+            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows);
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Task Kill");
+            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                const BOOL dark = theme_is_dark();
+                HICON hico = NULL;
+                const WCHAR* ipath = NULL;
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                if (ipath) hico = load_icon_path_or_module(ipath);
+                assign_icon_to_last_popup(hMenu, hico);
             }
             break;
         }
@@ -721,6 +1057,17 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOCK")) { LockWorkStation(); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { ExitWindowsEx(EWX_LOGOFF, 0); return; }
         if (!lstrcmpiW(g_map[i].path, L"POWER_HIBERNATE")) { system_hibernate(); return; }
+            if (wcsncmp(g_map[i].path, L"TASKKILL:", 9) == 0) {
+                DWORD pid = _wtoi(g_map[i].path + 9);
+                if (pid) {
+                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+                    if (hProcess) {
+                        TerminateProcess(hProcess, 1);
+                        CloseHandle(hProcess);
+                    }
+                }
+                return;
+            }
             open_shell_item(g_map[i].path); return; }
     }
     if (cmd >= IDM_RECENT_BASE && cmd < IDM_RECENT_BASE + 1000) {
@@ -981,9 +1328,15 @@ BOOL MenuOnDrawItem(HWND owner, const DRAWITEMSTRUCT* dis) {
         UINT id = GetMenuItemID(m, idx);
         if (id != (UINT)-1) icon = get_item_icon(id);
     }
+
+    HDC sdc = GetDC(owner);
+    int dpi = GetDeviceCaps(sdc, LOGPIXELSX);
+    ReleaseDC(owner, sdc);
+    int iconSize = MulDiv(16, dpi, 96);
+
     int leftPad = 16;
     if (icon) {
-        int cx=16, cy=16;
+        int cx=iconSize, cy=iconSize;
         int x = rc.left + 8; int y = rc.top + ( (rc.bottom-rc.top) - cy )/2;
         DrawIconEx(hdc, x, y, icon, cx, cy, 0, NULL, DI_NORMAL);
         leftPad = 8 + cx + 8;
@@ -1032,7 +1385,8 @@ static HBITMAP icon_to_hbmp(HICON hico, int cx, int cy) {
 
 static void assign_legacy_item_bitmap(HMENU hMenu, UINT id, HICON hico) {
     if (!hico) return;
-    HBITMAP hb = icon_to_hbmp(hico, 16, 16);
+    int size = get_preferred_icon_size();
+    HBITMAP hb = icon_to_hbmp(hico, size, size);
     if (!hb) return;
     MENUITEMINFOW mii = { sizeof(mii) };
     mii.fMask = MIIM_BITMAP;

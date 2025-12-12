@@ -10,6 +10,9 @@
       "name": "x64-release",
       "displayName": "x64 Release",
       "generator": "Visual Studio 18 2026",
+      "toolset": {
+        "value": "v143"
+      },
       "architecture": {
         "value": "x64"
       },
@@ -19,6 +22,9 @@
       "name": "arm64-release",
       "displayName": "ARM64 Release",
       "generator": "Visual Studio 18 2026",
+      "toolset": {
+        "value": "v143"
+      },
       "architecture": {
         "value": "ARM64"
       },

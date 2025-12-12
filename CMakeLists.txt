@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
+
+if(CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(_vs_output_dir "${CMAKE_BINARY_DIR}/")
+    list(APPEND CMAKE_VS_GLOBALS
+        "BaseOutputPath=${_vs_output_dir}"
+        "BaseIntermediateOutputPath=${_vs_output_dir}"
+    )
+endif()
+
 project(WinMacMenu C)
 
 set(CMAKE_C_STANDARD 11)

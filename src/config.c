@@ -42,71 +42,73 @@ static void trim_inplace(WCHAR* s) {
     }
 }
 
+
 // Write a default config.ini without comments
 static void write_default_ini(const WCHAR* path) {
     const char* ini =
         "[General]\r\n"\
-    "RunInBackground=true\r\n"\
-        "ShowOnLaunch=true\r\n"\
-        "ShowTrayIcon=true\r\n"\
-        "RecentMax=12\r\n"\
         "FolderSubmenuDepth=4\r\n"\
-        "ShowIcons=true\r\n"\
-    "ShowFileExtensions=true\r\n"\
-        "ShowFolderIcons=false\r\n"\
-        "RecentShowExtensions=true\r\n"\
+        "RecentLabel=fullpath\r\n"\
+        "RecentMax=12\r\n"\
         "RecentShowCleanItems=true\r\n"\
-        "ShowHidden=false\r\n"\
+        "RecentShowExtensions=true\r\n"\
+        "RecentShowIcons=true\r\n"\
+        "RunInBackground=true\r\n"\
         "ShowDotfiles=false\r\n"\
-        "MaxItems=40\r\n"\
-    "[Sorting]\r\n"\
-    "SortBy=name\r\n"\
-    "SortDirection=ascending\r\n"\
-    "FoldersFirst=true\r\n"\
-    "[Placement]\r\n"\
-    "PointerRelative=true\r\n"\
-        "Horizontal=center\r\n"\
-        "Vertical=bottom\r\n"\
+        "ShowFileExtensions=true\r\n"\
+        "ShowFolderIcons=false\r\n"\
+        "ShowHidden=false\r\n"\
+        "ShowIcons=other\r\n"\
+        "ShowOnLaunch=false\r\n"\
+        "ShowTrayIcon=true\r\n"\
+        "StartOnLogin=true\r\n"\
+        "TaskKillMax=10\r\n"\
+        "TaskKillIgnoreSystem=true\r\n"\
+        "TaskKillShowIcons=true\r\n"\
+        "TaskKillListWindows=false\r\n"\
+        "TaskKillExcludes=NeXus,NxDock\r\n"\
+        "[Placement]\r\n"\
+        "PointerRelative=false\r\n"\
+        "Horizontal=left\r\n"\
         "HOffset=10\r\n"\
+        "Vertical=top\r\n"\
         "VOffset=10\r\n"\
-        "IgnoreOffsetWhenCentered=HOffset\r\n"\
-        "IgnoreOffsetWhenRelative=true\r\n"\
+        "\r\n"\
         "[Menu]\r\n"\
         "Item1=Apps and Features|URI|ms-settings:appsfeatures\r\n"\
         "Item2=About Windows|URI|winver\r\n"\
-        "Item3=---|SEPARATOR|\r\n"\
+        "Item3=-\r\n"\
         "Item4=System Settings|URI|ms-settings:\r\n"\
-        "Item5=App Store|URI|ms-windows-store://home\r\n"\
-        "Item6=---|SEPARATOR|\r\n"\
-        "Item7=Recent Items|RECENT_SUBMENU|\r\n"\
-        "Item8=---|SEPARATOR|\r\n"\
-        "Item9=File Explorer|URI|explorer\r\n"\
-        "Item10=---|SEPARATOR|\r\n"\
-        "Item11=Sleep|POWER_SLEEP|\r\n"\
-        "Item12=Restart|POWER_RESTART|\r\n"\
-        "Item13=Shut down|POWER_SHUTDOWN|\r\n"\
-        "Item14=---|SEPARATOR|\r\n"\
-        "Item15=Event Viewer|FILE|eventvwr.msc\r\n"\
-        "Item16=Task Scheduler|FILE|taskschd.msc\r\n"\
-        "Item17=Task Manager|FILE|taskmgr\r\n"\
-        "Item18=---|SEPARATOR|\r\n"\
-        "Item19=Lock Screen|POWER_LOCK|\r\n"\
-        "Item20=Log Out %USERNAME%|POWER_LOGOFF|\r\n"\
+        "Item5=File Explorer|URI|explorer\r\n"\
+        "Item6=-\r\n"\
+        "Item7=Recent Items|RECENT\r\n"\
+        "Item8=-\r\n"\
+        "Item9=Force Quit|TASKKILL\r\n"\
+        "Item10=-\r\n"\
+        "Item11=Sleep|POWER_SLEEP\r\n"\
+        "Item12=Restart|POWER_RESTART\r\n"\
+        "Item13=Shut down|POWER_SHUTDOWN\r\n"\
+        "Item14=-\r\n"\
+        "Item15=Event Viewer|URI|eventvwr\r\n"\
+        "Item16=Task Scheduler|URI|taskschd.msc\r\n"\
+        "Item17=Task Manager|URI|taskmgr\r\n"\
+        "Item18=-\r\n"\
+        "Item19=Lock Screen|POWER_LOCK\r\n"\
+        "Item20=Log Out %USERNAME%|POWER_LOGOFF\r\n"\
+        "\r\n"\
         "[Icons]\r\n"\
-    "Icon1=%WINMAC%\\icons\\appsandfeatures.ico\r\n"\
-    "Icon2=%WINMAC%\\icons\\about.ico\r\n"\
-    "Icon4=%WINMAC%\\icons\\settings.ico\r\n"\
-    "Icon9=%WINMAC%\\icons\\explorer.ico\r\n"\
-    "Icon15=%WINMAC%\\icons\\eventvwr.ico\r\n"\
-    "Icon16=%WINMAC%\\icons\\taskschd.ico\r\n"\
-    "Icon17=%WINMAC%\\icons\\taskmgr.ico\r\n"\
-        "[IconsLight]\r\n"\
-    "Icon5=%WINMAC%\\icons\\store_light.ico\r\n"\
-        "[IconsDark]\r\n"\
-    "Icon5=%WINMAC%\\icons\\store_dark.ico\r\n"\
-        "[Control]\r\n"\
-        "LeftClick=WinMacMenu\r\n"\
-        "WindowsKey=WinMacMenu\r\n";
+        "Icon1=shell32.dll,-271\r\n"\
+        "Icon2=shell32.dll,-1001\r\n"\
+        "Icon4=shell32.dll,-16826\r\n"\
+        "Icon5=imageres.dll,-5325\r\n"\
+        "Icon7=shell32.dll,-327\r\n"\
+        "Icon9=shell32.dll,-240\r\n"\
+        "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
+        "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
+        "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
+        "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
+        "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
+        "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
 
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hf != INVALID_HANDLE_VALUE) {
@@ -153,7 +155,9 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"POWER_LOGOFF")) return CI_POWER_LOGOFF;
     if (!lstrcmpiW(s, L"POWER_HIBERNATE")) return CI_POWER_HIBERNATE;
     if (!lstrcmpiW(s, L"RECENT_SUBMENU")) return CI_RECENT_SUBMENU;
+    if (!lstrcmpiW(s, L"RECENT")) return CI_RECENT_SUBMENU;
     if (!lstrcmpiW(s, L"POWER_MENU")) return CI_POWER_MENU;
+    if (!lstrcmpiW(s, L"TASKKILL")) return CI_TASKKILL;
     return CI_SEPARATOR;
 }
 
@@ -304,6 +308,11 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"FolderShowOpenEntry", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->folderShowOpenEntry = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    // Global toggle for showing icons in Recent submenu (default false)
+    GetPrivateProfileStringW(L"General", L"RecentShowIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->recentShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     
     // Sorting options
     GetPrivateProfileStringW(L"Sorting", L"SortBy", L"name", buf, ARRAYSIZE(buf), out->iniPath);
@@ -327,6 +336,24 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"ShowHidden", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->showHidden = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    // TaskKill defaults
+    out->taskKillMax = GetPrivateProfileIntW(L"General", L"TaskKillMax", 10, out->iniPath);
+    
+    GetPrivateProfileStringW(L"General", L"TaskKillIgnoreSystem", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillIgnoreSystem = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"General", L"TaskKillShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"General", L"TaskKillListWindows", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillListWindows = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"General", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
+
     GetPrivateProfileStringW(L"General", L"ShowDotfiles", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     // Accept both dashed and concatenated forms (files-only, folders-only)
@@ -367,7 +394,9 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"ShowIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
     if (!buf[0]) GetPrivateProfileStringW(L"General", L"LegacyIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath); // backward compatibility
     trim_inplace(buf);
-    out->showIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    if (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1")) out->showIcons = 1;
+    else if (!lstrcmpiW(buf, L"other")) out->showIcons = 2;
+    else out->showIcons = 0;
     // Modern-only options (with [General] fallback) - ignored if modern disabled
 #ifdef ENABLE_MODERN_STYLE
     GetPrivateProfileStringW(L"Modern", L"Corners", L"", buf, ARRAYSIZE(buf), out->iniPath);
