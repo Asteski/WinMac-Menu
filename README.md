@@ -95,7 +95,9 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different file names for ini file.
 - INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
+- You can reference either *.dll or *.exe file in [Icons] section as path or jsut a file name (if the file resides in directory defined in %PATH%).
 
 ## Future plans
-- Custom activation shortcuts
-- Sub-menus sorting options
+- custom activation shortcuts
+- rewrite settings page in WinUI3
+- open folder of specific file entry in Recent Items list with middle mouse button
