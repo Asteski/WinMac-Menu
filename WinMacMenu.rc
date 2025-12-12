@@ -14,8 +14,8 @@ IDI_ABOUT_ICON ICON "res/about.ico"
 // Version information block
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,6,0,0
- PRODUCTVERSION 0,6,0,0
+ FILEVERSION 0,7,0,0
+ PRODUCTVERSION 0,7,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -32,11 +32,11 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName", "Asteski"
 			VALUE "FileDescription", "WinMac Menu"
-			VALUE "FileVersion", "0.6.0"
+			VALUE "FileVersion", "0.7.0"
 			VALUE "InternalName", "WinMacMenu.exe"
 			VALUE "OriginalFilename", "WinMacMenu.exe"
 			VALUE "ProductName", "WinMac Menu"
-			VALUE "ProductVersion", "0.6.0"
+			VALUE "ProductVersion", "0.7.0"
 			// Use hex escape for © to avoid potential encoding issues adding stray characters
 			VALUE "LegalCopyright", "\xA9 2025 Asteski"
 		END

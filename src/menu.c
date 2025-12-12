@@ -4,7 +4,9 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
+#include <dwmapi.h>
 #include <stdlib.h> // _wtoi
+#pragma comment(lib, "Dwmapi.lib")
 #include "menu.h"
 #include "config.h"
 #include "recent.h"
@@ -460,11 +462,33 @@ typedef struct TaskKillData {
 
 static HICON load_icon_path_or_module(const WCHAR* spec);
 
+static BOOL is_user_visible_window(HWND hwnd) {
+    if (!IsWindowVisible(hwnd)) return FALSE;
+
+    LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if ((exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)) return FALSE;
+
+    HWND owner = GetWindow(hwnd, GW_OWNER);
+    if (owner && IsWindowVisible(owner) && !(exStyle & WS_EX_APPWINDOW)) return FALSE;
+
+    BOOL cloaked = FALSE;
+    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) {
+        return FALSE;
+    }
+
+    RECT rc;
+    if (GetWindowRect(hwnd, &rc)) {
+        if ((rc.right - rc.left) <= 1 || (rc.bottom - rc.top) <= 1) return FALSE;
+    }
+
+    return TRUE;
+}
+
 static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     TaskKillData* data = (TaskKillData*)lParam;
     if (data->count >= data->max) return FALSE;
 
-    if (!IsWindowVisible(hwnd)) return TRUE;
+    if (!is_user_visible_window(hwnd)) return TRUE;
     
     WCHAR cls[64];
     BOOL isExplorer = FALSE;
@@ -572,7 +596,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         
         if (data->showIcons) {
             HICON hIcon = NULL;
-            if (isExplorer) {
+            if (isExplorer && !data->listWindows) {
                 hIcon = load_icon_path_or_module(L"imageres.dll,-5325");
             }
 

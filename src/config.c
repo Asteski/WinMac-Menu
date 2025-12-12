@@ -42,6 +42,7 @@ static void trim_inplace(WCHAR* s) {
     }
 }
 
+
 // Write a default config.ini without comments
 static void write_default_ini(const WCHAR* path) {
     const char* ini =
