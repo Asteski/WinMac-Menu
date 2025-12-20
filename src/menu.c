@@ -645,7 +645,7 @@ static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIc
 // GUID for shell:UsersFilesFolder {59031a47-3f72-44a7-89c5-5595fe6b30ee}
 static const GUID CLSID_UsersFilesFolder = { 0x59031a47, 0x3f72, 0x44a7, { 0x89, 0xc5, 0x55, 0x95, 0xfe, 0x6b, 0x30, 0xee } };
 
-static int fill_menu_with_home(HMENU hMenu, int insertPos) {
+static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
     CoInitialize(NULL);
 
     IShellFolder* pDesktop = NULL;
@@ -739,7 +739,18 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos) {
             }
 
             // Icon
+            // Determine whether icons are allowed for this item:
+            // - If we're populating a submenu (`isSubmenu`==TRUE), allow icons when HomeShowIcons is enabled and ShowIcons != 0.
+            // - If we're populating the root menu, only allow icons when HomeShowIcons is enabled and ShowIcons == 1 (legacy).
+            BOOL allowIcons = FALSE;
             if (g_cfg.homeShowIcons) {
+                if (isSubmenu) {
+                    if (g_cfg.showIcons != 0) allowIcons = TRUE;
+                } else {
+                    if (g_cfg.showIcons == 1) allowIcons = TRUE;
+                }
+            }
+            if (allowIcons) {
                 HICON hIcon = NULL;
                 LPITEMIDLIST pidlAbs = ILCombine(pidlUsersFiles, pidlItem);
                 SHFILEINFOW sfi = {0};
@@ -752,7 +763,7 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos) {
                     // Register icon for both cases (normal and submenu)
                     add_item_icon(g_nextFolderId - 1, hIcon);
 
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                    if (g_cfg.menuStyle == STYLE_LEGACY) {
                         if (asSubmenu) {
                             int pos = insertPos + added;
                             HBITMAP hbmp = icon_to_hbmp(hIcon, get_preferred_icon_size(), get_preferred_icon_size());
@@ -781,7 +792,7 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos) {
     return added;
 }
 
-static int fill_menu_with_thispc(HMENU hMenu, int insertPos) {
+static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
     WCHAR drives[512];
     if (GetLogicalDriveStringsW(ARRAYSIZE(drives), drives) == 0) {
         InsertMenuW(hMenu, insertPos, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(No drives found)");
@@ -838,7 +849,18 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos) {
             map_add(mii.wID, p);
         }
         
+        // Determine whether icons are allowed for this drive item:
+        // - If populating a submenu (`isSubmenu`), allow icons when ThisPCShowIcons is enabled and ShowIcons != 0.
+        // - If populating the root menu, only allow icons when ThisPCShowIcons is enabled and ShowIcons == 1 (legacy).
+        BOOL allowIcons = FALSE;
         if (g_cfg.thisPCShowIcons) {
+            if (isSubmenu) {
+                if (g_cfg.showIcons != 0) allowIcons = TRUE;
+            } else {
+                if (g_cfg.showIcons == 1) allowIcons = TRUE;
+            }
+        }
+        if (allowIcons) {
             HICON hIcon = NULL;
             SHFILEINFOW sfi = {0};
             if (SHGetFileInfoW(p, 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
@@ -849,7 +871,7 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos) {
                 // Note: For submenu, we just assigned an ID (g_nextFolderId - 1)
                 add_item_icon(g_nextFolderId - 1, hIcon);
 
-                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                if (g_cfg.menuStyle == STYLE_LEGACY) {
                     if (g_cfg.thisPCItemsAsSubmenus) {
                         int pos = insertPos + added;
                         HBITMAP hbmp = icon_to_hbmp(hIcon, get_preferred_icon_size(), get_preferred_icon_size());
@@ -900,11 +922,12 @@ static HMENU build_menu(void) {
             else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
             else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
             else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
-            if (ipath) {
-                HICON hico = load_icon_path_or_module(ipath);
-                add_item_icon(id, hico);
-                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) assign_legacy_item_bitmap(hMenu, id, hico);
-            }
+                if (ipath) {
+                    HICON hico = load_icon_path_or_module(ipath);
+                    // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
+                    if (g_cfg.showIcons == 1) add_item_icon(id, hico);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) assign_legacy_item_bitmap(hMenu, id, hico);
+                }
             id++;
             break;
         }
@@ -963,7 +986,8 @@ static HMENU build_menu(void) {
                     hico = load_icon_path_or_module(ipath);
                 }
                 if (hico) {
-                    add_item_icon(id, hico);
+                    // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
+                    if (g_cfg.showIcons == 1) add_item_icon(id, hico);
                     if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) assign_legacy_item_bitmap(hMenu, id, hico);
                 }
                 id++;
@@ -974,7 +998,7 @@ static HMENU build_menu(void) {
         {
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
-                fill_menu_with_thispc(sub, 0);
+                fill_menu_with_thispc(sub, 0, TRUE);
                 AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"This PC");
                 
                 const BOOL dark = theme_is_dark();
@@ -986,8 +1010,12 @@ static HMENU build_menu(void) {
                 else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                 else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                 if (ipath) {
-                    HICON hico = load_icon_path_or_module(ipath);
-                    assign_icon_to_last_popup(hMenu, hico);
+                    // Only load/assign popup-root icons when icons are enabled (legacy only).
+                    // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
+                    if (g_cfg.showIcons == 1) {
+                        HICON hico = load_icon_path_or_module(ipath);
+                        if (hico) assign_icon_to_last_popup(hMenu, hico);
+                    }
                 }
             } else {
                 if (it->label[0] && !it->inlineNoHeader) {
@@ -998,7 +1026,7 @@ static HMENU build_menu(void) {
                         AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
                     }
                 }
-                fill_menu_with_thispc(hMenu, GetMenuItemCount(hMenu));
+                fill_menu_with_thispc(hMenu, GetMenuItemCount(hMenu), FALSE);
             }
             break;
         }
@@ -1006,7 +1034,7 @@ static HMENU build_menu(void) {
         {
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
-                fill_menu_with_home(sub, 0);
+                fill_menu_with_home(sub, 0, TRUE);
                 AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Home");
                 
                 const BOOL dark = theme_is_dark();
@@ -1018,8 +1046,12 @@ static HMENU build_menu(void) {
                 else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                 else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                 if (ipath) {
-                    HICON hico = load_icon_path_or_module(ipath);
-                    assign_icon_to_last_popup(hMenu, hico);
+                    // Only load/assign popup-root icons when icons are enabled (legacy only).
+                    // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
+                    if (g_cfg.showIcons == 1) {
+                        HICON hico = load_icon_path_or_module(ipath);
+                        if (hico) assign_icon_to_last_popup(hMenu, hico);
+                    }
                 }
             } else {
                 if (it->label[0] && !it->inlineNoHeader) {
@@ -1030,7 +1062,7 @@ static HMENU build_menu(void) {
                         AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
                     }
                 }
-                fill_menu_with_home(hMenu, GetMenuItemCount(hMenu));
+                fill_menu_with_home(hMenu, GetMenuItemCount(hMenu), FALSE);
             }
             break;
         }
