@@ -48,67 +48,85 @@ static void write_default_ini(const WCHAR* path) {
     const char* ini =
         "[General]\r\n"\
         "FolderSubmenuDepth=4\r\n"\
-        "RecentLabel=fullpath\r\n"\
-        "RecentMax=12\r\n"\
-        "RecentShowCleanItems=true\r\n"\
-        "RecentShowExtensions=true\r\n"\
-        "RecentShowIcons=true\r\n"\
         "RunInBackground=true\r\n"\
         "ShowDotfiles=false\r\n"\
         "ShowFileExtensions=true\r\n"\
         "ShowFolderIcons=false\r\n"\
         "ShowHidden=false\r\n"\
-        "ShowIcons=other\r\n"\
-        "ShowOnLaunch=false\r\n"\
+        "ShowIcons=true\r\n"\
+        "ShowOnLaunch=true\r\n"\
         "ShowTrayIcon=true\r\n"\
-        "StartOnLogin=true\r\n"\
-        "TaskKillMax=10\r\n"\
-        "TaskKillIgnoreSystem=true\r\n"\
-        "TaskKillShowIcons=true\r\n"\
-        "TaskKillListWindows=false\r\n"\
-        "TaskKillExcludes=NeXus,NxDock\r\n"\
+        "StartOnLogin=false\r\n"\
+        "\r\n"\
         "[Placement]\r\n"\
-        "PointerRelative=false\r\n"\
-        "Horizontal=left\r\n"\
-        "HOffset=10\r\n"\
-        "Vertical=top\r\n"\
-        "VOffset=10\r\n"\
+        "PointerRelative=true\r\n"\
+        "HOffset=0\r\n"\
+        "VOffset=0\r\n"\
+        "\r\n"\
+        "[Sorting]\r\n"\
+        "SortBy=name\r\n"\
+        "SortDirection=ascending\r\n"\
+        "FoldersFirst=true\r\n"\
         "\r\n"\
         "[Menu]\r\n"\
         "Item1=Apps and Features|URI|ms-settings:appsfeatures\r\n"\
         "Item2=About Windows|URI|winver\r\n"\
-        "Item3=-\r\n"\
+        "Item3=---\r\n"\
         "Item4=System Settings|URI|ms-settings:\r\n"\
-        "Item5=File Explorer|URI|explorer\r\n"\
-        "Item6=-\r\n"\
-        "Item7=Recent Items|RECENT\r\n"\
-        "Item8=-\r\n"\
-        "Item9=Force Quit|TASKKILL\r\n"\
-        "Item10=-\r\n"\
-        "Item11=Sleep|POWER_SLEEP\r\n"\
-        "Item12=Restart|POWER_RESTART\r\n"\
-        "Item13=Shut down|POWER_SHUTDOWN\r\n"\
-        "Item14=-\r\n"\
-        "Item15=Event Viewer|URI|eventvwr\r\n"\
-        "Item16=Task Scheduler|URI|taskschd.msc\r\n"\
-        "Item17=Task Manager|URI|taskmgr\r\n"\
-        "Item18=-\r\n"\
-        "Item19=Lock Screen|POWER_LOCK\r\n"\
-        "Item20=Log Out %USERNAME%|POWER_LOGOFF\r\n"\
+        "Item5=File Explorer|THISPC\r\n"\
+        "Item6=User Profile|HOME\r\n"\
+        "Item7=---\r\n"\
+        "Item8=Recent Items|RECENT\r\n"\
+        "Item9=---\r\n"\
+        "Item10=Force Quit|TASKKILL\r\n"\
+        "Item11=---\r\n"\
+        "Item12=Sleep|POWER_SLEEP\r\n"\
+        "Item13=Restart|POWER_RESTART\r\n"\
+        "Item14=Shut down|POWER_SHUTDOWN\r\n"\
+        "Item15=---\r\n"\
+        "Item16=Event Viewer|URI|eventvwr\r\n"\
+        "Item17=Task Scheduler|URI|taskschd.msc\r\n"\
+        "Item18=Task Manager|URI|taskmgr\r\n"\
+        "Item19=---\r\n"\
+        "Item20=Lock Screen|POWER_LOCK\r\n"\
+        "Item21=Log Out %USERNAME%|POWER_LOGOFF\r\n"\
         "\r\n"\
         "[Icons]\r\n"\
         "Icon1=shell32.dll,-271\r\n"\
         "Icon2=shell32.dll,-1001\r\n"\
         "Icon4=shell32.dll,-16826\r\n"\
         "Icon5=imageres.dll,-5325\r\n"\
-        "Icon7=shell32.dll,-327\r\n"\
-        "Icon9=shell32.dll,-240\r\n"\
-        "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
-        "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
-        "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
-        "Icon15=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-9\r\n"\
-        "Icon16=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\iconres.dll,-18\r\n"\
-        "Icon17=%winmac%\\resource-redirect\\WinMac-yellow-folders\\Windhawk Resources\\taskmgr.dll,-30651\r\n";
+        "Icon6=imageres.dll,-88\r\n"\
+        "Icon8=shell32.dll,-327\r\n"\
+        "Icon10=shell32.dll,-240\r\n"\
+        "Icon16=eventvwr.exe,0\r\n"\
+        "Icon17=powercpl.dll,-513\r\n"\
+        "Icon18=taskmgr.exe,0\r\n"\
+        "\r\n"\
+        "[RecentItems]\r\n"\
+        "RecentLabel=fullpath\r\n"\
+        "RecentMax=12\r\n"\
+        "RecentShowCleanItems=true\r\n"\
+        "RecentShowExtensions=true\r\n"\
+        "RecentShowIcons=true\r\n"\
+        "\r\n"\
+        "[TaskKill]\r\n"\
+        "TaskKillAllDesktops=true\r\n"\
+        "TaskKillExcludes=\r\n"\
+        "TaskKillIgnoreSystem=true\r\n"\
+        "TaskKillListWindows=false\r\n"\
+        "TaskKillMax=24\r\n"\
+        "TaskKillShowIcons=true\r\n"\
+        "\r\n"\
+        "[ThisPC]\r\n"\
+        "ThisPCAsSubmenu=true\r\n"\
+        "ThisPCItemsAsSubmenus=true\r\n"\
+        "ThisPCShowIcons=true\r\n"\
+        "\r\n"\
+        "[Home]\r\n"\
+        "HomeAsSubmenu=true\r\n"\
+        "HomeItemsAsSubmenus=true\r\n"\
+        "HomeShowIcons=true\r\n";
 
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hf != INVALID_HANDLE_VALUE) {
@@ -158,6 +176,8 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"RECENT")) return CI_RECENT_SUBMENU;
     if (!lstrcmpiW(s, L"POWER_MENU")) return CI_POWER_MENU;
     if (!lstrcmpiW(s, L"TASKKILL")) return CI_TASKKILL;
+    if (!lstrcmpiW(s, L"THISPC")) return CI_THISPC;
+    if (!lstrcmpiW(s, L"HOME")) return CI_HOME;
     return CI_SEPARATOR;
 }
 
@@ -214,19 +234,45 @@ static int parse_menu(Config* cfg) {
     it->iconPathLight[0] = 0;
     it->iconPathDark[0] = 0;
         it->submenu = (it->type == CI_FOLDER_SUBMENU || it->type == CI_RECENT_SUBMENU);
+        if (it->type == CI_THISPC && cfg->thisPCAsSubmenu) it->submenu = TRUE;
+        if (it->type == CI_HOME && cfg->homeAsSubmenu) it->submenu = TRUE;
+
         // Allow FOLDER items to set mode via 4th field: "submenu" or "link"
-        if (it->type == CI_FOLDER && it->params[0]) {
+        if ((it->type == CI_FOLDER || it->type == CI_THISPC || it->type == CI_HOME) && it->params[0]) {
             WCHAR pLower[256]; lstrcpynW(pLower, it->params, ARRAYSIZE(pLower));
             for (WCHAR* q=pLower; *q; ++q) *q = (WCHAR)towlower(*q);
             if (wcsstr(pLower, L"submenu")) it->submenu = TRUE;
             else if (wcsstr(pLower, L"link")) it->submenu = FALSE;
+            
             // Experimental inline expansion: include token "inline" to inject folder contents at root
-            if (wcsstr(pLower, L"inline")) it->inlineExpand = TRUE; else it->inlineExpand = FALSE;
-            if (it->inlineExpand && (wcsstr(pLower, L"notitle") || wcsstr(pLower, L"noheader"))) it->inlineNoHeader = TRUE; else it->inlineNoHeader = FALSE;
+            if (wcsstr(pLower, L"inline")) it->inlineExpand = TRUE; 
+            else if ((it->type == CI_THISPC || it->type == CI_HOME) && !it->submenu) it->inlineExpand = TRUE; // THISPC/HOME defaults to inline
+            else it->inlineExpand = FALSE;
+
+            if (it->inlineExpand) {
+                BOOL explicitNoTitle = (wcsstr(pLower, L"notitle") || wcsstr(pLower, L"noheader"));
+                if (explicitNoTitle) {
+                    it->inlineNoHeader = TRUE;
+                } else if (wcsstr(pLower, L"title")) {
+                    it->inlineNoHeader = FALSE;
+                } else {
+                    // Default behavior if neither specified
+                    if (it->type == CI_THISPC || it->type == CI_HOME) it->inlineNoHeader = TRUE; // Default hidden for THISPC/HOME
+                    else it->inlineNoHeader = FALSE; // Default shown for FOLDER
+                }
+            } else {
+                it->inlineNoHeader = FALSE;
+            }
+
             if (it->inlineExpand && wcsstr(pLower, L"inlineopen")) it->inlineOpen = TRUE; else it->inlineOpen = FALSE;
         } else if (it->type == CI_FOLDER) {
             it->inlineExpand = FALSE;
             it->inlineNoHeader = FALSE;
+            it->inlineOpen = FALSE;
+        } else if (it->type == CI_THISPC || it->type == CI_HOME) {
+            // Default to inline/notitle for THISPC/HOME if no params provided
+            it->inlineExpand = TRUE;
+            it->inlineNoHeader = TRUE;
             it->inlineOpen = FALSE;
         } else {
             it->inlineExpand = FALSE; // non-folder
@@ -296,7 +342,7 @@ BOOL config_load(Config* out) {
     trim_inplace(buf);
     out->startOnLogin = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    out->recentMax = GetPrivateProfileIntW(L"General", L"RecentMax", 12, out->iniPath);
+    out->recentMax = GetPrivateProfileIntW(L"RecentItems", L"RecentMax", 12, out->iniPath);
     out->folderMaxDepth = GetPrivateProfileIntW(L"General", L"FolderSubmenuDepth", 4, out->iniPath);
     if (out->folderMaxDepth < 1) out->folderMaxDepth = 1; if (out->folderMaxDepth > 4) out->folderMaxDepth = 4;
     
@@ -310,7 +356,7 @@ BOOL config_load(Config* out) {
     out->folderShowOpenEntry = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     // Global toggle for showing icons in Recent submenu (default false)
-    GetPrivateProfileStringW(L"General", L"RecentShowIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"RecentShowIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->recentShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     
@@ -338,21 +384,49 @@ BOOL config_load(Config* out) {
     out->showHidden = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     // TaskKill defaults
-    out->taskKillMax = GetPrivateProfileIntW(L"General", L"TaskKillMax", 10, out->iniPath);
+    out->taskKillMax = GetPrivateProfileIntW(L"TaskKill", L"TaskKillMax", 10, out->iniPath);
     
-    GetPrivateProfileStringW(L"General", L"TaskKillIgnoreSystem", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillIgnoreSystem", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillIgnoreSystem = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"General", L"TaskKillShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"General", L"TaskKillListWindows", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillListWindows", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillListWindows = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"General", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillAllDesktops", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillAllDesktops = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
+
+    GetPrivateProfileStringW(L"ThisPC", L"ThisPCItemsAsSubmenus", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->thisPCItemsAsSubmenus = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"ThisPC", L"ThisPCShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->thisPCShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"ThisPC", L"ThisPCAsSubmenu", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->thisPCAsSubmenu = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Home", L"HomeItemsAsSubmenus", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->homeItemsAsSubmenus = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Home", L"HomeShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->homeShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Home", L"HomeAsSubmenu", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->homeAsSubmenu = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"General", L"ShowDotfiles", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -493,7 +567,7 @@ BOOL config_load(Config* out) {
         PathAppendW(out->logFilePath, fname);
     }
     // RecentLabel (default fullpath). Accept synonyms: full, fullpath, path, name, filename, file, leaf
-    GetPrivateProfileStringW(L"General", L"RecentLabel", L"fullpath", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"RecentLabel", L"fullpath", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!lstrcmpiW(buf, L"name") || !lstrcmpiW(buf, L"filename") || !lstrcmpiW(buf, L"file") || !lstrcmpiW(buf, L"leaf")) out->recentLabelMode = 1; else out->recentLabelMode = 0;
     // ShowFileExtensions (default true). Backward compatibility: ShowExtensions (old) and HideExtensions (legacy inverse).
@@ -526,7 +600,7 @@ BOOL config_load(Config* out) {
     trim_inplace(buf);
     out->showFolderIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // RecentShowExtensions (default true). Back compat: RecentHideExtensions overrides if present.
-    GetPrivateProfileStringW(L"General", L"RecentShowExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"RecentShowExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     BOOL haveRecentShow = buf[0] != 0;
     BOOL recentShow = TRUE;
@@ -534,7 +608,7 @@ BOOL config_load(Config* out) {
         recentShow = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     }
     WCHAR tmpOldR[32]; tmpOldR[0]=0;
-    GetPrivateProfileStringW(L"General", L"RecentHideExtensions", L"", tmpOldR, ARRAYSIZE(tmpOldR), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"RecentHideExtensions", L"", tmpOldR, ARRAYSIZE(tmpOldR), out->iniPath);
     trim_inplace(tmpOldR);
     if (tmpOldR[0]) {
         BOOL hideOldR = (!lstrcmpiW(tmpOldR, L"true") || !lstrcmpiW(tmpOldR, L"1"));
@@ -542,7 +616,7 @@ BOOL config_load(Config* out) {
     }
     out->recentShowExtensions = recentShow;
     // RecentShowCleanItems flag (default true)
-    GetPrivateProfileStringW(L"General", L"RecentShowCleanItems", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"RecentShowCleanItems", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->recentShowCleanItems = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // Themed tray icon optional paths
@@ -600,7 +674,7 @@ BOOL config_load(Config* out) {
     if (out->logLevel > 0) {
         WCHAR msg[4096];
         wsprintfW(msg,
-            L"[WinMacMenu Config]\n Level=%d Style=%s ShowIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d ShowFolderIcons=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
+            L"[WinMacMenu Config]\n Level=%d Style=%s ShowIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d ShowFolderIcons=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n ThisPCSubmenus=%d ThisPCAsSubmenu=%d HomeAsSubmenu=%d TaskKillAllDesktops=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
             out->logLevel,
             out->menuStyle==0?L"legacy":L"modern",
             out->showIcons,
@@ -629,6 +703,10 @@ BOOL config_load(Config* out) {
             out->vPlacement,
             out->hOffset,
             out->vOffset,
+            out->thisPCItemsAsSubmenus,
+            out->thisPCAsSubmenu,
+            out->homeAsSubmenu,
+            out->taskKillAllDesktops,
             out->iniPath,
             out->logFolderPath,
             out->logFilePath);

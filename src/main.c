@@ -25,6 +25,7 @@ typedef enum {
     CLI_MODE_RELOAD,        // Reload specific PID
     CLI_MODE_SHUTDOWN,      // Shutdown specific PID
     CLI_MODE_SETTINGS,      // Open settings for specific PID
+    CLI_MODE_OPEN_INI,      // Open ini file for specific PID
     CLI_MODE_HELP           // Show help
 } CliModeType;
 
@@ -318,6 +319,26 @@ static BOOL cli_settings_pid(DWORD pid) {
     return TRUE;
 }
 
+// CLI implementation: Open ini file for specific PID
+static BOOL cli_open_ini_pid(DWORD pid) {
+    HWND hwnd = NULL;
+    WCHAR title[260] = {0};
+    
+    if (!find_winmacmenu_window_by_pid(pid, &hwnd, title, ARRAYSIZE(title))) {
+        wprintf(L"Error: No WinMacMenu session found with PID %lu\n", pid);
+        return FALSE;
+    }
+    
+    wprintf(L"Opening ini file for WinMacMenu session (PID: %lu, Title: %s)...\n", pid, title);
+    
+    // Send the open ini command directly using WM_COMMAND
+    // From the code, open ini is menu item 10011
+    PostMessageW(hwnd, WM_COMMAND, 10011, 0);
+    
+    wprintf(L"Open ini file request sent successfully.\n");
+    return TRUE;
+}
+
 // CLI implementation: Show help
 static void cli_show_help(void) {
     wprintf(L"WinMacMenu - Command Line Interface\n");
@@ -330,6 +351,7 @@ static void cli_show_help(void) {
     wprintf(L"  --reload <pid>, -r      Reload specific session by PID\n");
     wprintf(L"  --shutdown <pid>, -k    Shutdown specific session by PID\n");
     wprintf(L"  --settings <pid>, -s    Open settings for specific session by PID\n");
+    wprintf(L"  --open-ini <pid>, -o    Open ini file for specific session by PID\n");
     wprintf(L"  --help, -h, /?          Show this help message\n\n");
     wprintf(L"Examples:\n");
     wprintf(L"  WinMacMenu.exe --list\n");
@@ -342,6 +364,8 @@ static void cli_show_help(void) {
     wprintf(L"  WinMacMenu.exe -k 1234\n");
     wprintf(L"  WinMacMenu.exe --settings 1234\n");
     wprintf(L"  WinMacMenu.exe -s 1234\n");
+    wprintf(L"  WinMacMenu.exe --open-ini 1234\n");
+    wprintf(L"  WinMacMenu.exe -o 1234\n");
     wprintf(L"  WinMacMenu.exe --config \"custom.ini\"\n\n");
     wprintf(L"When run without CLI options, WinMacMenu starts normally in GUI mode.\n");
 }
@@ -646,6 +670,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             AppendMenuW(m, MF_STRING, 10009, iconsLabel);
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
             AppendMenuW(m, MF_STRING, 10005, L"Settings");
+            AppendMenuW(m, MF_STRING, 10011, L"Open ini file");
             AppendMenuW(m, MF_STRING, 10006, L"Help");
             AppendMenuW(m, MF_STRING, 10007, L"About");
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
@@ -715,6 +740,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         tray_reload(hWnd);
                     }
                 }
+            } else if (cmd == 10011) {
+                ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10006) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
@@ -722,7 +749,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.7.0"));
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.8.0"));
                 MSGBOXPARAMSW mbp = {0};
                 mbp.cbSize = sizeof(mbp);
                 mbp.hwndOwner = hWnd;
@@ -830,6 +857,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
             return 0;
+        } else if (LOWORD(wParam) == 10011) {
+            // Open ini file command
+            ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
+            return 0;
         }
         MenuExecuteCommand(hWnd, (UINT)LOWORD(wParam));
         return 0;
@@ -869,6 +900,7 @@ static BOOL cli_list_sessions(OutputFormat outputFormat);
 static BOOL cli_reload_pid(DWORD pid);
 static BOOL cli_shutdown_pid(DWORD pid);
 static BOOL cli_settings_pid(DWORD pid);
+static BOOL cli_open_ini_pid(DWORD pid);
 static void cli_show_help(void);
 static BOOL find_winmacmenu_window_by_pid(DWORD pid, HWND* outHwnd, WCHAR* outTitle, size_t titleSize);
 
@@ -914,6 +946,16 @@ static BOOL parse_cli_args(CliArgs* args) {
         }
         else if ((!lstrcmpiW(argv[i], L"--settings") || !lstrcmpiW(argv[i], L"-s")) && i + 1 < argc) {
             args->mode = CLI_MODE_SETTINGS;
+            args->targetPid = _wtoi(argv[i + 1]);
+            if (args->targetPid == 0) {
+                wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
+                result = FALSE;
+                break;
+            }
+            ++i; // Skip next argument
+        }
+        else if ((!lstrcmpiW(argv[i], L"--open-ini") || !lstrcmpiW(argv[i], L"-o")) && i + 1 < argc) {
+            args->mode = CLI_MODE_OPEN_INI;
             args->targetPid = _wtoi(argv[i + 1]);
             if (args->targetPid == 0) {
                 wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
@@ -982,6 +1024,9 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
                 break;
             case CLI_MODE_SETTINGS:
                 success = cli_settings_pid(cliArgs.targetPid);
+                break;
+            case CLI_MODE_OPEN_INI:
+                success = cli_open_ini_pid(cliArgs.targetPid);
                 break;
             case CLI_MODE_HELP:
                 cli_show_help();

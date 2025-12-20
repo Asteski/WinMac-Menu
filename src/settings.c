@@ -220,10 +220,10 @@ static BOOL Sorting_Save(HWND pg, Config* c){
     if(c->iniPath[0]){
         const WCHAR* fields[] = {L"name", L"date", L"created", L"size", L"type"};
         if(c->sortField >= 0 && c->sortField < 5)
-            WritePrivateProfileStringW(L"General",L"Sort",fields[c->sortField],c->iniPath);
+            WritePrivateProfileStringW(L"Sorting",L"SortBy",fields[c->sortField],c->iniPath);
             
-        WritePrivateProfileStringW(L"General",L"SortDescending",c->sortDescending?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"SortFoldersFirst",c->sortFoldersFirst?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Sorting",L"SortDirection",c->sortDescending?L"descending":L"ascending",c->iniPath);
+        WritePrivateProfileStringW(L"Sorting",L"FoldersFirst",c->sortFoldersFirst?L"true":L"false",c->iniPath);
         
         WCHAR buf[32];
         wsprintfW(buf,L"%d",c->maxItems);
@@ -236,6 +236,9 @@ static BOOL Sorting_Save(HWND pg, Config* c){
 static void Advanced_Load(HWND pg, Config* c){
     set_check(pg,IDC_RECENT_SHOW_EXT,c->recentShowExtensions);
     set_check(pg,IDC_RECENT_SHOW_CLEAN,c->recentShowCleanItems);
+    set_check(pg,IDC_THISPC_AS_SUBMENU,c->thisPCAsSubmenu);
+    set_check(pg,IDC_HOME_AS_SUBMENU,c->homeAsSubmenu);
+    set_check(pg,IDC_TASKKILL_ALL_DESKTOPS,c->taskKillAllDesktops);
     // Power exclusions
     // Checkboxes now represent inclusion (checked = include), so invert exclude flags
     set_check(pg,IDC_EXCL_SLEEP,!c->excludeSleep);
@@ -262,6 +265,9 @@ static BOOL Advanced_Save(HWND pg, Config* c){
     BOOL ch=FALSE; BOOL b;
     b=get_check(pg,IDC_RECENT_SHOW_EXT); if(c->recentShowExtensions!=b){c->recentShowExtensions=b;ch=TRUE;}
     b=get_check(pg,IDC_RECENT_SHOW_CLEAN); if(c->recentShowCleanItems!=b){c->recentShowCleanItems=b;ch=TRUE;}
+    b=get_check(pg,IDC_THISPC_AS_SUBMENU); if(c->thisPCAsSubmenu!=b){c->thisPCAsSubmenu=b;ch=TRUE;}
+    b=get_check(pg,IDC_HOME_AS_SUBMENU); if(c->homeAsSubmenu!=b){c->homeAsSubmenu=b;ch=TRUE;}
+    b=get_check(pg,IDC_TASKKILL_ALL_DESKTOPS); if(c->taskKillAllDesktops!=b){c->taskKillAllDesktops=b;ch=TRUE;}
     // Power inclusion checkboxes (checked = include). Store as exclusion flags internally.
     b=!get_check(pg,IDC_EXCL_SLEEP); if(c->excludeSleep!=b){c->excludeSleep=b; ch=TRUE;}
     b=!get_check(pg,IDC_EXCL_HIBERNATE); if(c->excludeHibernate!=b){c->excludeHibernate=b; ch=TRUE;}
@@ -282,10 +288,13 @@ static BOOL Advanced_Save(HWND pg, Config* c){
     if(GetDlgItemTextW(pg,IDC_DEFAULT_ICON_DARK,buf,ARRAYSIZE(buf))){ if(lstrcmpW(buf,c->defaultIconPathDark)!=0){ lstrcpynW(c->defaultIconPathDark,buf,ARRAYSIZE(c->defaultIconPathDark)); ch=TRUE; }}
     if(!ch) return FALSE;
     if(c->iniPath[0]){
-        WritePrivateProfileStringW(L"General",L"RecentShowExtensions",c->recentShowExtensions?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"RecentShowCleanItems",c->recentShowCleanItems?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"RecentLabel", c->recentLabelMode==0?L"fullpath":L"name", c->iniPath);
-        WCHAR num[32]; wsprintfW(num,L"%d",c->recentMax); WritePrivateProfileStringW(L"General",L"RecentMax",num,c->iniPath);
+        WritePrivateProfileStringW(L"RecentItems",L"RecentShowExtensions",c->recentShowExtensions?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"RecentItems",L"RecentShowCleanItems",c->recentShowCleanItems?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"RecentItems",L"RecentLabel", c->recentLabelMode==0?L"fullpath":L"name", c->iniPath);
+        WritePrivateProfileStringW(L"ThisPC",L"ThisPCAsSubmenu",c->thisPCAsSubmenu?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Home",L"HomeAsSubmenu",c->homeAsSubmenu?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"TaskKill",L"TaskKillAllDesktops",c->taskKillAllDesktops?L"true":L"false",c->iniPath);
+        WCHAR num[32]; wsprintfW(num,L"%d",c->recentMax); WritePrivateProfileStringW(L"RecentItems",L"RecentMax",num,c->iniPath);
         WritePrivateProfileStringW(L"General",L"DefaultIcon",c->defaultIconPath,c->iniPath);
         WritePrivateProfileStringW(L"General",L"DefaultIconLight",c->defaultIconPathLight,c->iniPath);
         WritePrivateProfileStringW(L"General",L"DefaultIconDark",c->defaultIconPathDark,c->iniPath);
