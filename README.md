@@ -54,6 +54,10 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 - [Power] exclude specific power options
 - [Sorting] sort folder content
+- [RecentItems] item settings
+- [TaskKill] item settings
+- [ThisPC]item settings
+- [Home] item settings
 - [Logging]
 
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
