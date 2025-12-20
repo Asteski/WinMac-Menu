@@ -20,7 +20,9 @@ typedef enum {
     CI_POWER_HIBERNATE,
     CI_RECENT_SUBMENU,
     CI_POWER_MENU,
-    CI_TASKKILL
+    CI_TASKKILL,
+    CI_THISPC,
+    CI_HOME
 } ConfigItemType;
 
 typedef enum {
@@ -106,6 +108,7 @@ typedef struct Config {
     BOOL taskKillIgnoreSystem;
     BOOL taskKillShowIcons;
     BOOL taskKillListWindows;
+    BOOL taskKillAllDesktops;
     WCHAR taskKillExcludes[512];
 
     // When PointerRelative = true, optionally ignore H/V offsets
@@ -132,6 +135,12 @@ typedef struct Config {
     WCHAR leftClickCommand[MAX_PATH];      // Custom command for left click (when action = CA_CUSTOM_COMMAND)
     ControlActionType windowsKeyAction;    // Windows key action
     WCHAR windowsKeyCommand[MAX_PATH];     // Custom command for Windows key (when action = CA_CUSTOM_COMMAND)
+    BOOL thisPCItemsAsSubmenus; // [General] ThisPCItemsAsSubmenus=true|false (default true)
+    BOOL thisPCShowIcons;       // [General] ThisPCShowIcons=true|false (default true)
+    BOOL thisPCAsSubmenu;       // [ThisPC] ThisPCAsSubmenu=true|false (default false)
+    BOOL homeItemsAsSubmenus;   // [General] HomeItemsAsSubmenus=true|false (default true)
+    BOOL homeShowIcons;         // [General] HomeShowIcons=true|false (default true)
+    BOOL homeAsSubmenu;         // [Home] HomeAsSubmenu=true|false (default false)
     ConfigItem items[64];
     int count;
 } Config;

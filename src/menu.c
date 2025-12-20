@@ -33,10 +33,11 @@ typedef struct FolderMenuData {
     WCHAR path[MAX_PATH];
     int depth;
     int offset;
+    BOOL forceLinks;
 } FolderMenuData;
 
 // Forward declaration
-static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset);
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks);
 
 
 static Config g_cfg; // loaded on demand
@@ -159,12 +160,13 @@ static void map_add(UINT id, const WCHAR* path) {
     }
 }
 
-static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset) {
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks) {
     FolderMenuData* data = (FolderMenuData*)LocalAlloc(LMEM_FIXED|LMEM_ZEROINIT, sizeof(FolderMenuData));
     if (!data) return;
     lstrcpynW(data->path, path, ARRAYSIZE(data->path));
     data->depth = depth;
     data->offset = offset;
+    data->forceLinks = forceLinks;
     MENUINFO mi = { sizeof(mi) };
     mi.fMask = MIM_MENUDATA;
     mi.dwMenuData = (ULONG_PTR)data;
@@ -297,7 +299,7 @@ static int compare_files(const void* a, const void* b) {
     return res;
 }
 
-static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset) {
+static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset, BOOL forceLinks) {
     WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
     PathCombineW(pattern, path, L"*");
     HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
@@ -369,10 +371,10 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
     for (int i = start; i < end; ++i) {
         if (items[i].isDir) {
             WCHAR name[260]; get_name_from_path(items[i].fullPath, name, ARRAYSIZE(name));
-            if (depth < g_cfg.folderMaxDepth) {
+            if (!forceLinks && depth < g_cfg.folderMaxDepth) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, items[i].fullPath, depth + 1, 0);
+                attach_menu_data(sub, items[i].fullPath, depth + 1, 0, FALSE);
                 
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA;
@@ -409,7 +411,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
         // Show More Items
         HMENU sub = CreatePopupMenu();
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-        attach_menu_data(sub, path, depth, end);
+        attach_menu_data(sub, path, depth, end, forceLinks);
         
         InsertMenuW(hMenu, insertPos + added, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
         added++;
@@ -443,7 +445,7 @@ static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
         while (GetMenuItemCount(parent) > 0) DeleteMenu(parent, 0, MF_BYPOSITION);
     }
 
-    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset);
+    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset, data->forceLinks);
 }
 
 typedef struct TaskKillData {
@@ -456,13 +458,14 @@ typedef struct TaskKillData {
     WCHAR** excludes;
     int excludeCount;
     BOOL listWindows;
+    BOOL allDesktops;
     WCHAR addedNames[64][64];
     int addedNamesCount;
 } TaskKillData;
 
 static HICON load_icon_path_or_module(const WCHAR* spec);
 
-static BOOL is_user_visible_window(HWND hwnd) {
+static BOOL is_user_visible_window(HWND hwnd, BOOL allowCloakedShell) {
     if (!IsWindowVisible(hwnd)) return FALSE;
 
     LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -471,9 +474,13 @@ static BOOL is_user_visible_window(HWND hwnd) {
     HWND owner = GetWindow(hwnd, GW_OWNER);
     if (owner && IsWindowVisible(owner) && !(exStyle & WS_EX_APPWINDOW)) return FALSE;
 
-    BOOL cloaked = FALSE;
+    DWORD cloaked = 0;
     if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) {
-        return FALSE;
+        if (allowCloakedShell && cloaked == DWM_CLOAKED_SHELL) {
+            // Allow windows cloaked by shell (virtual desktops)
+        } else {
+            return FALSE;
+        }
     }
 
     RECT rc;
@@ -488,7 +495,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     TaskKillData* data = (TaskKillData*)lParam;
     if (data->count >= data->max) return FALSE;
 
-    if (!is_user_visible_window(hwnd)) return TRUE;
+    if (!is_user_visible_window(hwnd, data->allDesktops)) return TRUE;
     
     WCHAR cls[64];
     BOOL isExplorer = FALSE;
@@ -624,15 +631,246 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
-static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows) {
+static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows, BOOL allDesktops) {
     HMENU sub = CreatePopupMenu();
     UINT id = IDM_TASKKILL_BASE;
-    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, {{0}}, 0 };
+    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, allDesktops, {{0}}, 0 };
     EnumWindows(EnumWindowsProc, (LPARAM)&data);
     if (data.count == 0) {
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
     }
     return sub;
+}
+
+// GUID for shell:UsersFilesFolder {59031a47-3f72-44a7-89c5-5595fe6b30ee}
+static const GUID CLSID_UsersFilesFolder = { 0x59031a47, 0x3f72, 0x44a7, { 0x89, 0xc5, 0x55, 0x95, 0xfe, 0x6b, 0x30, 0xee } };
+
+static int fill_menu_with_home(HMENU hMenu, int insertPos) {
+    CoInitialize(NULL);
+
+    IShellFolder* pDesktop = NULL;
+    if (FAILED(SHGetDesktopFolder(&pDesktop))) {
+        CoUninitialize();
+        return 0;
+    }
+
+    LPITEMIDLIST pidlUsersFiles = NULL;
+    // Parse ::{GUID}
+    if (FAILED(pDesktop->lpVtbl->ParseDisplayName(pDesktop, NULL, NULL, L"::{59031a47-3f72-44a7-89c5-5595fe6b30ee}", NULL, &pidlUsersFiles, NULL))) {
+        pDesktop->lpVtbl->Release(pDesktop);
+        CoUninitialize();
+        return 0;
+    }
+
+    IShellFolder* pUsersFiles = NULL;
+    if (FAILED(pDesktop->lpVtbl->BindToObject(pDesktop, pidlUsersFiles, NULL, &IID_IShellFolder, (void**)&pUsersFiles))) {
+        CoTaskMemFree(pidlUsersFiles);
+        pDesktop->lpVtbl->Release(pDesktop);
+        CoUninitialize();
+        return 0;
+    }
+
+    DWORD flags = SHCONTF_FOLDERS | SHCONTF_NONFOLDERS;
+    if (g_cfg.showHidden) flags |= SHCONTF_INCLUDEHIDDEN;
+
+    IEnumIDList* pEnum = NULL;
+    if (FAILED(pUsersFiles->lpVtbl->EnumObjects(pUsersFiles, NULL, flags, &pEnum))) {
+        pUsersFiles->lpVtbl->Release(pUsersFiles);
+        CoTaskMemFree(pidlUsersFiles);
+        pDesktop->lpVtbl->Release(pDesktop);
+        CoUninitialize();
+        return 0;
+    }
+
+    LPITEMIDLIST pidlItem = NULL;
+    ULONG fetched = 0;
+    int added = 0;
+
+    while (pEnum->lpVtbl->Next(pEnum, 1, &pidlItem, &fetched) == S_OK && fetched == 1) {
+        STRRET str;
+        WCHAR name[MAX_PATH];
+        
+        // Display Name
+        if (SUCCEEDED(pUsersFiles->lpVtbl->GetDisplayNameOf(pUsersFiles, pidlItem, SHGDN_NORMAL, &str))) {
+            StrRetToBufW(&str, pidlItem, name, ARRAYSIZE(name));
+        } else {
+            name[0] = 0;
+        }
+
+        // Parsing Path
+        WCHAR path[MAX_PATH];
+        path[0] = 0;
+        if (SUCCEEDED(pUsersFiles->lpVtbl->GetDisplayNameOf(pUsersFiles, pidlItem, SHGDN_FORPARSING, &str))) {
+            StrRetToBufW(&str, pidlItem, path, ARRAYSIZE(path));
+        }
+
+        ULONG attribs = SFGAO_FOLDER;
+        pUsersFiles->lpVtbl->GetAttributesOf(pUsersFiles, 1, (LPCITEMIDLIST*)&pidlItem, &attribs);
+        BOOL isFolder = (attribs & SFGAO_FOLDER);
+
+        if (name[0]) {
+            // Determine if we should show as submenu
+            BOOL asSubmenu = (isFolder && g_cfg.homeItemsAsSubmenus && path[0] && PathFileExistsW(path));
+
+            if (asSubmenu) {
+                HMENU sub = CreatePopupMenu();
+                AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
+                attach_menu_data(sub, path, 1, 0, FALSE);
+                
+                MENUITEMINFOW mii = { sizeof(mii) };
+                mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
+                mii.dwTypeData = name;
+                mii.hSubMenu = sub;
+                mii.wID = g_nextFolderId++;
+                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+                if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
+                InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+            } else {
+                MENUITEMINFOW mii = { sizeof(mii) };
+                mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
+                mii.dwTypeData = name;
+                mii.wID = g_nextFolderId++;
+                if (path[0]) {
+                    mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+                    if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
+                    map_add(mii.wID, path);
+                }
+                InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+            }
+
+            // Icon
+            if (g_cfg.homeShowIcons) {
+                HICON hIcon = NULL;
+                LPITEMIDLIST pidlAbs = ILCombine(pidlUsersFiles, pidlItem);
+                SHFILEINFOW sfi = {0};
+                if (SHGetFileInfoW((LPCWSTR)pidlAbs, 0, &sfi, sizeof(sfi), SHGFI_PIDL | SHGFI_ICON | SHGFI_SMALLICON)) {
+                    hIcon = sfi.hIcon;
+                }
+                CoTaskMemFree(pidlAbs);
+
+                if (hIcon) {
+                    // Register icon for both cases (normal and submenu)
+                    add_item_icon(g_nextFolderId - 1, hIcon);
+
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                        if (asSubmenu) {
+                            int pos = insertPos + added;
+                            HBITMAP hbmp = icon_to_hbmp(hIcon, get_preferred_icon_size(), get_preferred_icon_size());
+                            if (hbmp) {
+                                MENUITEMINFOW miiIcon = { sizeof(miiIcon) };
+                                miiIcon.fMask = MIIM_BITMAP;
+                                miiIcon.hbmpItem = hbmp;
+                                SetMenuItemInfoW(hMenu, pos, TRUE, &miiIcon);
+                            }
+                        } else {
+                            assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                        }
+                    }
+                }
+            }
+            added++;
+        }
+        CoTaskMemFree(pidlItem);
+    }
+
+    pEnum->lpVtbl->Release(pEnum);
+    pUsersFiles->lpVtbl->Release(pUsersFiles);
+    CoTaskMemFree(pidlUsersFiles);
+    pDesktop->lpVtbl->Release(pDesktop);
+    CoUninitialize();
+    return added;
+}
+
+static int fill_menu_with_thispc(HMENU hMenu, int insertPos) {
+    WCHAR drives[512];
+    if (GetLogicalDriveStringsW(ARRAYSIZE(drives), drives) == 0) {
+        InsertMenuW(hMenu, insertPos, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(No drives found)");
+        return 1;
+    }
+
+    int added = 0;
+    WCHAR* p = drives;
+    while (*p) {
+        WCHAR label[MAX_PATH + 32];
+        WCHAR volName[MAX_PATH] = {0};
+        
+        GetVolumeInformationW(p, volName, ARRAYSIZE(volName), NULL, NULL, NULL, NULL, 0);
+        
+        if (volName[0]) {
+            size_t len = lstrlenW(p);
+            if (len > 0 && p[len-1] == L'\\') p[len-1] = 0;
+            wsprintfW(label, L"%s (%s)", volName, p);
+            if (len > 0) p[len-1] = L'\\';
+        } else {
+            UINT type = GetDriveTypeW(p);
+            const WCHAR* typeStr = L"Local Disk";
+            if (type == DRIVE_REMOVABLE) typeStr = L"Removable Disk";
+            else if (type == DRIVE_CDROM) typeStr = L"CD Drive";
+            else if (type == DRIVE_REMOTE) typeStr = L"Network Drive";
+            
+            size_t len = lstrlenW(p);
+            if (len > 0 && p[len-1] == L'\\') p[len-1] = 0;
+            wsprintfW(label, L"%s (%s)", typeStr, p);
+            if (len > 0) p[len-1] = L'\\';
+        }
+
+        MENUITEMINFOW mii = { sizeof(mii) };
+        
+        if (g_cfg.thisPCItemsAsSubmenus) {
+            HMENU sub = CreatePopupMenu();
+            AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
+            attach_menu_data(sub, p, 1, 0, FALSE);
+            
+            mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
+            mii.dwTypeData = label;
+            mii.hSubMenu = sub;
+            mii.wID = g_nextFolderId++;
+            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
+            if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, p);
+            InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+        } else {
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
+            mii.dwTypeData = label;
+            mii.wID = g_nextFolderId++;
+            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
+            if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, p);
+            InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+            map_add(mii.wID, p);
+        }
+        
+        if (g_cfg.thisPCShowIcons) {
+            HICON hIcon = NULL;
+            SHFILEINFOW sfi = {0};
+            if (SHGetFileInfoW(p, 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
+                hIcon = sfi.hIcon;
+            }
+            if (hIcon) {
+                // Register icon for both cases (normal and submenu)
+                // Note: For submenu, we just assigned an ID (g_nextFolderId - 1)
+                add_item_icon(g_nextFolderId - 1, hIcon);
+
+                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                    if (g_cfg.thisPCItemsAsSubmenus) {
+                        int pos = insertPos + added;
+                        HBITMAP hbmp = icon_to_hbmp(hIcon, get_preferred_icon_size(), get_preferred_icon_size());
+                        if (hbmp) {
+                            MENUITEMINFOW miiIcon = { sizeof(miiIcon) };
+                            miiIcon.fMask = MIIM_BITMAP;
+                            miiIcon.hbmpItem = hbmp;
+                            SetMenuItemInfoW(hMenu, pos, TRUE, &miiIcon);
+                        }
+                    } else {
+                        assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                    }
+                }
+            }
+        } 
+
+
+        added++;
+        p += lstrlenW(p) + 1;
+    }
+    return added;
 }
 
 static HMENU build_menu(void) {
@@ -676,7 +914,7 @@ static HMENU build_menu(void) {
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, it->path, 1, 0);
+                attach_menu_data(sub, it->path, 1, 0, FALSE);
                 AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_DATA | MIIM_SUBMENU;
@@ -698,7 +936,7 @@ static HMENU build_menu(void) {
                     }
                 }
                 
-                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0);
+                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE);
                 
                 // No automatic trailing separator; user controls separators explicitly in config.
             } else {
@@ -732,11 +970,75 @@ static HMENU build_menu(void) {
             }
             break;
         }
+        case CI_THISPC:
+        {
+            if (it->submenu) {
+                HMENU sub = CreatePopupMenu();
+                fill_menu_with_thispc(sub, 0);
+                AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"This PC");
+                
+                const BOOL dark = theme_is_dark();
+                const WCHAR* ipath = NULL;
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                if (ipath) {
+                    HICON hico = load_icon_path_or_module(ipath);
+                    assign_icon_to_last_popup(hMenu, hico);
+                }
+            } else {
+                if (it->label[0] && !it->inlineNoHeader) {
+                    if (it->inlineOpen) {
+                        AppendMenuW(hMenu, MF_STRING, g_nextFolderId, it->label);
+                        map_add(g_nextFolderId++, L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}");
+                    } else {
+                        AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
+                    }
+                }
+                fill_menu_with_thispc(hMenu, GetMenuItemCount(hMenu));
+            }
+            break;
+        }
+        case CI_HOME:
+        {
+            if (it->submenu) {
+                HMENU sub = CreatePopupMenu();
+                fill_menu_with_home(sub, 0);
+                AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Home");
+                
+                const BOOL dark = theme_is_dark();
+                const WCHAR* ipath = NULL;
+                if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
+                else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
+                else if (it->iconPath[0]) ipath = it->iconPath;
+                else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
+                else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
+                if (ipath) {
+                    HICON hico = load_icon_path_or_module(ipath);
+                    assign_icon_to_last_popup(hMenu, hico);
+                }
+            } else {
+                if (it->label[0] && !it->inlineNoHeader) {
+                    if (it->inlineOpen) {
+                        AppendMenuW(hMenu, MF_STRING, g_nextFolderId, it->label);
+                        map_add(g_nextFolderId++, L"::{59031a47-3f72-44a7-89c5-5595fe6b30ee}");
+                    } else {
+                        AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
+                    }
+                }
+                fill_menu_with_home(hMenu, GetMenuItemCount(hMenu));
+            }
+            break;
+        }
         case CI_FOLDER_SUBMENU:
         {
             HMENU sub = CreatePopupMenu();
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-            attach_menu_data(sub, it->path, 1, 0);
+            attach_menu_data(sub, it->path, 1, 0, FALSE);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
@@ -935,7 +1237,7 @@ static HMENU build_menu(void) {
                 }
             }
             if (max <= 0) max = 10;
-            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows);
+            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows, g_cfg.taskKillAllDesktops);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Task Kill");
             if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
                 const BOOL dark = theme_is_dark();
@@ -1325,7 +1627,14 @@ BOOL MenuOnDrawItem(HWND owner, const DRAWITEMSTRUCT* dis) {
     // Optional icon mapped by command ID
     HICON icon = NULL;
     if (idx >= 0) {
-        UINT id = GetMenuItemID(m, idx);
+        UINT id = (UINT)-1;
+        MENUITEMINFOW miiID = { sizeof(miiID) };
+        miiID.fMask = MIIM_ID;
+        if (GetMenuItemInfoW(m, idx, TRUE, &miiID)) {
+            id = miiID.wID;
+        }
+        if (id == (UINT)-1) id = GetMenuItemID(m, idx); // Fallback
+
         if (id != (UINT)-1) icon = get_item_icon(id);
     }
 
