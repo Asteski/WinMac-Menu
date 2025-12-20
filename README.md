@@ -57,7 +57,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [Sorting] sort folder content
 - [RecentItems] item settings
 - [TaskKill] item settings
-- [ThisPC]item settings
+- [ThisPC] item settings
 - [Home] item settings
 - [Logging]
 
