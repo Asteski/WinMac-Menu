@@ -5,7 +5,6 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
 - Low-latency popup
-- `[WIP]` [Discover the range of application use cases](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ### Windows 11:
 ![WinMacMenu screenshot](img/winmacmenu-demo-11.png)
@@ -14,8 +13,8 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
-- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more.
-- Recent Items - dynamic submenu from %AppData%\Microsoft\Windows\Recent
+- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
+- Recent Items - dynamic submenu from %AppData%\Microsoft\Windows\ folder
 - Force Quit - dynamic submenu to forcibly end tasks
 - This PC - dynamic submenu to list This PC content
 - Home - dynamic submenu to show User Profile folder
@@ -38,6 +37,9 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
   - To start silently in background, without showing the menu on first launch, set `ShowOnLaunch=false`.
 
 **Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+
+`[WIP]` [Discover the range of application use cases](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use).
+
 
 ## Sections
 - [General] global behavior and style
