@@ -14,12 +14,13 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
-- Configure the menu using either a simple INI file or the built-in GUI for live editing.
-- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
-- Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
-- Force Quit: dynamic submenu to forcibly end tasks
-- Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
-- Icons: per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
+- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more.
+- Recent Items - dynamic submenu from %AppData%\Microsoft\Windows\Recent
+- Force Quit - dynamic submenu to forcibly end tasks
+- This PC - dynamic submenu to list This PC content
+- Home - dynamic submenu to show User Profile folder
+- Light/Dark auto-adaptation - immersive dark hint on the invisible owner window
+- Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
 - Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
 - First-letter activation, outside-click dismissal
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
@@ -32,19 +33,11 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 **Quick Start**: Double‑click the EXE. By default, it runs in background mode with a system tray icon.
 
 **Modes**:
-- **Background Mode (default)**: App stays running in background. Launch again to toggle/show menu.
-- **One-shot**: Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
-  - To start silently in background (without showing the menu on first launch), set `ShowOnLaunch=false`.
+- **Background Mode (default)** - App stays running in background. Launch again to toggle/show menu.
+- **Single Run** - Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
+  - To start silently in background, without showing the menu on first launch, set `ShowOnLaunch=false`.
 
 **Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
-
-**Tray Icon**: Right-click for settings menu including:
-- Show menu / Hide tray / Elevate (run as admin)
-- Reload
-- Start on login toggle
-- Show/Hide menu icons (toggles whether icons appear in the popup menu)
-- Settings (opens GUI) / Help / About
-- Exit
 
 ## Sections
 - [General] global behavior and style
