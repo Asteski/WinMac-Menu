@@ -2,7 +2,7 @@
 
 Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
 
-[Discover the range of application use cases](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use).
+[Discover the range of application use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 - Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
