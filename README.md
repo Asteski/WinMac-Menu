@@ -28,6 +28,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
 - Sorting of folder content by name, date, size and type
 - Granular extension hiding (global + recent-only override)
+- `WIP` Settings GUI available for those, who do not want to modify INI file directly
 
 ## Run
 
