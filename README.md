@@ -2,10 +2,11 @@
 
 Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
 
+[Discover the range of possible application use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
+
 - Windows 10/11, x86 and ARM64 supported
 - No installer, single EXE
 - Low-latency popup
-- [Discover the range of application use cases](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ### Windows 11:
 ![WinMacMenu screenshot](img/winmacmenu-demo-11.png)
@@ -14,37 +15,31 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
-- Configure the menu using either a simple INI file or the built-in GUI for live editing.
-- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and a consolidated Power menu (POWER_MENU)
-- Recent Items: dynamic submenu from %AppData%\Microsoft\Windows\Recent
-- Force Quit: dynamic submenu to forcibly end tasks
-- Light/Dark auto-adaptation; immersive dark hint on the invisible owner window
-- Icons: per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
+- Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
+- Recent Items - dynamic submenu from %AppData%\Microsoft\Windows\ folder
+- Force Quit - dynamic submenu to forcibly end tasks
+- This PC - dynamic submenu to list This PC content
+- Home - dynamic submenu to show User Profile folder
+- Light/Dark auto-adaptation - immersive dark hint on the invisible owner window
+- Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
 - Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
 - First-letter activation, outside-click dismissal
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
 - Sorting of folder content by name, date, size and type
 - Granular extension hiding (global + recent-only override)
+- `WIP` Settings GUI available for those, who do not want to modify INI file directly
 
 ## Run
 
 **Quick Start**: Double‑click the EXE. By default, it runs in background mode with a system tray icon.
 
 **Modes**:
-- **Background Mode (default)**: App stays running in background. Launch again to toggle/show menu.
-- **One-shot**: Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
-  - To start silently in background (without showing the menu on first launch), set `ShowOnLaunch=false`.
+- **Background Mode (default)** - App stays running in background. Launch again to toggle/show menu.
+- **Single Run** - Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
+  - To start silently in background, without showing the menu on first launch, set `ShowOnLaunch=false`.
 
 **Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
-
-**Tray Icon**: Right-click for settings menu including:
-- Show menu / Hide tray / Elevate (run as admin)
-- Reload
-- Start on login toggle
-- Show/Hide menu icons (toggles whether icons appear in the popup menu)
-- Settings (opens GUI) / Help / About
-- Exit
 
 ## Sections
 - [General] global behavior and style
