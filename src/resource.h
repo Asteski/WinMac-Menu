@@ -4,6 +4,7 @@
 #define IDI_TRAY_LIGHT 102
 #define IDI_TRAY_DARK 103
 #define IDI_ABOUT_ICON 104
+#define IDI_TRAY_DEFAULT 105
 
 // Dialogs
 #define IDD_SETTINGS 200

@@ -62,6 +62,7 @@ static BOOL g_menuActive = FALSE;
 static BOOL g_menuShowingNow = FALSE; // tracks if a popup is currently displayed (between ShowWinXMenu enter and menu close)
 static HWND g_hMainWnd = NULL;
 static BOOL g_runInBackground = FALSE; // mirror of config for quick checks
+static BOOL g_reloadMode = FALSE; // when launched with --reload, suppress show-on-launch behavior
 static UINT g_trayMsg = WM_APP + 1; // tray callback message id for Shell_NotifyIcon
 static BOOL g_trayAdded = FALSE;
 static HICON g_hTrayIcon = NULL;
@@ -378,39 +379,55 @@ static void cli_show_help(void) {
 static void tray_add(HWND hWnd) {
     if (!g_cfg.showTrayIcon || g_trayAdded) return;
     BOOL dark = theme_is_dark();
-    // Lazy load themed icons (file paths override resource)
-    if (!g_hTrayIconLight) {
-        if (g_cfg.trayIconPathLight[0]) {
-            g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPathLight, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
-        }
-        if (!g_hTrayIconLight && g_cfg.trayIconPath[0]) {
-            g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
-        }
-        if (!g_hTrayIconLight) {
-            g_hTrayIconLight = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_LIGHT), IMAGE_ICON,
+    
+    // If monochrome tray icon is disabled, load tray_Default.ico instead of theme-dependent icons
+    if (!g_cfg.monochromeTrayIcon) {
+        // Use default tray icon from resource
+        g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_DEFAULT), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        if (!g_hTrayIcon) {
+            // Fallback to embedded resource if tray_Default failed
+            g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
                 GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            if (!g_hTrayIcon) g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
         }
-    }
-    if (!g_hTrayIconDark) {
-        if (g_cfg.trayIconPathDark[0]) {
-            g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPathDark, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
-        }
-        if (!g_hTrayIconDark && g_cfg.trayIconPath[0]) {
-            g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+    } else {
+        // Use theme-dependent icons (original behavior)
+        // Lazy load themed icons (file paths override resource)
+        if (!g_hTrayIconLight) {
+            if (g_cfg.trayIconPathLight[0]) {
+                g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPathLight, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+            }
+            if (!g_hTrayIconLight && g_cfg.trayIconPath[0]) {
+                g_hTrayIconLight = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+            }
+            if (!g_hTrayIconLight) {
+                g_hTrayIconLight = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_LIGHT), IMAGE_ICON,
+                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            }
         }
         if (!g_hTrayIconDark) {
-            g_hTrayIconDark = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_DARK), IMAGE_ICON,
+            if (g_cfg.trayIconPathDark[0]) {
+                g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPathDark, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+            }
+            if (!g_hTrayIconDark && g_cfg.trayIconPath[0]) {
+                g_hTrayIconDark = (HICON)LoadImageW(NULL, g_cfg.trayIconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+            }
+            if (!g_hTrayIconDark) {
+                g_hTrayIconDark = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TRAY_DARK), IMAGE_ICON,
+                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            }
+        }
+        if (dark) g_hTrayIcon = g_hTrayIconDark ? g_hTrayIconDark : g_hTrayIconLight;
+        else g_hTrayIcon = g_hTrayIconLight ? g_hTrayIconLight : g_hTrayIconDark;
+        if (!g_hTrayIcon) {
+            // Fallback to embedded resource
+            g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
                 GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            if (!g_hTrayIcon) g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
         }
     }
-    if (dark) g_hTrayIcon = g_hTrayIconDark ? g_hTrayIconDark : g_hTrayIconLight;
-    else g_hTrayIcon = g_hTrayIconLight ? g_hTrayIconLight : g_hTrayIconDark;
-    if (!g_hTrayIcon) {
-        // Fallback to embedded resource
-        g_hTrayIcon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
-            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-        if (!g_hTrayIcon) g_hTrayIcon = LoadIcon(NULL, IDI_APPLICATION);
-    }
+    
     NOTIFYICONDATAW nid = {0};
     nid.cbSize = sizeof(nid);
     nid.hWnd = hWnd;
@@ -477,6 +494,48 @@ static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) 
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
+static void open_settings_app(HWND hWnd) {
+    WCHAR exeDir[MAX_PATH];
+    if (!GetModuleFileNameW(NULL, exeDir, ARRAYSIZE(exeDir))) {
+        return;
+    }
+    PathRemoveFileSpecW(exeDir);
+
+    WCHAR settingsExe[MAX_PATH];
+    lstrcpynW(settingsExe, exeDir, ARRAYSIZE(settingsExe));
+    PathAppendW(settingsExe, L"bin");
+    PathAppendW(settingsExe, L"WinMacMenuSettings.exe");
+
+    if (!PathFileExistsW(settingsExe)) {
+        MessageBoxW(hWnd, L"WinMacMenuSettings.exe was not found.", L"WinMac Menu", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    WCHAR configPath[MAX_PATH];
+    if (g_cfg.iniPath[0]) {
+        GetFullPathNameW(g_cfg.iniPath, ARRAYSIZE(configPath), configPath, NULL);
+    }
+    else {
+        GetFullPathNameW(L"config.ini", ARRAYSIZE(configPath), configPath, NULL);
+    }
+
+    WCHAR args[2048];
+    // Pass an explicit flag so the settings app can hide the config loader controls when launched from the tray.
+    swprintf_s(args, ARRAYSIZE(args), L"--config \"%s\" --from-tray", configPath);
+
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi = {0};
+    if (!CreateProcessW(settingsExe, args, NULL, NULL, FALSE, 0, NULL, exeDir, &si, &pi)) {
+        DWORD err = GetLastError();
+        WCHAR message[256];
+        wsprintfW(message, L"Failed to launch WinMacMenuSettings.exe. Error: %lu", err);
+        MessageBoxW(hWnd, message, L"WinMac Menu", MB_OK | MB_ICONERROR);
+        return;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+}
+
 // Hook helpers
 static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && g_hHookTargetWnd) {
@@ -531,6 +590,28 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
                                     PostMessageW(g_hHookTargetWnd, WM_CANCELMODE, 0, 0); // Close menu
                                     return 1; // Swallow click
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle middle-click to open parent folder of recent items
+        if (wParam == WM_MBUTTONUP) {
+            HWND hMenuWnd = WindowFromPoint(ms->pt);
+            WCHAR cls[64];
+            if (hMenuWnd && GetClassNameW(hMenuWnd, cls, ARRAYSIZE(cls)) && !lstrcmpW(cls, L"#32768")) {
+                HMENU hMenu = (HMENU)SendMessageW(hMenuWnd, MN_GETHMENU, 0, 0);
+                if (hMenu) {
+                    int pos = MenuItemFromPoint(hMenuWnd, hMenu, ms->pt);
+                    if (pos != -1) {
+                        UINT itemId = GetMenuItemID(hMenu, pos);
+                        if (itemId != 0 && itemId != -1) {
+                            // Try to open parent folder if it's a recent item
+                            if (MenuOpenRecentParentFolder(itemId)) {
+                                PostMessageW(g_hHookTargetWnd, WM_CANCELMODE, 0, 0); // Close menu
+                                return 1; // Swallow click
                             }
                         }
                     }
@@ -650,6 +731,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Small context with Exit
             POINT pt; GetCursorPos(&pt);
             HMENU m = CreatePopupMenu();
+            if (!m) return 0; // Guard against menu creation failure
             AppendMenuW(m, MF_STRING, 10001, L"Show menu");
             AppendMenuW(m, MF_STRING, 10003, L"Hide tray");
             BOOL elevated = is_process_elevated();
@@ -677,6 +759,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             AppendMenuW(m, MF_STRING, 10002, L"Exit");
             SetForegroundWindow(hWnd);
             UINT cmd = TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hWnd, NULL);
+            PostMessageW(hWnd, WM_NULL, 0, 0); // Required for tray icon menus
             DestroyMenu(m);
             if (cmd == 10001) {
                 PostMessageW(hWnd, WM_APP, 0, 0);
@@ -728,18 +811,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_cfg.showIcons = !g_cfg.showIcons;
                 WritePrivateProfileStringW(L"General", L"ShowIcons", g_cfg.showIcons ? L"true" : L"false", g_cfg.iniPath);
             } else if (cmd == 10005) {
-                // Show settings dialog (replaces opening raw INI)
-                Config before = g_cfg; // snapshot
-                if (ShowSettingsDialog(hWnd, &g_cfg)) {
-                    // Apply changes that need runtime updates
-                    g_runInBackground = g_cfg.runInBackground;
-                    if (g_cfg.showTrayIcon != before.showTrayIcon) {
-                        if (g_cfg.showTrayIcon) tray_add(hWnd); else tray_remove(hWnd);
-                    } else if (g_cfg.showTrayIcon) {
-                        // Reload to reflect possible theme/tooltip changes
-                        tray_reload(hWnd);
-                    }
-                }
+                open_settings_app(hWnd);
             } else if (cmd == 10011) {
                 ShellExecuteW(NULL, L"open", g_cfg.iniPath, NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10006) {
@@ -749,7 +821,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2025 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.8.0"));
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2026 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.9.0"));
                 MSGBOXPARAMSW mbp = {0};
                 mbp.cbSize = sizeof(mbp);
                 mbp.hwndOwner = hWnd;
@@ -844,18 +916,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
         } else if (LOWORD(wParam) == 10005) {
-            // Settings command from CLI
-            Config before = g_cfg; // snapshot
-            if (ShowSettingsDialog(hWnd, &g_cfg)) {
-                // Apply changes that need runtime updates
-                g_runInBackground = g_cfg.runInBackground;
-                if (g_cfg.showTrayIcon != before.showTrayIcon) {
-                    if (g_cfg.showTrayIcon) tray_add(hWnd); else tray_remove(hWnd);
-                } else if (g_cfg.showTrayIcon) {
-                    // Reload to reflect possible theme/tooltip changes
-                    tray_reload(hWnd);
-                }
-            }
+            open_settings_app(hWnd);
             return 0;
         } else if (LOWORD(wParam) == 10011) {
             // Open ini file command
@@ -924,15 +985,27 @@ static BOOL parse_cli_args(CliArgs* args) {
         else if (!lstrcmpiW(argv[i], L"--list") || !lstrcmpiW(argv[i], L"-l")) {
             args->mode = CLI_MODE_LIST;
         }
-        else if ((!lstrcmpiW(argv[i], L"--reload") || !lstrcmpiW(argv[i], L"-r")) && i + 1 < argc) {
-            args->mode = CLI_MODE_RELOAD;
-            args->targetPid = _wtoi(argv[i + 1]);
-            if (args->targetPid == 0) {
-                wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
-                result = FALSE;
-                break;
+        else if ((!lstrcmpiW(argv[i], L"--reload") || !lstrcmpiW(argv[i], L"-r"))) {
+            // Support two forms:
+            // 1) --reload <pid>  -> reload specific PID (existing behavior)
+            // 2) --reload         -> start mode: launched as reload of this config; suppress show-on-launch
+            if (i + 1 < argc && argv[i+1][0] && (argv[i+1][0] >= L'0' && argv[i+1][0] <= L'9')) {
+                args->mode = CLI_MODE_RELOAD;
+                args->targetPid = _wtoi(argv[i + 1]);
+                if (args->targetPid == 0) {
+                    wprintf(L"Error: Invalid PID '%s' for %s\n", argv[i + 1], argv[i]);
+                    result = FALSE;
+                    break;
+                }
+                ++i; // Skip next argument
+            } else {
+                // Reload start flag (no pid) - mark that this process is a reload-to-start
+                args->mode = args->mode; // keep existing mode (probably NORMAL)
+                // store reloadStart in configPath as special marker? Add dedicated field instead
+                args->outputFormat = args->outputFormat; // noop - we don't have dedicated field in struct in this file; instead rely on checking argv later in wWinMain
+                // We will detect this case by presence of --reload in command line again in wWinMain if needed.
+                // For convenience, move index on if next arg was present but not numeric
             }
-            ++i; // Skip next argument
         }
         else if ((!lstrcmpiW(argv[i], L"--shutdown") || !lstrcmpiW(argv[i], L"-k")) && i + 1 < argc) {
             args->mode = CLI_MODE_SHUTDOWN;
@@ -1046,6 +1119,11 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
         return success ? 0 : 1;
     }
     
+    // Detect --reload flag in command line to suppress ShowOnLaunch
+    if (wcsstr(GetCommandLineW(), L"--reload") != NULL) {
+        g_reloadMode = TRUE;
+    }
+
     // Set config path if provided
     if (cliArgs.configPath[0]) {
         config_set_default_path(cliArgs.configPath);
@@ -1148,8 +1226,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
             }
         }
         
-        // Optionally show menu on first launch
-        if (g_cfg.showOnLaunch) {
+        // Optionally show menu on first launch (skip when started with --reload)
+        if (g_cfg.showOnLaunch && !g_reloadMode) {
             POINT pt = {0,0};
             g_menuActive = TRUE; g_menuShowingNow = TRUE;
             install_menu_hooks(hWnd);

@@ -5,6 +5,7 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
 #include <stdlib.h> // _wtoi
 #pragma comment(lib, "Dwmapi.lib")
 #include "menu.h"
@@ -377,12 +378,27 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 attach_menu_data(sub, items[i].fullPath, depth + 1, 0, FALSE);
                 
                 MENUITEMINFOW mii = { sizeof(mii) };
-                mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA;
+                UINT folderId = g_nextFolderId++;
+                mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
                 mii.dwTypeData = name;
                 mii.hSubMenu = sub;
+                mii.wID = folderId;
                 mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
+
+                if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
+                    HICON hFolder = get_system_folder_icon();
+                    if (hFolder) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                            assign_legacy_item_bitmap(hMenu, folderId, hFolder);
+#ifdef ENABLE_MODERN_STYLE
+                        } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                            add_item_icon(folderId, hFolder);
+#endif
+                        }
+                    }
+                }
             } else {
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
@@ -392,6 +408,19 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
                 map_add(mii.wID, items[i].fullPath);
+
+                if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
+                    HICON hFolder = get_system_folder_icon();
+                    if (hFolder) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                            assign_legacy_item_bitmap(hMenu, mii.wID, hFolder);
+#ifdef ENABLE_MODERN_STYLE
+                        } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                            add_item_icon(mii.wID, hFolder);
+#endif
+                        }
+                    }
+                }
             }
         } else {
             WCHAR name[260]; get_name_from_path(items[i].fullPath, name, ARRAYSIZE(name));
@@ -538,66 +567,121 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                 WCHAR path[MAX_PATH];
                 DWORD size = ARRAYSIZE(path);
                 if (QueryFullProcessImageNameW(hProcess, 0, path, &size)) {
-                    // Try to get File Description
-                    DWORD handle;
-                    DWORD verSize = GetFileVersionInfoSizeW(path, &handle);
-                    BOOL gotDescription = FALSE;
-                    if (verSize > 0) {
-                        void* verData = malloc(verSize);
-                        if (verData) {
-                            if (GetFileVersionInfoW(path, handle, verSize, verData)) {
-                                struct LANGANDCODEPAGE {
-                                    WORD wLanguage;
-                                    WORD wCodePage;
-                                } *lpTranslate;
-                                UINT cbTranslate;
+                    WCHAR* name = PathFindFileNameW(path);
+                    
+                    // Special handling for ApplicationFrameHost.exe (UWP apps container)
+                    // These apps must be treated individually by window title, not grouped by exe
+                    BOOL isFrameHost = (lstrcmpiW(name, L"ApplicationFrameHost.exe") == 0);
+                    
+                    if (!isFrameHost) {
+                        // Check duplicates by executable name (group all windows of same app)
+                        for (int i = 0; i < data->addedNamesCount; i++) {
+                            if (lstrcmpiW(data->addedNames[i], name) == 0) {
+                                CloseHandle(hProcess);
+                                return TRUE; // Skip duplicate app
+                            }
+                        }
+                    }
+                    
+                    // For ApplicationFrameHost (UWP apps), always use window title - skip FileDescription
+                    if (isFrameHost) {
+                        lstrcpynW(label, title, ARRAYSIZE(label));
+                    } else {
+                        // Try to get File Description
+                        DWORD handle;
+                        DWORD verSize = GetFileVersionInfoSizeW(path, &handle);
+                        BOOL gotDescription = FALSE;
+                        if (verSize > 0) {
+                            void* verData = malloc(verSize);
+                            if (verData) {
+                                if (GetFileVersionInfoW(path, handle, verSize, verData)) {
+                                    struct LANGANDCODEPAGE {
+                                        WORD wLanguage;
+                                        WORD wCodePage;
+                                    } *lpTranslate;
+                                    UINT cbTranslate;
 
-                                // Read the list of languages and code pages.
-                                if (VerQueryValueW(verData, L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate)) {
-                                    // Read the file description for each language and code page.
-                                    for( unsigned int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
-                                        WCHAR subBlock[50];
-                                        wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
-                                        
-                                        WCHAR* description = NULL;
-                                        UINT descLen = 0;
-                                        if (VerQueryValueW(verData, subBlock, (LPVOID*)&description, &descLen) && descLen > 0) {
-                                            lstrcpynW(label, description, ARRAYSIZE(label));
-                                            gotDescription = TRUE;
-                                            break;
+                                    // Read the list of languages and code pages.
+                                    if (VerQueryValueW(verData, L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate)) {
+                                        // Read the file description for each language and code page.
+                                        for( unsigned int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
+                                            WCHAR subBlock[50];
+                                            wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
+                                            
+                                            WCHAR* description = NULL;
+                                            UINT descLen = 0;
+                                            if (VerQueryValueW(verData, subBlock, (LPVOID*)&description, &descLen) && descLen > 0) {
+                                                lstrcpynW(label, description, ARRAYSIZE(label));
+                                                gotDescription = TRUE;
+                                                break;
+                                            }
                                         }
                                     }
                                 }
+                                free(verData);
                             }
-                            free(verData);
                         }
-                    }
 
-                    WCHAR* name = PathFindFileNameW(path);
-                    if (!gotDescription) {
-                        lstrcpynW(label, name, ARRAYSIZE(label));
+                        if (!gotDescription) {
+                            // Hardcoded exceptions for specific apps
+                            if (lstrcmpiW(name, L"mspaint.exe") == 0) {
+                                lstrcpynW(label, L"Paint", ARRAYSIZE(label));
+                            } else if (lstrcmpiW(name, L"SnippingTool.exe") == 0) {
+                                lstrcpynW(label, L"Snipping Tool", ARRAYSIZE(label));
+                            } else if (lstrcmpiW(name, L"PowerToys.Settings.exe") == 0) {
+                                lstrcpynW(label, L"PowerToys", ARRAYSIZE(label));
+                            } else {
+                                // Fallback: use executable name without .exe extension
+                                lstrcpynW(label, name, ARRAYSIZE(label));
+                                // Remove .exe extension for cleaner display
+                                WCHAR* ext = wcsrchr(label, L'.');
+                                if (ext && lstrcmpiW(ext, L".exe") == 0) {
+                                    *ext = 0;
+                                }
+                            }
+                        }
                     }
                     
                     if (lstrcmpiW(name, L"explorer.exe") == 0) isExplorer = TRUE;
 
-                    // Check duplicates
-                    for (int i = 0; i < data->addedNamesCount; i++) {
-                        if (lstrcmpiW(data->addedNames[i], label) == 0) {
-                            CloseHandle(hProcess);
-                            return TRUE; // Skip duplicate
-                        }
-                    }
-                    
-                    if (data->addedNamesCount < 64) {
-                        lstrcpynW(data->addedNames[data->addedNamesCount++], label, 64);
+                    // Store executable name for deduplication (not display label)
+                    // Skip deduplication storage for ApplicationFrameHost (each UWP app is unique)
+                    if (!isFrameHost && data->addedNamesCount < 64) {
+                        lstrcpynW(data->addedNames[data->addedNamesCount++], name, 64);
                     }
                 }
                 CloseHandle(hProcess);
             }
         }
 
-        WCHAR cmd[64];
-        wsprintfW(cmd, L"TASKKILL:%u", pid);
+        WCHAR cmd[MAX_PATH + 16];
+        if (data->listWindows) {
+            // Windows mode: kill specific PID
+            wsprintfW(cmd, L"TASKKILL:%u", pid);
+        } else {
+            // Apps mode: kill all processes with this executable name
+            // Exception: ApplicationFrameHost (UWP container) - kill by PID only
+            HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (hProc) {
+                WCHAR exePath[MAX_PATH];
+                DWORD sz = ARRAYSIZE(exePath);
+                if (QueryFullProcessImageNameW(hProc, 0, exePath, &sz)) {
+                    WCHAR* exeName = PathFindFileNameW(exePath);
+                    if (lstrcmpiW(exeName, L"ApplicationFrameHost.exe") == 0) {
+                        // UWP apps: kill only this specific instance
+                        wsprintfW(cmd, L"TASKKILL:%u", pid);
+                    } else {
+                        // Regular apps: kill all instances with same exe name
+                        wsprintfW(cmd, L"TASKKILL:EXE:%s", exeName);
+                    }
+                } else {
+                    wsprintfW(cmd, L"TASKKILL:%u", pid);
+                }
+                CloseHandle(hProc);
+            } else {
+                wsprintfW(cmd, L"TASKKILL:%u", pid);
+            }
+        }
         
         AppendMenuW(data->hMenu, MF_STRING, *data->pId, label);
         
@@ -605,6 +689,39 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
             HICON hIcon = NULL;
             if (isExplorer && !data->listWindows) {
                 hIcon = load_icon_path_or_module(L"imageres.dll,-5325");
+            }
+
+            if (!hIcon) {
+                // For UWP apps (ApplicationFrameWindow), try multiple child window approaches
+                WCHAR className[64];
+                if (GetClassNameW(hwnd, className, ARRAYSIZE(className))) {
+                    if (lstrcmpiW(className, L"ApplicationFrameWindow") == 0) {
+                        // Try CoreWindow first
+                        HWND hChild = FindWindowExW(hwnd, NULL, L"Windows.UI.Core.CoreWindow", NULL);
+                        if (hChild) {
+                            hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_SMALL, 0);
+                            if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICONSM);
+                            if (!hIcon) hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_BIG, 0);
+                            if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICON);
+                        }
+                        
+                        // Try other child windows if CoreWindow didn't work
+                        if (!hIcon) {
+                            hChild = NULL;
+                            while ((hChild = FindWindowExW(hwnd, hChild, NULL, NULL)) != NULL) {
+                                hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_SMALL, 0);
+                                if (hIcon) break;
+                                hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICONSM);
+                                if (hIcon) break;
+                            }
+                        }
+                        
+                        // Fallback: extract from imageres.dll for generic app icon
+                        if (!hIcon) {
+                            hIcon = load_icon_path_or_module(L"imageres.dll,-102");
+                        }
+                    }
+                }
             }
 
             if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
@@ -908,6 +1025,9 @@ static HMENU build_menu(void) {
         case CI_SEPARATOR:
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             break;
+        case CI_CATEGORY:
+            AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label[0] ? it->label : it->path);
+            break;
         case CI_URI:
         case CI_FILE:
         case CI_CMD:
@@ -1072,7 +1192,8 @@ static HMENU build_menu(void) {
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
             attach_menu_data(sub, it->path, 1, 0, FALSE);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+            UINT popupId = g_nextFolderId++;
+            if (g_cfg.showIcons != 0) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoF = NULL;
                 const WCHAR* ipath = NULL;
@@ -1090,10 +1211,19 @@ static HMENU build_menu(void) {
                     }
                 }
                 if (!hicoF && ipath) hicoF = load_icon_path_or_module(ipath);
-                assign_icon_to_last_popup(hMenu, hicoF);
+                if (hicoF) {
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                        assign_icon_to_last_popup(hMenu, hicoF);
+#ifdef ENABLE_MODERN_STYLE
+                    } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                        add_item_icon(popupId, hicoF);
+#endif
+                    }
+                }
             }
             MENUITEMINFOW mii = { sizeof(mii) };
-            mii.fMask = MIIM_DATA | MIIM_SUBMENU;
+            mii.fMask = MIIM_DATA | MIIM_SUBMENU | MIIM_ID;
+            mii.wID = popupId;
             mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(it->path) + 1) * sizeof(WCHAR));
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, it->path);
             mii.hSubMenu = sub;
@@ -1392,12 +1522,35 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { ExitWindowsEx(EWX_LOGOFF, 0); return; }
         if (!lstrcmpiW(g_map[i].path, L"POWER_HIBERNATE")) { system_hibernate(); return; }
             if (wcsncmp(g_map[i].path, L"TASKKILL:", 9) == 0) {
-                DWORD pid = _wtoi(g_map[i].path + 9);
-                if (pid) {
-                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-                    if (hProcess) {
-                        TerminateProcess(hProcess, 1);
-                        CloseHandle(hProcess);
+                const WCHAR* param = g_map[i].path + 9;
+                if (wcsncmp(param, L"EXE:", 4) == 0) {
+                    // Kill all processes with this executable name
+                    const WCHAR* exeName = param + 4;
+                    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                    if (hSnapshot != INVALID_HANDLE_VALUE) {
+                        PROCESSENTRY32W pe = { sizeof(pe) };
+                        if (Process32FirstW(hSnapshot, &pe)) {
+                            do {
+                                if (lstrcmpiW(pe.szExeFile, exeName) == 0) {
+                                    HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                                    if (hProc) {
+                                        TerminateProcess(hProc, 1);
+                                        CloseHandle(hProc);
+                                    }
+                                }
+                            } while (Process32NextW(hSnapshot, &pe));
+                        }
+                        CloseHandle(hSnapshot);
+                    }
+                } else {
+                    // Kill specific PID
+                    DWORD pid = _wtoi(param);
+                    if (pid) {
+                        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+                        if (hProcess) {
+                            TerminateProcess(hProcess, 1);
+                            CloseHandle(hProcess);
+                        }
                     }
                 }
                 return;
@@ -1455,6 +1608,31 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             break;
         }
     }
+}
+
+BOOL MenuOpenRecentParentFolder(UINT cmd) {
+    // Check if this is a recent item command
+    if (cmd < IDM_RECENT_BASE || cmd >= IDM_RECENT_BASE + 1000) {
+        return FALSE; // Not a recent item
+    }
+    
+    // Skip the "Clear Recent Items" special command
+    if (cmd == IDM_RECENT_BASE + 900) {
+        return FALSE;
+    }
+    
+    RecentItem *items = NULL;
+    int n = recent_get_items(&items, g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
+    int idx = cmd - IDM_RECENT_BASE;
+    
+    BOOL result = FALSE;
+    if (idx >= 0 && idx < n) {
+        recent_open_parent_folder(&items[idx]);
+        result = TRUE;
+    }
+    
+    if (items) LocalFree(items);
+    return result;
 }
 
 void ShowWinXMenu(HWND owner, POINT screenPt) {
