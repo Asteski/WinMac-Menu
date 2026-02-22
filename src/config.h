@@ -7,6 +7,7 @@ extern "C" {
 
 typedef enum {
     CI_SEPARATOR = 0,
+    CI_CATEGORY,
     CI_URI,
     CI_FILE,
     CI_CMD,
@@ -123,6 +124,7 @@ typedef struct Config {
     WCHAR trayIconPath[MAX_PATH];
     WCHAR trayIconPathLight[MAX_PATH];
     WCHAR trayIconPathDark[MAX_PATH];
+    BOOL monochromeTrayIcon; // [General] MonochromeTrayIcon=true|false (default true) - when true, use the monochrome theme icon paths, otherwise fall back to app.ico
     // Power menu exclusion flags (Advanced tab): when TRUE, corresponding action is hidden from POWER_MENU aggregate
     BOOL excludeSleep;
     BOOL excludeShutdown;

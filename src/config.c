@@ -56,6 +56,7 @@ static void write_default_ini(const WCHAR* path) {
         "ShowIcons=true\r\n"\
         "ShowOnLaunch=true\r\n"\
         "ShowTrayIcon=true\r\n"\
+        "MonochromeTrayIcon=true\r\n"\
         "StartOnLogin=false\r\n"\
         "\r\n"\
         "[Placement]\r\n"\
@@ -161,6 +162,8 @@ BOOL config_ensure(Config* out) {
 static ConfigItemType parse_type(const WCHAR* s) {
     if (!s) return CI_SEPARATOR;
     if (!lstrcmpiW(s, L"SEPARATOR")) return CI_SEPARATOR;
+    if (!lstrcmpiW(s, L"CATEGORY")) return CI_CATEGORY;
+    if (!lstrcmpiW(s, L"CAT")) return CI_CATEGORY;
     if (!lstrcmpiW(s, L"URI")) return CI_URI;
     if (!lstrcmpiW(s, L"FILE")) return CI_FILE;
     if (!lstrcmpiW(s, L"CMD")) return CI_CMD;
@@ -627,6 +630,10 @@ BOOL config_load(Config* out) {
     if (out->trayIconPath[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPath, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPath, ex, ARRAYSIZE(out->trayIconPath)); }
     if (out->trayIconPathLight[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathLight, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathLight, ex, ARRAYSIZE(out->trayIconPathLight)); }
     if (out->trayIconPathDark[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathDark, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathDark, ex, ARRAYSIZE(out->trayIconPathDark)); }
+    // MonochromeTrayIcon (default true) - when true, use the monochrome theme icon paths; false falls back to app.ico
+    GetPrivateProfileStringW(L"General", L"MonochromeTrayIcon", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->monochromeTrayIcon = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     
     // Parse Control section
     WCHAR controlBuf[256];

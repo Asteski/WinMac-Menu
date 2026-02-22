@@ -30,12 +30,13 @@ void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND h
             break;
             
         case CA_CUSTOM_COMMAND:
-            wprintf(L"Action: CA_CUSTOM_COMMAND - executing '%s'\n", command ? command : L"(null)");
+            wsprintfW(debug, L"Action: CA_CUSTOM_COMMAND - executing '%s'\n", command ? command : L"(null)");
+            OutputDebugStringW(debug);
             OutputDebugStringW(L"Action: CA_CUSTOM_COMMAND\n");
             if (command && command[0]) {
                 ExecuteCustomCommand(command);
             } else {
-                wprintf(L"No custom command specified\n");
+                OutputDebugStringW(L"No custom command specified\n");
                 OutputDebugStringW(L"No custom command specified\n");
             }
             break;

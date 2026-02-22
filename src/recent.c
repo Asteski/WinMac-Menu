@@ -68,6 +68,36 @@ void recent_open_item(const RecentItem *item) {
     ShellExecuteW(NULL, L"open", item->path, NULL, NULL, SW_SHOWNORMAL);
 }
 
+void recent_open_parent_folder(const RecentItem *item) {
+    if (!item) return;
+    if (!item->path[0]) return;
+    DWORD attrs = GetFileAttributesW(item->path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return; // silently ignore stale entry
+    
+    WCHAR parentPath[MAX_PATH];
+    lstrcpynW(parentPath, item->path, ARRAYSIZE(parentPath));
+    
+    // If it's a file, get its directory
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        WCHAR* lastSlash = wcsrchr(parentPath, L'\\');
+        if (lastSlash) {
+            *lastSlash = L'\0';
+        }
+    }
+    // If it's a directory, open it as-is (it's already the root folder)
+    
+    // Open the parent folder and select the item if it was a file
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        // For files, use /select to highlight the file in the folder
+        WCHAR cmdLine[MAX_PATH * 2];
+        wsprintfW(cmdLine, L"/select,%s", item->path);
+        ShellExecuteW(NULL, L"open", L"explorer.exe", cmdLine, NULL, SW_SHOWNORMAL);
+    } else {
+        // For folders, just open the folder
+        ShellExecuteW(NULL, L"open", parentPath, NULL, NULL, SW_SHOWNORMAL);
+    }
+}
+
 void recent_clear_all(void) {
     WCHAR recentPath[MAX_PATH];
     if (!SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_RECENT, NULL, SHGFP_TYPE_CURRENT, recentPath))) return;

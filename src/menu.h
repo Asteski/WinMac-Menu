@@ -9,5 +9,7 @@ void MenuOnMenuSelect(HWND owner, WPARAM wParam, LPARAM lParam);
 void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu);
 BOOL MenuOnMeasureItem(HWND owner, MEASUREITEMSTRUCT* mis);
 BOOL MenuOnDrawItem(HWND owner, const DRAWITEMSTRUCT* dis);
+BOOL MenuOpenRecentParentFolder(UINT cmd);
 
 extern BOOL g_shouldReopenMenu;
+
