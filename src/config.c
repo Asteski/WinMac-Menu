@@ -54,7 +54,7 @@ static void write_default_ini(const WCHAR* path) {
         "ShowFolderIcons=false\r\n"\
         "ShowHidden=false\r\n"\
         "ShowIcons=true\r\n"\
-        "ShowOnLaunch=true\r\n"\
+        "ShowOnLaunch=false\r\n"\
         "ShowTrayIcon=true\r\n"\
         "MonochromeTrayIcon=true\r\n"\
         "StartOnLogin=false\r\n"\
@@ -376,9 +376,14 @@ BOOL config_load(Config* out) {
     trim_inplace(buf);
     out->sortDescending = (!lstrcmpiW(buf, L"descending") || !lstrcmpiW(buf, L"desc"));
 
-    GetPrivateProfileStringW(L"Sorting", L"FoldersFirst", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"Sorting", L"FoldersFirst", L"folders", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    out->sortFoldersFirst = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    if (!lstrcmpiW(buf, L"folders") || !lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"))
+        out->sortObjectTypePriority = 1;
+    else if (!lstrcmpiW(buf, L"files"))
+        out->sortObjectTypePriority = 2;
+    else
+        out->sortObjectTypePriority = 0;
 
     out->maxItems = GetPrivateProfileIntW(L"General", L"MaxItems", 40, out->iniPath);
 
@@ -388,7 +393,7 @@ BOOL config_load(Config* out) {
 
     // TaskKill defaults
     out->taskKillMax = GetPrivateProfileIntW(L"TaskKill", L"TaskKillMax", 10, out->iniPath);
-    
+
     GetPrivateProfileStringW(L"TaskKill", L"TaskKillIgnoreSystem", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillIgnoreSystem = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
@@ -406,6 +411,14 @@ BOOL config_load(Config* out) {
     out->taskKillAllDesktops = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"TaskKill", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
+
+    // Power option defaults: all included unless explicitly excluded
+    out->excludeSleep = GetPrivateProfileIntW(L"Power", L"ExcludeSleep", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeHibernate = GetPrivateProfileIntW(L"Power", L"ExcludeHibernate", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeShutdown = GetPrivateProfileIntW(L"Power", L"ExcludeShutdown", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeRestart = GetPrivateProfileIntW(L"Power", L"ExcludeRestart", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeLock = GetPrivateProfileIntW(L"Power", L"ExcludeLock", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeLogoff = GetPrivateProfileIntW(L"Power", L"ExcludeLogoff", 0, out->iniPath) ? TRUE : FALSE;
 
     GetPrivateProfileStringW(L"ThisPC", L"ThisPCItemsAsSubmenus", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);

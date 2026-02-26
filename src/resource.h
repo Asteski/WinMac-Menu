@@ -1,3 +1,22 @@
+// Folder submenu depth controls
+#define IDC_FOLDERDEPTH_EDIT     1030
+#define IDC_FOLDERDEPTH_SPIN     1031
+#define IDC_POWER_HIBERNATE  3010
+#define IDC_POWER_LOCK       3011
+#define IDC_POWER_LOGOFF     3012
+#define IDC_POWER_RESTART    3013
+#define IDC_POWER_SHUTDOWN   3014
+#define IDC_POWER_SLEEP      3015
+#define IDC_HOME_ITEMS_AS_SUBMENUS  3003
+#define IDC_HOME_SHOW_ICONS         3004
+// Task Kill (Advanced tab)
+#define IDC_TASKKILL_IGNORE_SYSTEM 2001
+#define IDC_TASKKILL_LIST_WINDOWS 2002
+#define IDC_TASKKILL_MAX_COMBO 2003
+#define IDC_TASKKILL_SHOW_ICONS 2004
+#define IDC_TASKKILL_EXCLUDES 2005
+#define IDC_IGNORE_CENTERED_COMBO   1050
+#define IDC_IGNORE_RELATIVE_COMBO   1051
 #pragma once
 // Resource identifiers
 #define IDI_APPICON 101
@@ -8,6 +27,8 @@
 
 // Dialogs
 #define IDD_SETTINGS 200
+// Sorting page dialog
+#define IDD_PAGE_SORTING 1205
 
 // Controls (Settings Dialog)
 #define IDC_RUNINBACKGROUND    1000
@@ -20,8 +41,6 @@
 #define IDC_RECENTSHOWEXT      1007
 #define IDC_RECENTMAX_EDIT     1008
 #define IDC_RECENTMAX_SPIN     1009
-#define IDC_FOLDERDEPTH_EDIT   1010
-#define IDC_FOLDERDEPTH_SPIN   1011
 #define IDC_POINTERRELATIVE    1012
 #define IDC_HPLACEMENT_COMBO   1013
 #define IDC_VPLACEMENT_COMBO   1014
@@ -35,6 +54,16 @@
 #define IDC_IGNORE_H_REL       1022
 #define IDC_IGNORE_V_REL       1023
 #define IDC_OPEN_CONFIG_FOLDER 1024
+
+#define IDC_SHOWHIDDEN         1026
+#define IDC_SHOWDOTFILES       1027
+#define IDC_MONOTRAYICON       1028
+// Sorting controls
+#define IDC_SORT_FIELD        1100
+#define IDC_SORT_DIRECTION    1101
+#define IDC_SORT_FOLDERSFIRST 1102
+#define IDC_MAXITEMS_EDIT     1103
+#define IDC_MAXITEMS_SPIN     1104
 #define IDC_CONFIG_FILE_LABEL  1025
 
 // Tab control main
@@ -46,7 +75,7 @@
 #define IDD_PAGE_ICONS          1202
 #define IDD_PAGE_ADVANCED       1203
 #define IDD_PAGE_PLACEMENT      1204 // new placement page
-#define IDD_PAGE_SORTING        1205 // new sorting page
+// #define IDD_PAGE_SORTING        1205 // removed sorting page
 
 // Menu page controls
 #define IDC_MENU_LIST           1300
@@ -83,22 +112,13 @@
 #define IDC_THISPC_AS_SUBMENU   1508
 #define IDC_HOME_AS_SUBMENU     1509
 #define IDC_TASKKILL_ALL_DESKTOPS 1510
+#define IDC_THISPC_ITEMS_AS_SUBMENUS  3001
+#define IDC_THISPC_SHOW_ICONS         3002
 // Recent name mode radios
 #define IDC_RECENT_NAME_FULL     1700
 #define IDC_RECENT_NAME_FILE     1701
 
 // Power exclusion checkboxes (Advanced tab)
-#define IDC_EXCL_SLEEP          1900
-#define IDC_EXCL_HIBERNATE      1901
-#define IDC_EXCL_SHUTDOWN       1902
-#define IDC_EXCL_RESTART        1903
-#define IDC_EXCL_LOCK           1904
-#define IDC_EXCL_LOGOFF         1905
 
-// Sorting page controls
-#define IDC_SORT_FIELD          1600
-#define IDC_SORT_DESCENDING     1601
-#define IDC_SORT_FOLDERSFIRST   1602
-#define IDC_MAXITEMS_EDIT       1603
-#define IDC_MAXITEMS_SPIN       1604
+// Sorting page controls REMOVED
 

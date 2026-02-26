@@ -65,7 +65,8 @@ typedef struct Config {
     // Sorting for inline folders
     enum { SORT_NAME=0, SORT_DATE_MODIFIED, SORT_DATE_CREATED, SORT_TYPE, SORT_SIZE } sortField;
     BOOL sortDescending;
-    BOOL sortFoldersFirst;
+    // 0 = disabled, 1 = folders first, 2 = files first
+    int sortObjectTypePriority;
     
     // Paging
     int maxItems; // Maximum items to show per folder page (0 = unlimited)

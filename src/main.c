@@ -495,8 +495,15 @@ static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) 
 }
 
 static void open_settings_app(HWND hWnd) {
+    // Check if running on Windows 10 (major=10, minor=0, build<22000)
+    OSVERSIONINFOEXW osvi = {0};
+    osvi.dwOSVersionInfoSize = sizeof(osvi);
+    GetVersionExW((OSVERSIONINFOW*)&osvi);
+    BOOL isWin10 = (osvi.dwMajorVersion == 10 && osvi.dwMinorVersion == 0 && osvi.dwBuildNumber < 22000);
+
     WCHAR exeDir[MAX_PATH];
     if (!GetModuleFileNameW(NULL, exeDir, ARRAYSIZE(exeDir))) {
+        ShowSettingsDialog(hWnd, &g_cfg);
         return;
     }
     PathRemoveFileSpecW(exeDir);
@@ -506,30 +513,32 @@ static void open_settings_app(HWND hWnd) {
     PathAppendW(settingsExe, L"bin");
     PathAppendW(settingsExe, L"WinMacMenuSettings.exe");
 
+    // If on Windows 10, always show old settings GUI
+    if (isWin10) {
+        ShowSettingsDialog(hWnd, &g_cfg);
+        return;
+    }
+
     if (!PathFileExistsW(settingsExe)) {
-        MessageBoxW(hWnd, L"WinMacMenuSettings.exe was not found.", L"WinMac Menu", MB_OK | MB_ICONERROR);
+        ShowSettingsDialog(hWnd, &g_cfg);
         return;
     }
 
     WCHAR configPath[MAX_PATH];
     if (g_cfg.iniPath[0]) {
         GetFullPathNameW(g_cfg.iniPath, ARRAYSIZE(configPath), configPath, NULL);
-    }
-    else {
+    } else {
         GetFullPathNameW(L"config.ini", ARRAYSIZE(configPath), configPath, NULL);
     }
 
     WCHAR args[2048];
-    // Pass an explicit flag so the settings app can hide the config loader controls when launched from the tray.
     swprintf_s(args, ARRAYSIZE(args), L"--config \"%s\" --from-tray", configPath);
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = {0};
     if (!CreateProcessW(settingsExe, args, NULL, NULL, FALSE, 0, NULL, exeDir, &si, &pi)) {
-        DWORD err = GetLastError();
-        WCHAR message[256];
-        wsprintfW(message, L"Failed to launch WinMacMenuSettings.exe. Error: %lu", err);
-        MessageBoxW(hWnd, message, L"WinMac Menu", MB_OK | MB_ICONERROR);
+        // Fallback to old settings GUI if launching fails
+        ShowSettingsDialog(hWnd, &g_cfg);
         return;
     }
     CloseHandle(pi.hThread);
@@ -821,7 +830,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
                 WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
                 WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2026 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.9.0"));
+                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2026 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.10.0"));
                 MSGBOXPARAMSW mbp = {0};
                 mbp.cbSize = sizeof(mbp);
                 mbp.hwndOwner = hWnd;

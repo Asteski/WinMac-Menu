@@ -1,5 +1,7 @@
+
 // Reconstructed clean settings.c to address prior hidden corruption causing C2181.
 #include "settings.h"
+#include "settings_extra.h"
 #include "resource.h"
 #include "util.h"
 #include <windows.h>
@@ -8,8 +10,27 @@
 #include <commdlg.h>
 #include <shellapi.h>
 
+// Forward declaration for dialog procedure
+static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Shows the settings dialog (modal). Returns TRUE if any values were changed and saved.
+BOOL ShowSettingsDialog(HWND owner, Config* cfg) {
+    g_settingsOwnerHwnd = owner;
+    INT_PTR result = DialogBoxParamW(
+        GetModuleHandleW(NULL),
+        MAKEINTRESOURCEW(IDD_SETTINGS),
+        owner,
+        MainDlgProc,
+        (LPARAM)cfg
+    );
+    g_settingsOwnerHwnd = NULL;
+    return (result == IDOK) ? TRUE : FALSE;
+}
+
 typedef struct SettingsState {
     Config* cfg;
+    // Track original power option states
+    BOOL origExcludeSleep, origExcludeHibernate, origExcludeShutdown, origExcludeRestart, origExcludeLock, origExcludeLogoff;
     HWND hTabs;
     HWND pages[6]; // General, Placement, Menu, Icons, Sorting, Advanced
     // Working copy of menu/icon items so Apply/Save commits atomically
@@ -18,6 +39,7 @@ typedef struct SettingsState {
     BOOL workingDirty; // set when workingItems modified
     int baseW, baseH; // initial dialog size for min constraint
     HFONT hItalic; // italic font for filename label
+    BOOL reloadNeeded; // set if tray reload is needed after Save & Close
 } SettingsState;
 
 // Prototype so early helpers can reference selection utility without ordering issues
@@ -32,11 +54,8 @@ static BOOL Sorting_Save(HWND pg, Config* c);
 
 // Generic child page dialog procedure: forward button commands to main dialog
 static INT_PTR CALLBACK PageDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
+    // All custom groupbox drawing and coloring reverted
     switch(msg){
-    case WM_INITDIALOG:
-        // Store SettingsState* locally if needed later
-        SetWindowLongPtrW(dlg, GWLP_USERDATA, lParam);
-        return TRUE;
     case WM_NOTIFY: {
         // Forward notifications (e.g., list view selection changes) to main dialog
         HWND parent = GetParent(dlg);
@@ -82,6 +101,12 @@ static void apply_dialog_icon(HWND dlg,const Config* cfg){
 
 // -------- General Page --------
 static void General_Load(HWND pg, Config* c){
+        set_check(pg, IDC_POWER_HIBERNATE, !c->excludeHibernate);
+        set_check(pg, IDC_POWER_LOCK,      !c->excludeLock);
+        set_check(pg, IDC_POWER_LOGOFF,    !c->excludeLogoff);
+        set_check(pg, IDC_POWER_RESTART,   !c->excludeRestart);
+        set_check(pg, IDC_POWER_SHUTDOWN,  !c->excludeShutdown);
+        set_check(pg, IDC_POWER_SLEEP,     !c->excludeSleep);
     set_check(pg,IDC_RUNINBACKGROUND,c->runInBackground);
     set_check(pg,IDC_SHOWONLAUNCH,c->showOnLaunch);
     set_check(pg,IDC_SHOWTRAYICON,c->showTrayIcon);
@@ -89,8 +114,14 @@ static void General_Load(HWND pg, Config* c){
     set_check(pg,IDC_SHOWICONS,c->showIcons);
     set_check(pg,IDC_SHOWFOLDERICONS,c->showFolderIcons);
     set_check(pg,IDC_SHOWEXTENSIONS,c->showExtensions);
-    set_int(pg,IDC_FOLDERDEPTH_EDIT,c->folderMaxDepth);
-    SendDlgItemMessageW(pg,IDC_FOLDERDEPTH_SPIN,UDM_SETRANGE,0,MAKELPARAM(4,1));
+    set_check(pg,IDC_SHOWHIDDEN,c->showHidden);
+    set_check(pg,IDC_SHOWDOTFILES,c->showDotfiles);
+    set_check(pg,IDC_MONOTRAYICON,c->monochromeTrayIcon);
+        // Folder Submenu Depth
+        set_int(pg, IDC_FOLDERDEPTH_EDIT, c->folderMaxDepth);
+        SendDlgItemMessageW(pg, IDC_FOLDERDEPTH_SPIN, UDM_SETRANGE, 0, MAKELPARAM(4, 1));
+    // ...existing code...
+    // Power Menu checkboxes removed from GUI
     // Populate filename label (separate static now). Button text remains static in resource.
     HWND hLabel = GetDlgItem(pg, IDC_CONFIG_FILE_LABEL);
     if(hLabel){
@@ -118,37 +149,84 @@ static void General_Load(HWND pg, Config* c){
     SetDlgItemTextW(pg, IDC_OPEN_CONFIG_FOLDER, L"Show config folder");
 }
 static BOOL General_Save(HWND pg, Config* c){
-    BOOL ch=FALSE; BOOL b;
+    BOOL ch=FALSE;
+    BOOL reloadNeeded=FALSE;
+    BOOL b;
+    BOOL origExcludeHibernate = c->excludeHibernate;
+    BOOL origExcludeLock = c->excludeLock;
+    BOOL origExcludeLogoff = c->excludeLogoff;
+    BOOL origExcludeRestart = c->excludeRestart;
+    BOOL origExcludeShutdown = c->excludeShutdown;
+    BOOL origExcludeSleep = c->excludeSleep;
+
+    c->excludeHibernate = !get_check(pg, IDC_POWER_HIBERNATE);
+    c->excludeLock      = !get_check(pg, IDC_POWER_LOCK);
+    c->excludeLogoff    = !get_check(pg, IDC_POWER_LOGOFF);
+    c->excludeRestart   = !get_check(pg, IDC_POWER_RESTART);
+    c->excludeShutdown  = !get_check(pg, IDC_POWER_SHUTDOWN);
+    c->excludeSleep     = !get_check(pg, IDC_POWER_SLEEP);
+
+    if (origExcludeHibernate != c->excludeHibernate || origExcludeLock != c->excludeLock || origExcludeLogoff != c->excludeLogoff || origExcludeRestart != c->excludeRestart || origExcludeShutdown != c->excludeShutdown || origExcludeSleep != c->excludeSleep) ch = TRUE;
+
     b=get_check(pg,IDC_RUNINBACKGROUND);            if(c->runInBackground!=b){c->runInBackground=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWONLAUNCH);               if(c->showOnLaunch!=b){c->showOnLaunch=b;ch=TRUE;}
-    b=get_check(pg,IDC_SHOWTRAYICON);               if(c->showTrayIcon!=b){c->showTrayIcon=b;ch=TRUE;}
+    b=get_check(pg,IDC_SHOWTRAYICON);               if(c->showTrayIcon!=b){c->showTrayIcon=b;ch=TRUE;reloadNeeded=TRUE;}
     b=get_check(pg,IDC_STARTONLOGIN);               if(c->startOnLogin!=b){c->startOnLogin=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWICONS);                  if(c->showIcons!=b){c->showIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWFOLDERICONS);            if(c->showFolderIcons!=b){c->showFolderIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWEXTENSIONS);             if(c->showExtensions!=b){c->showExtensions=b;ch=TRUE;}
-    int v=get_int(pg,IDC_FOLDERDEPTH_EDIT,c->folderMaxDepth); if(v!=c->folderMaxDepth){ if(v<1)v=1; if(v>4)v=4; c->folderMaxDepth=v; ch=TRUE; }
-    if(!ch) return FALSE;
+    b=get_check(pg,IDC_SHOWHIDDEN);                 if(c->showHidden!=b){c->showHidden=b;ch=TRUE;}
+    b=get_check(pg,IDC_SHOWDOTFILES);               if(c->showDotfiles!=b){c->showDotfiles=b;ch=TRUE;}
+    b=get_check(pg,IDC_MONOTRAYICON);               if(c->monochromeTrayIcon!=b){c->monochromeTrayIcon=b;ch=TRUE;reloadNeeded=TRUE;}
+
+    int vFolderDepth = get_int(pg, IDC_FOLDERDEPTH_EDIT, c->folderMaxDepth);
+    if (vFolderDepth < 1) vFolderDepth = 1;
+    if (vFolderDepth > 4) vFolderDepth = 4;
+    if (c->folderMaxDepth != vFolderDepth) { c->folderMaxDepth = vFolderDepth; ch = TRUE; }
     if(c->iniPath[0]){
+        WCHAR bufDepth[8];
+        wsprintfW(bufDepth, L"%d", c->folderMaxDepth);
+        WritePrivateProfileStringW(L"General", L"FolderSubmenuDepth", bufDepth, c->iniPath);
         WritePrivateProfileStringW(L"General",L"RunInBackground",   c->runInBackground?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowOnLaunch",      c->showOnLaunch?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowTrayIcon",      c->showTrayIcon?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"StartOnLogin",      c->startOnLogin?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowIcons",         c->showIcons?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"ShowFolderIcons",   c->showFolderIcons?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"ShowFileExtensions",c->showExtensions?L"true":L"false",c->iniPath);
-        WCHAR buf[32]; wsprintfW(buf,L"%d",c->folderMaxDepth); WritePrivateProfileStringW(L"General",L"FolderSubmenuDepth",buf,c->iniPath);
+        WritePrivateProfileStringW(L"General",L"ShowHidden",        c->showHidden?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"ShowDotfiles",      c->showDotfiles?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"MonochromeTrayIcon",c->monochromeTrayIcon?L"true":L"false",c->iniPath);
+        // Power options: only write keys for excluded (unchecked) options as Name=0, remove when included (checked)
+        int excluded = 0;
+        if (c->excludeSleep) { WritePrivateProfileStringW(L"Power", L"Sleep", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Sleep", NULL, c->iniPath); }
+        if (c->excludeHibernate) { WritePrivateProfileStringW(L"Power", L"Hibernate", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Hibernate", NULL, c->iniPath); }
+        if (c->excludeShutdown) { WritePrivateProfileStringW(L"Power", L"Shutdown", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Shutdown", NULL, c->iniPath); }
+        if (c->excludeRestart) { WritePrivateProfileStringW(L"Power", L"Restart", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Restart", NULL, c->iniPath); }
+        if (c->excludeLock) { WritePrivateProfileStringW(L"Power", L"Lock", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Lock", NULL, c->iniPath); }
+        if (c->excludeLogoff) { WritePrivateProfileStringW(L"Power", L"Logoff", L"0", c->iniPath); excluded++; } else { WritePrivateProfileStringW(L"Power", L"Logoff", NULL, c->iniPath); }
+        if (excluded == 0) { WritePrivateProfileStringW(L"Power", NULL, NULL, c->iniPath); }
     }
-    WCHAR exe[MAX_PATH]; GetModuleFileNameW(NULL,exe,ARRAYSIZE(exe)); WCHAR cmd[2048]; if(c->iniPath[0]) wsprintfW(cmd,L"\"%s\" --config \"%s\"",exe,c->iniPath); else wsprintfW(cmd,L"\"%s\"",exe); WCHAR runName[32]; lstrcpynW(runName,L"WinMac Menu",ARRAYSIZE(runName)); if(c->startOnLogin) set_run_at_login(runName,cmd); else remove_run_at_login(runName);
-    return TRUE;
+
+    WCHAR exe[MAX_PATH];
+    GetModuleFileNameW(NULL, exe, ARRAYSIZE(exe));
+    WCHAR cmd[2048];
+    if(c->iniPath[0])
+        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exe, c->iniPath);
+    else
+        wsprintfW(cmd, L"\"%s\"", exe);
+    WCHAR runName[32];
+    lstrcpynW(runName, L"WinMac Menu", ARRAYSIZE(runName));
+    if(c->startOnLogin)
+        set_run_at_login(runName, cmd);
+    else
+        remove_run_at_login(runName);
+
+    // Do not trigger reload here; let caller decide based on button pressed
+    return reloadNeeded ? 2 : ch ? 1 : 0;
 }
 
 // -------- Placement Page --------
 static void Placement_Load(HWND pg, Config* c){
     set_check(pg,IDC_POINTERRELATIVE,c->pointerRelative);
-    set_check(pg,IDC_IGNORE_H_CENTERED,c->ignoreHOffsetWhenCentered);
-    set_check(pg,IDC_IGNORE_V_CENTERED,c->ignoreVOffsetWhenCentered);
-    set_check(pg,IDC_IGNORE_H_REL,c->ignoreHOffsetWhenRelative);
-    set_check(pg,IDC_IGNORE_V_REL,c->ignoreVOffsetWhenRelative);
     HWND hH=GetDlgItem(pg,IDC_HPLACEMENT_COMBO), hV=GetDlgItem(pg,IDC_VPLACEMENT_COMBO);
     const WCHAR* Hs[]={L"Left",L"Center",L"Right"};
     const WCHAR* Vs[]={L"Top",L"Center",L"Bottom"};
@@ -156,19 +234,55 @@ static void Placement_Load(HWND pg, Config* c){
     SendMessageW(hH,CB_SETCURSEL,c->hPlacement,0);
     SendMessageW(hV,CB_SETCURSEL,c->vPlacement,0);
     set_int(pg,IDC_HOFFSET_EDIT,c->hOffset); set_int(pg,IDC_VOFFSET_EDIT,c->vOffset);
+    // Populate IgnoreOffsetWhenCentered combobox
+    HWND hCentered = GetDlgItem(pg, IDC_IGNORE_CENTERED_COMBO);
+    SendMessageW(hCentered, CB_RESETCONTENT, 0, 0);
+    SendMessageW(hCentered, CB_ADDSTRING, 0, (LPARAM)L"True");      // 0
+    SendMessageW(hCentered, CB_ADDSTRING, 0, (LPARAM)L"False");     // 1
+    SendMessageW(hCentered, CB_ADDSTRING, 0, (LPARAM)L"Horizontal only"); // 2
+    SendMessageW(hCentered, CB_ADDSTRING, 0, (LPARAM)L"Vertical only");   // 3
+    int centeredSel = 1;
+    if (c->ignoreHOffsetWhenCentered && c->ignoreVOffsetWhenCentered) centeredSel = 0;
+    else if (c->ignoreHOffsetWhenCentered) centeredSel = 2;
+    else if (c->ignoreVOffsetWhenCentered) centeredSel = 3;
+    SendMessageW(hCentered, CB_SETCURSEL, centeredSel, 0);
+    // Populate IgnoreOffsetWhenRelative combobox
+    HWND hRelative = GetDlgItem(pg, IDC_IGNORE_RELATIVE_COMBO);
+    SendMessageW(hRelative, CB_RESETCONTENT, 0, 0);
+    SendMessageW(hRelative, CB_ADDSTRING, 0, (LPARAM)L"True");      // 0
+    SendMessageW(hRelative, CB_ADDSTRING, 0, (LPARAM)L"False");     // 1
+    SendMessageW(hRelative, CB_ADDSTRING, 0, (LPARAM)L"Horizontal only"); // 2
+    SendMessageW(hRelative, CB_ADDSTRING, 0, (LPARAM)L"Vertical only");   // 3
+    int relativeSel = 1;
+    if (c->ignoreHOffsetWhenRelative && c->ignoreVOffsetWhenRelative) relativeSel = 0;
+    else if (c->ignoreHOffsetWhenRelative) relativeSel = 2;
+    else if (c->ignoreVOffsetWhenRelative) relativeSel = 3;
+    SendMessageW(hRelative, CB_SETCURSEL, relativeSel, 0);
+    // Enable/disable relative combobox based on pointer relative
+    EnableWindow(hRelative, c->pointerRelative);
 }
 static BOOL Placement_Save(HWND pg, Config* c){
     BOOL ch=FALSE; BOOL b;
     b=get_check(pg,IDC_POINTERRELATIVE); if(c->pointerRelative!=b){c->pointerRelative=b;ch=TRUE;}
-    b=get_check(pg,IDC_IGNORE_H_CENTERED); if(c->ignoreHOffsetWhenCentered!=b){c->ignoreHOffsetWhenCentered=b;ch=TRUE;}
-    b=get_check(pg,IDC_IGNORE_V_CENTERED); if(c->ignoreVOffsetWhenCentered!=b){c->ignoreVOffsetWhenCentered=b;ch=TRUE;}
-    b=get_check(pg,IDC_IGNORE_H_REL); if(c->ignoreHOffsetWhenRelative!=b){c->ignoreHOffsetWhenRelative=b;ch=TRUE;}
-    b=get_check(pg,IDC_IGNORE_V_REL); if(c->ignoreVOffsetWhenRelative!=b){c->ignoreVOffsetWhenRelative=b;ch=TRUE;}
     int v;
     v=(int)SendDlgItemMessageW(pg,IDC_HPLACEMENT_COMBO,CB_GETCURSEL,0,0); if(v>=0 && v!=c->hPlacement){c->hPlacement=v;ch=TRUE;}
     v=(int)SendDlgItemMessageW(pg,IDC_VPLACEMENT_COMBO,CB_GETCURSEL,0,0); if(v>=0 && v!=c->vPlacement){c->vPlacement=v;ch=TRUE;}
     v=get_int(pg,IDC_HOFFSET_EDIT,c->hOffset); if(v!=c->hOffset){c->hOffset=v;ch=TRUE;}
     v=get_int(pg,IDC_VOFFSET_EDIT,c->vOffset); if(v!=c->vOffset){c->vOffset=v;ch=TRUE;}
+    // Save IgnoreOffsetWhenCentered from combobox
+    HWND hCentered = GetDlgItem(pg, IDC_IGNORE_CENTERED_COMBO);
+    int centeredSel = (int)SendMessageW(hCentered, CB_GETCURSEL, 0, 0);
+    c->ignoreHOffsetWhenCentered = c->ignoreVOffsetWhenCentered = FALSE;
+    if(centeredSel == 0) { c->ignoreHOffsetWhenCentered = TRUE; c->ignoreVOffsetWhenCentered = TRUE; }
+    else if(centeredSel == 2) { c->ignoreHOffsetWhenCentered = TRUE; }
+    else if(centeredSel == 3) { c->ignoreVOffsetWhenCentered = TRUE; }
+    // Save IgnoreOffsetWhenRelative from combobox
+    HWND hRelative = GetDlgItem(pg, IDC_IGNORE_RELATIVE_COMBO);
+    int relativeSel = (int)SendMessageW(hRelative, CB_GETCURSEL, 0, 0);
+    c->ignoreHOffsetWhenRelative = c->ignoreVOffsetWhenRelative = FALSE;
+    if(relativeSel == 0) { c->ignoreHOffsetWhenRelative = TRUE; c->ignoreVOffsetWhenRelative = TRUE; }
+    else if(relativeSel == 2) { c->ignoreHOffsetWhenRelative = TRUE; }
+    else if(relativeSel == 3) { c->ignoreVOffsetWhenRelative = TRUE; }
     if(!ch) return FALSE;
     if(c->iniPath[0]){
         WCHAR buf[32];
@@ -187,47 +301,58 @@ static BOOL Placement_Save(HWND pg, Config* c){
 
 // -------- Sorting Page --------
 static void Sorting_Load(HWND pg, Config* c){
-    HWND hCombo=GetDlgItem(pg,IDC_SORT_FIELD);
-    if(hCombo){
-        SendMessageW(hCombo,CB_RESETCONTENT,0,0);
-        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Name");
-        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Date Modified");
-        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Date Created");
-        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Size");
-        SendMessageW(hCombo,CB_ADDSTRING,0,(LPARAM)L"Type");
-        SendMessageW(hCombo,CB_SETCURSEL,c->sortField,0);
+    HWND hSortField = GetDlgItem(pg, IDC_SORT_FIELD);
+    if (hSortField) {
+        SendMessageW(hSortField, CB_RESETCONTENT, 0, 0);
+        SendMessageW(hSortField, CB_ADDSTRING, 0, (LPARAM)L"Name");           // 0
+        SendMessageW(hSortField, CB_ADDSTRING, 0, (LPARAM)L"Date Modified");  // 1
+        SendMessageW(hSortField, CB_ADDSTRING, 0, (LPARAM)L"Date Created");   // 2
+        SendMessageW(hSortField, CB_ADDSTRING, 0, (LPARAM)L"File Type");      // 3
+        SendMessageW(hSortField, CB_ADDSTRING, 0, (LPARAM)L"Size");           // 4
+        int sel = (c->sortField >= 0 && c->sortField <= 4) ? c->sortField : 0;
+        SendMessageW(hSortField, CB_SETCURSEL, sel, 0);
     }
-    set_check(pg,IDC_SORT_DESCENDING,c->sortDescending);
-    set_check(pg,IDC_SORT_FOLDERSFIRST,c->sortFoldersFirst);
-    set_int(pg,IDC_MAXITEMS_EDIT,c->maxItems);
-    SendDlgItemMessageW(pg,IDC_MAXITEMS_SPIN,UDM_SETRANGE,0,MAKELPARAM(999,1));
+    HWND hSortDir = GetDlgItem(pg, IDC_SORT_DIRECTION);
+    if (hSortDir) {
+        SendMessageW(hSortDir, CB_RESETCONTENT, 0, 0);
+        SendMessageW(hSortDir, CB_ADDSTRING, 0, (LPARAM)L"Ascending");
+        SendMessageW(hSortDir, CB_ADDSTRING, 0, (LPARAM)L"Descending");
+        SendMessageW(hSortDir, CB_SETCURSEL, c->sortDescending ? 1 : 0, 0);
+    }
+    HWND hSortObjType = GetDlgItem(pg, IDC_SORT_FOLDERSFIRST);
+    if (hSortObjType) {
+        SendMessageW(hSortObjType, CB_RESETCONTENT, 0, 0);
+        SendMessageW(hSortObjType, CB_ADDSTRING, 0, (LPARAM)L"Disabled"); // 0
+        SendMessageW(hSortObjType, CB_ADDSTRING, 0, (LPARAM)L"Folders first");  // 1
+        SendMessageW(hSortObjType, CB_ADDSTRING, 0, (LPARAM)L"Files first");    // 2
+        int sel = (c->sortObjectTypePriority >= 0 && c->sortObjectTypePriority <= 2) ? c->sortObjectTypePriority : 0;
+        SendMessageW(hSortObjType, CB_SETCURSEL, sel, 0);
+    }
 }
 
 static BOOL Sorting_Save(HWND pg, Config* c){
-    BOOL ch=FALSE; BOOL b;
-    int v;
-    
-    v=(int)SendDlgItemMessageW(pg,IDC_SORT_FIELD,CB_GETCURSEL,0,0);
-    if(v>=0 && v!=c->sortField){c->sortField=v;ch=TRUE;}
-    
-    b=get_check(pg,IDC_SORT_DESCENDING); if(c->sortDescending!=b){c->sortDescending=b;ch=TRUE;}
-    b=get_check(pg,IDC_SORT_FOLDERSFIRST); if(c->sortFoldersFirst!=b){c->sortFoldersFirst=b;ch=TRUE;}
-    
-    v=get_int(pg,IDC_MAXITEMS_EDIT,c->maxItems); if(v!=c->maxItems){c->maxItems=v;ch=TRUE;}
-    
+    BOOL ch=FALSE;
+    HWND hSortField = GetDlgItem(pg, IDC_SORT_FIELD);
+    int v = (int)SendMessageW(hSortField, CB_GETCURSEL, 0, 0);
+    if (v >= 0 && v <= 4 && c->sortField != v) { c->sortField = v; ch = TRUE; }
+    HWND hSortDir = GetDlgItem(pg, IDC_SORT_DIRECTION);
+    int dir = (int)SendMessageW(hSortDir, CB_GETCURSEL, 0, 0);
+    BOOL desc = (dir == 1);
+    if (c->sortDescending != desc) { c->sortDescending = desc; ch = TRUE; }
+    HWND hSortObjType = GetDlgItem(pg, IDC_SORT_FOLDERSFIRST);
+    int objType = (int)SendMessageW(hSortObjType, CB_GETCURSEL, 0, 0);
+    if (objType < 0 || objType > 2) objType = 0;
+    if (c->sortObjectTypePriority != objType) { c->sortObjectTypePriority = objType; ch = TRUE; }
     if(!ch) return FALSE;
-    
     if(c->iniPath[0]){
-        const WCHAR* fields[] = {L"name", L"date", L"created", L"size", L"type"};
+        const WCHAR* fields[] = {L"name", L"datemodified", L"datecreated", L"type", L"size"};
         if(c->sortField >= 0 && c->sortField < 5)
             WritePrivateProfileStringW(L"Sorting",L"SortBy",fields[c->sortField],c->iniPath);
-            
         WritePrivateProfileStringW(L"Sorting",L"SortDirection",c->sortDescending?L"descending":L"ascending",c->iniPath);
-        WritePrivateProfileStringW(L"Sorting",L"FoldersFirst",c->sortFoldersFirst?L"true":L"false",c->iniPath);
-        
-        WCHAR buf[32];
-        wsprintfW(buf,L"%d",c->maxItems);
-        WritePrivateProfileStringW(L"General",L"MaxItems",buf,c->iniPath);
+        const WCHAR* objTypeStr = L"false";
+        if (c->sortObjectTypePriority == 1) objTypeStr = L"true";
+        else if (c->sortObjectTypePriority == 2) objTypeStr = L"files";
+        WritePrivateProfileStringW(L"Sorting",L"FoldersFirst",objTypeStr,c->iniPath);
     }
     return TRUE;
 }
@@ -237,16 +362,28 @@ static void Advanced_Load(HWND pg, Config* c){
     set_check(pg,IDC_RECENT_SHOW_EXT,c->recentShowExtensions);
     set_check(pg,IDC_RECENT_SHOW_CLEAN,c->recentShowCleanItems);
     set_check(pg,IDC_THISPC_AS_SUBMENU,c->thisPCAsSubmenu);
+    set_check(pg,IDC_THISPC_ITEMS_AS_SUBMENUS,c->thisPCItemsAsSubmenus);
+    set_check(pg,IDC_THISPC_SHOW_ICONS,c->thisPCShowIcons);
     set_check(pg,IDC_HOME_AS_SUBMENU,c->homeAsSubmenu);
+    set_check(pg,IDC_HOME_ITEMS_AS_SUBMENUS,c->homeItemsAsSubmenus);
+    set_check(pg,IDC_HOME_SHOW_ICONS,c->homeShowIcons);
     set_check(pg,IDC_TASKKILL_ALL_DESKTOPS,c->taskKillAllDesktops);
-    // Power exclusions
-    // Checkboxes now represent inclusion (checked = include), so invert exclude flags
-    set_check(pg,IDC_EXCL_SLEEP,!c->excludeSleep);
-    set_check(pg,IDC_EXCL_HIBERNATE,!c->excludeHibernate);
-    set_check(pg,IDC_EXCL_SHUTDOWN,!c->excludeShutdown);
-    set_check(pg,IDC_EXCL_RESTART,!c->excludeRestart);
-    set_check(pg,IDC_EXCL_LOCK,!c->excludeLock);
-    set_check(pg,IDC_EXCL_LOGOFF,!c->excludeLogoff);
+    set_check(pg,IDC_TASKKILL_IGNORE_SYSTEM,c->taskKillIgnoreSystem);
+    set_check(pg,IDC_TASKKILL_LIST_WINDOWS,c->taskKillListWindows);
+    set_check(pg,IDC_TASKKILL_SHOW_ICONS,c->taskKillShowIcons);
+    set_int(pg,IDC_TASKKILL_MAX_COMBO,c->taskKillMax);
+    if(c->taskKillExcludes[0]){
+        SetDlgItemTextW(pg,IDC_TASKKILL_EXCLUDES,c->taskKillExcludes);
+    }else{
+        // Set cue banner (placeholder) if empty
+        HWND hEdit = GetDlgItem(pg, IDC_TASKKILL_EXCLUDES);
+        if(hEdit){
+            // Windows >= Vista: EM_SETCUEBANNER = 0x1501
+            SendMessageW(hEdit, 0x1501, TRUE, (LPARAM)L"mspaint.exe,xboxapp.exe");
+            SetDlgItemTextW(pg,IDC_TASKKILL_EXCLUDES,L"");
+        }
+    }
+    // Power exclusions removed from Advanced page
     // Populate name display combo (ID 1702): 0=Full path,1=File name
     HWND hCombo=GetDlgItem(pg,1702);
     if(hCombo){
@@ -266,15 +403,24 @@ static BOOL Advanced_Save(HWND pg, Config* c){
     b=get_check(pg,IDC_RECENT_SHOW_EXT); if(c->recentShowExtensions!=b){c->recentShowExtensions=b;ch=TRUE;}
     b=get_check(pg,IDC_RECENT_SHOW_CLEAN); if(c->recentShowCleanItems!=b){c->recentShowCleanItems=b;ch=TRUE;}
     b=get_check(pg,IDC_THISPC_AS_SUBMENU); if(c->thisPCAsSubmenu!=b){c->thisPCAsSubmenu=b;ch=TRUE;}
+    b=get_check(pg,IDC_THISPC_ITEMS_AS_SUBMENUS); if(c->thisPCItemsAsSubmenus!=b){c->thisPCItemsAsSubmenus=b;ch=TRUE;}
+    b=get_check(pg,IDC_THISPC_SHOW_ICONS); if(c->thisPCShowIcons!=b){c->thisPCShowIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_HOME_AS_SUBMENU); if(c->homeAsSubmenu!=b){c->homeAsSubmenu=b;ch=TRUE;}
+    b=get_check(pg,IDC_HOME_ITEMS_AS_SUBMENUS); if(c->homeItemsAsSubmenus!=b){c->homeItemsAsSubmenus=b;ch=TRUE;}
+    b=get_check(pg,IDC_HOME_SHOW_ICONS); if(c->homeShowIcons!=b){c->homeShowIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_TASKKILL_ALL_DESKTOPS); if(c->taskKillAllDesktops!=b){c->taskKillAllDesktops=b;ch=TRUE;}
-    // Power inclusion checkboxes (checked = include). Store as exclusion flags internally.
-    b=!get_check(pg,IDC_EXCL_SLEEP); if(c->excludeSleep!=b){c->excludeSleep=b; ch=TRUE;}
-    b=!get_check(pg,IDC_EXCL_HIBERNATE); if(c->excludeHibernate!=b){c->excludeHibernate=b; ch=TRUE;}
-    b=!get_check(pg,IDC_EXCL_SHUTDOWN); if(c->excludeShutdown!=b){c->excludeShutdown=b; ch=TRUE;}
-    b=!get_check(pg,IDC_EXCL_RESTART); if(c->excludeRestart!=b){c->excludeRestart=b; ch=TRUE;}
-    b=!get_check(pg,IDC_EXCL_LOCK); if(c->excludeLock!=b){c->excludeLock=b; ch=TRUE;}
-    b=!get_check(pg,IDC_EXCL_LOGOFF); if(c->excludeLogoff!=b){c->excludeLogoff=b; ch=TRUE;}
+    b=get_check(pg,IDC_TASKKILL_IGNORE_SYSTEM); if(c->taskKillIgnoreSystem!=b){c->taskKillIgnoreSystem=b;ch=TRUE;}
+    b=get_check(pg,IDC_TASKKILL_LIST_WINDOWS); if(c->taskKillListWindows!=b){c->taskKillListWindows=b;ch=TRUE;}
+    b=get_check(pg,IDC_TASKKILL_SHOW_ICONS); if(c->taskKillShowIcons!=b){c->taskKillShowIcons=b;ch=TRUE;}
+    int v2=get_int(pg,IDC_TASKKILL_MAX_COMBO,c->taskKillMax); if(v2!=c->taskKillMax){c->taskKillMax=v2;ch=TRUE;}
+    WCHAR buf2[512];
+    if(GetDlgItemTextW(pg,IDC_TASKKILL_EXCLUDES,buf2,ARRAYSIZE(buf2))){
+        if(lstrcmpW(buf2,c->taskKillExcludes)!=0){
+            lstrcpynW(c->taskKillExcludes,buf2,ARRAYSIZE(c->taskKillExcludes));
+            ch=TRUE;
+        }
+    }
+    // Power inclusion checkboxes removed from Advanced page
     HWND hCombo=GetDlgItem(pg,1702);
     if(hCombo){
         int mode=(int)SendMessageW(hCombo,CB_GETCURSEL,0,0);
@@ -292,24 +438,21 @@ static BOOL Advanced_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"RecentItems",L"RecentShowCleanItems",c->recentShowCleanItems?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"RecentItems",L"RecentLabel", c->recentLabelMode==0?L"fullpath":L"name", c->iniPath);
         WritePrivateProfileStringW(L"ThisPC",L"ThisPCAsSubmenu",c->thisPCAsSubmenu?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"ThisPC",L"ThisPCItemsAsSubmenus",c->thisPCItemsAsSubmenus?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"ThisPC",L"ThisPCShowIcons",c->thisPCShowIcons?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"Home",L"HomeAsSubmenu",c->homeAsSubmenu?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Home",L"HomeItemsAsSubmenus",c->homeItemsAsSubmenus?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Home",L"HomeShowIcons",c->homeShowIcons?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"TaskKill",L"TaskKillAllDesktops",c->taskKillAllDesktops?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"TaskKill",L"TaskKillIgnoreSystem",c->taskKillIgnoreSystem?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"TaskKill",L"TaskKillListWindows",c->taskKillListWindows?L"true":L"false",c->iniPath);
+        WCHAR num2[32]; wsprintfW(num2,L"%d",c->taskKillMax); WritePrivateProfileStringW(L"TaskKill",L"TaskKillMax",num2,c->iniPath);
+        WritePrivateProfileStringW(L"TaskKill",L"TaskKillShowIcons",c->taskKillShowIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"TaskKill",L"TaskKillExcludes",c->taskKillExcludes,c->iniPath);
         WCHAR num[32]; wsprintfW(num,L"%d",c->recentMax); WritePrivateProfileStringW(L"RecentItems",L"RecentMax",num,c->iniPath);
-        WritePrivateProfileStringW(L"General",L"DefaultIcon",c->defaultIconPath,c->iniPath);
-        WritePrivateProfileStringW(L"General",L"DefaultIconLight",c->defaultIconPathLight,c->iniPath);
-        WritePrivateProfileStringW(L"General",L"DefaultIconDark",c->defaultIconPathDark,c->iniPath);
-        // Persist new inclusion model: only write keys for excluded options as Name=0, remove when included.
-        // Names: Sleep, Hibernate, Shutdown, Restart, Lock, Logoff
-        WritePrivateProfileStringW(L"Power",L"Sleep", c->excludeSleep? L"0" : NULL, c->iniPath);
-        WritePrivateProfileStringW(L"Power",L"Hibernate", c->excludeHibernate? L"0" : NULL, c->iniPath);
-        WritePrivateProfileStringW(L"Power",L"Shutdown", c->excludeShutdown? L"0" : NULL, c->iniPath);
-        WritePrivateProfileStringW(L"Power",L"Restart", c->excludeRestart? L"0" : NULL, c->iniPath);
-        WritePrivateProfileStringW(L"Power",L"Lock", c->excludeLock? L"0" : NULL, c->iniPath);
-        WritePrivateProfileStringW(L"Power",L"Logoff", c->excludeLogoff? L"0" : NULL, c->iniPath);
-        if(!c->excludeSleep && !c->excludeHibernate && !c->excludeShutdown && !c->excludeRestart && !c->excludeLock && !c->excludeLogoff){
-            // All included: remove entire [Power] section if present
-            WritePrivateProfileStringW(L"Power", NULL, NULL, c->iniPath);
-        }
+        if(c->defaultIconPath[0]) WritePrivateProfileStringW(L"General",L"DefaultIcon",c->defaultIconPath,c->iniPath); else WritePrivateProfileStringW(L"General",L"DefaultIcon",NULL,c->iniPath);
+        if(c->defaultIconPathLight[0]) WritePrivateProfileStringW(L"General",L"DefaultIconLight",c->defaultIconPathLight,c->iniPath); else WritePrivateProfileStringW(L"General",L"DefaultIconLight",NULL,c->iniPath);
+        if(c->defaultIconPathDark[0]) WritePrivateProfileStringW(L"General",L"DefaultIconDark",c->defaultIconPathDark,c->iniPath); else WritePrivateProfileStringW(L"General",L"DefaultIconDark",NULL,c->iniPath);
     }
     return TRUE;
 }
@@ -317,7 +460,24 @@ static BOOL Advanced_Save(HWND pg, Config* c){
 // -------- Menu & Icons Pages (read-only skeleton) --------
 static const WCHAR* item_type_name(ConfigItemType t){
     switch(t){
-        case CI_SEPARATOR: return L"Separator"; case CI_URI: return L"URI"; case CI_FILE: return L"File"; case CI_CMD: return L"Command"; case CI_FOLDER: return L"Folder"; case CI_FOLDER_SUBMENU: return L"Folder (submenu)"; case CI_POWER_SLEEP: return L"Sleep"; case CI_POWER_HIBERNATE: return L"Hibernate"; case CI_POWER_SHUTDOWN: return L"Shutdown"; case CI_POWER_RESTART: return L"Restart"; case CI_POWER_LOCK: return L"Lock"; case CI_POWER_LOGOFF: return L"Logoff"; case CI_RECENT_SUBMENU: return L"Recent"; case CI_POWER_MENU: return L"Power Menu"; }
+        case CI_SEPARATOR: return L"Separator";
+        case CI_URI: return L"URI";
+        case CI_FILE: return L"File";
+        case CI_CMD: return L"Command";
+        case CI_FOLDER: return L"Folder";
+        case CI_FOLDER_SUBMENU: return L"Folder (submenu)";
+        case CI_POWER_SLEEP: return L"Sleep";
+        case CI_POWER_HIBERNATE: return L"Hibernate";
+        case CI_POWER_SHUTDOWN: return L"Shutdown";
+        case CI_POWER_RESTART: return L"Restart";
+        case CI_POWER_LOCK: return L"Lock";
+        case CI_POWER_LOGOFF: return L"Logoff";
+        case CI_RECENT_SUBMENU: return L"Recent";
+        case CI_POWER_MENU: return L"Power Menu";
+        case CI_THISPC: return L"This PC";
+        case CI_HOME: return L"Home";
+        case CI_TASKKILL: return L"Task Kill";
+    }
     return L"?";
 }
 static void lv_add_col(HWND lv,int i,int w,const WCHAR* txt){
@@ -371,8 +531,25 @@ static void Menu_Load(HWND pg, Config* c){
 // Map internal enum to legacy textual token used in original INI format
 static const WCHAR* item_type_token(ConfigItemType t){
     switch(t){
-        case CI_SEPARATOR: return L"SEPARATOR"; case CI_URI: return L"URI"; case CI_FILE: return L"FILE"; case CI_CMD: return L"CMD"; case CI_FOLDER: return L"FOLDER"; case CI_FOLDER_SUBMENU: return L"FOLDER_SUBMENU"; case CI_POWER_SLEEP: return L"POWER_SLEEP"; case CI_POWER_HIBERNATE: return L"POWER_HIBERNATE"; case CI_POWER_SHUTDOWN: return L"POWER_SHUTDOWN"; case CI_POWER_RESTART: return L"POWER_RESTART"; case CI_POWER_LOCK: return L"POWER_LOCK"; case CI_POWER_LOGOFF: return L"POWER_LOGOFF"; case CI_RECENT_SUBMENU: return L"RECENT_SUBMENU"; case CI_POWER_MENU: return L"POWER_MENU"; }
-    return L"SEPARATOR";
+        case CI_SEPARATOR: return L"SEPARATOR";
+        case CI_URI: return L"URI";
+        case CI_FILE: return L"FILE";
+        case CI_CMD: return L"CMD";
+        case CI_FOLDER: return L"FOLDER";
+        case CI_FOLDER_SUBMENU: return L"FOLDER_SUBMENU";
+        case CI_POWER_SLEEP: return L"POWER_SLEEP";
+        case CI_POWER_HIBERNATE: return L"POWER_HIBERNATE";
+        case CI_POWER_SHUTDOWN: return L"POWER_SHUTDOWN";
+        case CI_POWER_RESTART: return L"POWER_RESTART";
+        case CI_POWER_LOCK: return L"POWER_LOCK";
+        case CI_POWER_LOGOFF: return L"POWER_LOGOFF";
+        case CI_RECENT_SUBMENU: return L"RECENT_SUBMENU";
+        case CI_POWER_MENU: return L"POWER_MENU";
+        case CI_TASKKILL: return L"TASKKILL";
+        case CI_THISPC: return L"THISPC";
+        case CI_HOME: return L"HOME";
+        default: return L"UNKNOWN";
+    }
 }
 static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c->iniPath[0]) return FALSE; BOOL any=FALSE;
     // Legacy format: ItemN=Label|TYPE|Path|(optional Params)
@@ -384,8 +561,17 @@ static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c
         if(it->type==CI_SEPARATOR){ // Always write canonical separator form
             wsprintfW(line,L"---|SEPARATOR|");
         } else {
-            // Label|TYPE|
-            if(it->path[0]){
+            // For special types that don't use path, ensure correct serialization
+            if(
+                it->type==CI_POWER_MENU ||
+                it->type==CI_RECENT_SUBMENU ||
+                it->type==CI_TASKKILL ||
+                it->type==CI_THISPC ||
+                it->type==CI_HOME
+            ){
+                // These types do not use path/params, just label and type
+                wsprintfW(line,L"%s|%s|",it->label,token);
+            } else if(it->path[0]){
                 if(it->params[0]) wsprintfW(line,L"%s|%s|%s|%s",it->label,token,it->path,it->params);
                 else wsprintfW(line,L"%s|%s|%s",it->label,token,it->path);
             } else {
@@ -475,17 +661,36 @@ static BOOL Icons_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!
         // Clean empty companion sections (heuristic): check if main had none but flags set? Simplicity: rely on any flag.
         // Optional refinement could parse file again; omitted for performance.
     }
-    return any; }
-
-// Enable/disable Menu buttons (Add always enabled; others depend on selection & position)
+    return any;
+}
 // (menu_update_buttons & refresh_lists implemented later with working copy helpers)
 
 // ---------------- Item Edit Dialog -----------------
 typedef struct ItemEditCtx { ConfigItem tmp; BOOL editing; } ItemEditCtx;
 static void item_fill_type_combo(HWND h){
     const struct { ConfigItemType t; const WCHAR* n; } types[]={
-        {CI_SEPARATOR,L"Separator"},{CI_URI,L"URI"},{CI_FILE,L"File"},{CI_CMD,L"Command"},{CI_FOLDER,L"Folder"},{CI_FOLDER_SUBMENU,L"Folder (submenu)"},{CI_POWER_SLEEP,L"Sleep"},{CI_POWER_HIBERNATE,L"Hibernate"},{CI_POWER_SHUTDOWN,L"Shutdown"},{CI_POWER_RESTART,L"Restart"},{CI_POWER_LOCK,L"Lock"},{CI_POWER_LOGOFF,L"Logoff"},{CI_RECENT_SUBMENU,L"Recent"},{CI_POWER_MENU,L"Power Menu"}
-    }; for(int i=0;i< (int)(sizeof(types)/sizeof(types[0])); i++){ int idx=(int)SendMessageW(h,CB_ADDSTRING,0,(LPARAM)types[i].n); SendMessageW(h,CB_SETITEMDATA,idx,types[i].t); }
+        {CI_SEPARATOR,L"Separator"},
+        {CI_URI,L"URI"},
+        {CI_FILE,L"File"},
+        {CI_CMD,L"Command"},
+        {CI_FOLDER,L"Folder"},
+        {CI_FOLDER_SUBMENU,L"Folder (submenu)"},
+        {CI_POWER_SLEEP,L"Sleep"},
+        {CI_POWER_HIBERNATE,L"Hibernate"},
+        {CI_POWER_SHUTDOWN,L"Shutdown"},
+        {CI_POWER_RESTART,L"Restart"},
+        {CI_POWER_LOCK,L"Lock"},
+        {CI_POWER_LOGOFF,L"Logoff"},
+        {CI_RECENT_SUBMENU,L"Recent"},
+        {CI_POWER_MENU,L"Power Menu"},
+        {CI_THISPC,L"This PC"},
+        {CI_HOME,L"Home"},
+        {CI_TASKKILL,L"Task Kill"}
+    };
+    for(int i=0;i< (int)(sizeof(types)/sizeof(types[0])); i++){
+        int idx=(int)SendMessageW(h,CB_ADDSTRING,0,(LPARAM)types[i].n);
+        SendMessageW(h,CB_SETITEMDATA,idx,types[i].t);
+    }
 }
 static INT_PTR CALLBACK ItemEditDlg(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
     ItemEditCtx* ctx=(ItemEditCtx*)GetWindowLongPtrW(dlg,GWLP_USERDATA);
@@ -519,7 +724,16 @@ static INT_PTR CALLBACK ItemEditDlg(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
 }
 
 static BOOL edit_item_modal(HWND parent, ConfigItem* outItem, BOOL editing){
-    ItemEditCtx ctx; ZeroMemory(&ctx,sizeof(ctx)); if(outItem) ctx.tmp=*outItem; else ctx.tmp.type=CI_FILE; ctx.editing=editing; INT_PTR r=DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_ITEM_EDIT),parent,ItemEditDlg,(LPARAM)&ctx); if(r==IDOK){ if(outItem) *outItem=ctx.tmp; return TRUE; } return FALSE; }
+    ItemEditCtx ctx; ZeroMemory(&ctx,sizeof(ctx));
+    if(outItem) ctx.tmp=*outItem; else ctx.tmp.type=CI_FILE;
+    ctx.editing=editing;
+    INT_PTR r=DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_ITEM_EDIT),parent,ItemEditDlg,(LPARAM)&ctx);
+    if(r==IDOK){
+        if(outItem) *outItem=ctx.tmp;
+        return TRUE;
+    }
+    return FALSE;
+}
 
 // ---------------- Menu actions -----------------
 static int menu_get_selected_index(HWND lv){ int sel=(int)SendMessageW(lv,LVM_GETNEXTITEM,(WPARAM)-1,LVNI_SELECTED); if(sel<0) return -1; LVITEMW li; ZeroMemory(&li,sizeof(li)); li.iItem=sel; li.mask=LVIF_PARAM; if(SendMessageW(lv,LVM_GETITEM,0,(LPARAM)&li)) return (int)li.lParam; return -1; }
@@ -670,138 +884,169 @@ static void relayout_page(HWND page, int w, int h){
     }
 }
 static void show_page(SettingsState* st,int idx){ for(int i=0;i<6;i++){ if(st->pages[i]) ShowWindow(st->pages[i], i==idx?SW_SHOW:SW_HIDE); } }
-static BOOL save_all(SettingsState* st){ if(!st) return FALSE; if(st->workingDirty){ working_commit(st); } BOOL any=FALSE; any|=General_Save(st->pages[0],st->cfg); any|=Placement_Save(st->pages[1],st->cfg); any|=Advanced_Save(st->pages[5],st->cfg); any|=Menu_Save(st->pages[2],st->cfg); any|=Icons_Save(st->pages[3],st->cfg); any|=Sorting_Save(st->pages[4],st->cfg); return any; }
+static BOOL save_all(SettingsState* st) {
+    if(!st) return FALSE;
+    if(st->workingDirty){ working_commit(st); }
+    int generalResult = General_Save(st->pages[0],st->cfg);
+    if (generalResult == 2)
+        st->reloadNeeded = TRUE;
+    BOOL any = (generalResult != 0);
+    any |= Placement_Save(st->pages[1],st->cfg);
+    any |= Advanced_Save(st->pages[5],st->cfg);
+    any |= Menu_Save(st->pages[2],st->cfg);
+    any |= Icons_Save(st->pages[3],st->cfg);
+    any |= Sorting_Save(st->pages[4],st->cfg);
+    return any;
+}
 
 static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
-    static SettingsState* st=NULL;
-    switch(msg){
-    case WM_GETMINMAXINFO:
-        if(st){
-            MINMAXINFO* mmi=(MINMAXINFO*)lParam;
-            mmi->ptMinTrackSize.x = st->baseW;
-            mmi->ptMinTrackSize.y = st->baseH;
-        }
-        return 0;
-    case WM_SYSCOMMAND:
-        if((wParam & 0xFFF0) == SC_CLOSE){
+    static SettingsState* st = NULL;
+    switch (msg) {
+        case WM_GETMINMAXINFO:
+            if (st) {
+                MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+                mmi->ptMinTrackSize.x = st->baseW;
+                mmi->ptMinTrackSize.y = st->baseH;
+            }
+            break;
+        case WM_SYSCOMMAND:
+            if ((wParam & 0xFFF0) == SC_CLOSE) {
+                EndDialog(dlg, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
             EndDialog(dlg, IDCANCEL);
             return TRUE;
-        }
-        break;
-    case WM_CLOSE:
-        EndDialog(dlg, IDCANCEL);
-        return TRUE;
-    case WM_INITDIALOG:
-        st=(SettingsState*)calloc(1,sizeof(SettingsState));
-        st->cfg=(Config*)lParam;
-        {
-            RECT rc; GetWindowRect(dlg,&rc); st->baseW = rc.right-rc.left; st->baseH = rc.bottom-rc.top;
-        }
-        {
-            LONG_PTR ex=GetWindowLongPtrW(dlg,GWL_EXSTYLE); SetWindowLongPtrW(dlg,GWL_EXSTYLE,ex|WS_EX_APPWINDOW);
-        }
-        apply_dialog_icon(dlg,st->cfg);
-        init_tabs(dlg,st);
-        // Center window manually (DS_CENTER removed). Use work area.
-        {
-            RECT rc; GetWindowRect(dlg,&rc); RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
-            int w=rc.right-rc.left; int h=rc.bottom-rc.top;
-            int x=wa.left + ( (wa.right-wa.left) - w)/2; int y=wa.top + ( (wa.bottom-wa.top) - h)/2;
-            SetWindowPos(dlg,NULL,x,y,0,0,SWP_NOZORDER|SWP_NOSIZE);
-        }
-        return TRUE;
-    case WM_SIZE:
-        if(st){
-            int cw = LOWORD(lParam); int ch = HIWORD(lParam);
-            // Layout: buttons anchored bottom-right, tabs fill remaining above button row
-            HWND hApply=GetDlgItem(dlg,IDC_APPLY);
-            HWND hSave=GetDlgItem(dlg,IDC_SAVEEXIT);
-            HWND hCancel=GetDlgItem(dlg,IDC_CANCEL);
-            RECT rb; GetWindowRect(hApply,&rb); MapWindowPoints(NULL,dlg,(POINT*)&rb,2); int btnH = rb.bottom-rb.top; int btnW = rb.right-rb.left;
-            int margin=6; int gap=4;
-            int cancelW, cancelH; RECT rc; GetWindowRect(hCancel,&rc); MapWindowPoints(NULL,dlg,(POINT*)&rc,2); cancelW=rc.right-rc.left; cancelH=rc.bottom-rc.top;
-            int saveW, saveH; GetWindowRect(hSave,&rc); MapWindowPoints(NULL,dlg,(POINT*)&rc,2); saveW=rc.right-rc.left; saveH=rc.bottom-rc.top;
-            int applyW, applyH; GetWindowRect(hApply,&rc); MapWindowPoints(NULL,dlg,(POINT*)&rc,2); applyW=rc.right-rc.left; applyH=rc.bottom-rc.top;
-            int btnY = ch - margin - btnH;
-            // Total width of button cluster with equal gaps
-            int totalW = applyW + saveW + cancelW + gap*2;
-            // Center cluster; keep at least margin from edges
-            int clusterX = (cw - totalW)/2; if(clusterX < margin) clusterX = margin; if(clusterX + totalW > cw - margin) clusterX = cw - margin - totalW;
-            int xApply = clusterX;
-            int xSave  = xApply + applyW + gap;
-            int xCancel= xSave + saveW + gap;
-            SetWindowPos(hApply,NULL,xApply,btnY,0,0,SWP_NOZORDER|SWP_NOSIZE);
-            SetWindowPos(hSave,NULL,xSave,btnY,0,0,SWP_NOZORDER|SWP_NOSIZE);
-            SetWindowPos(hCancel,NULL,xCancel,btnY,0,0,SWP_NOZORDER|SWP_NOSIZE);
-            // Resize tab control
-            HWND hTabs=st->hTabs; if(hTabs){
-                RECT rTabs; GetWindowRect(hTabs,&rTabs); MapWindowPoints(NULL,dlg,(POINT*)&rTabs,2);
-                int tabsX = rTabs.left; int tabsY = rTabs.top; // keep original top-left
-                int tabsW = cw - tabsX - margin;
-                int tabsH = btnY - tabsY - margin;
-                if(tabsW<100) tabsW=100; if(tabsH<100) tabsH=100;
-                SetWindowPos(hTabs,NULL,tabsX,tabsY,tabsW,tabsH,SWP_NOZORDER);
-                // Adjust pages to new tab display area
-                RECT rcClient; GetClientRect(hTabs,&rcClient); RECT rcDisplay=rcClient; TabCtrl_AdjustRect(hTabs,FALSE,&rcDisplay); MapWindowPoints(hTabs,dlg,(POINT*)&rcDisplay,2);
-                // Compute consistent padding like in init_tabs
-                RECT rItem0; if(TabCtrl_GetItemRect(hTabs,0,&rItem0)){ MapWindowPoints(hTabs,dlg,(POINT*)&rItem0,2);} int headerBottom=rItem0.bottom; int gapBelowTabs=6; int leftPadding=12; int rightPadding=8; int bottomPadding=8;
-                int x = rcDisplay.left + leftPadding; int y = headerBottom + gapBelowTabs; int w = (rcDisplay.right - leftPadding) - rightPadding - rcDisplay.left; int h = (rcDisplay.bottom - bottomPadding) - y; if(h<0) h=0;
-                for(int i=0;i<6;i++){ if(st->pages[i]){ SetWindowPos(st->pages[i],NULL,x,y,w,h,SWP_NOZORDER); relayout_page(st->pages[i],w,h); } }
+        case WM_INITDIALOG:
+            st = (SettingsState*)calloc(1, sizeof(SettingsState));
+            st->cfg = (Config*)lParam;
+            // Store original power option states
+            st->origExcludeSleep = st->cfg->excludeSleep;
+            st->origExcludeHibernate = st->cfg->excludeHibernate;
+            st->origExcludeShutdown = st->cfg->excludeShutdown;
+            st->origExcludeRestart = st->cfg->excludeRestart;
+            st->origExcludeLock = st->cfg->excludeLock;
+            st->origExcludeLogoff = st->cfg->excludeLogoff;
+            {
+                RECT rc; GetWindowRect(dlg, &rc); st->baseW = rc.right - rc.left; st->baseH = rc.bottom - rc.top;
+                LONG_PTR ex = GetWindowLongPtrW(dlg, GWL_EXSTYLE); SetWindowLongPtrW(dlg, GWL_EXSTYLE, ex | WS_EX_APPWINDOW);
             }
-        }
-        return 0;
-    case WM_NOTIFY:{
-        LPNMHDR nh=(LPNMHDR)lParam;
-        if(nh->idFrom==IDC_SETTINGS_TABS && nh->code==TCN_SELCHANGE){
-            int sel=TabCtrl_GetCurSel(st->hTabs);
-            show_page(st,sel);
-            if(sel==2) menu_update_buttons(st, st->pages[2]);
-            if(sel==3) icons_update_buttons(st, st->pages[3]);
-        }
-        // Live selection changes in Icons list
-        if(nh->idFrom==IDC_ICONS_LIST && nh->code==LVN_ITEMCHANGED){
-            LPNMLISTVIEW lv=(LPNMLISTVIEW)nh; if((lv->uChanged & LVIF_STATE) && ( (lv->uNewState^lv->uOldState) & LVIS_SELECTED)){
-                icons_update_buttons(st, st->pages[3]);
+            apply_dialog_icon(dlg, st->cfg);
+            init_tabs(dlg, st);
+            // Center window manually (DS_CENTER removed). Use work area.
+            {
+                RECT rc; GetWindowRect(dlg, &rc); RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+                int w = rc.right - rc.left; int h = rc.bottom - rc.top;
+                int x = wa.left + ((wa.right - wa.left) - w) / 2; int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+                SetWindowPos(dlg, NULL, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
             }
-        }
-        // Live selection changes in Menu list
-        if(nh->idFrom==IDC_MENU_LIST && nh->code==LVN_ITEMCHANGED){
-            LPNMLISTVIEW lv=(LPNMLISTVIEW)nh; if((lv->uChanged & LVIF_STATE) && ( (lv->uNewState^lv->uOldState) & LVIS_SELECTED)){
-                menu_update_buttons(st, st->pages[2]);
-            }
-        }
-        break; }
-    case WM_COMMAND:
-        switch(LOWORD(wParam)){
-            case IDC_APPLY: save_all(st); return TRUE;
-            case IDC_SAVEEXIT: save_all(st); EndDialog(dlg,IDOK); return TRUE;
-            case IDC_CANCEL: EndDialog(dlg,IDCANCEL); return TRUE;
-            case IDC_OPEN_CONFIG_FOLDER: {
-                if(st && st->cfg && st->cfg->iniPath[0]){
-                    WCHAR folder[MAX_PATH]; lstrcpynW(folder, st->cfg->iniPath, ARRAYSIZE(folder));
-                    PathRemoveFileSpecW(folder);
-                    if(folder[0]) ShellExecuteW(dlg, L"open", folder, NULL, NULL, SW_SHOWNORMAL);
+            return TRUE;
+        case WM_SIZE:
+            if (st) {
+                int cw = LOWORD(lParam); int ch = HIWORD(lParam);
+                // Layout: buttons anchored bottom-right, tabs fill remaining above button row
+                HWND hApply = GetDlgItem(dlg, IDC_APPLY);
+                HWND hSave = GetDlgItem(dlg, IDC_SAVEEXIT);
+                HWND hCancel = GetDlgItem(dlg, IDC_CANCEL);
+                RECT rb; GetWindowRect(hApply, &rb); MapWindowPoints(NULL, dlg, (POINT*)&rb, 2); int btnH = rb.bottom - rb.top; int btnW = rb.right - rb.left;
+                int margin = 6; int gap = 4;
+                int cancelW, cancelH; RECT rc; GetWindowRect(hCancel, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); cancelW = rc.right - rc.left; cancelH = rc.bottom - rc.top;
+                int saveW, saveH; GetWindowRect(hSave, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); saveW = rc.right - rc.left; saveH = rc.bottom - rc.top;
+                int applyW, applyH; GetWindowRect(hApply, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); applyW = rc.right - rc.left; applyH = rc.bottom - rc.top;
+                int btnY = ch - margin - btnH;
+                // Total width of button cluster with equal gaps
+                int totalW = applyW + saveW + cancelW + gap * 2;
+                // Center cluster; keep at least margin from edges
+                int clusterX = (cw - totalW) / 2; if (clusterX < margin) clusterX = margin; if (clusterX + totalW > cw - margin) clusterX = cw - margin - totalW;
+                int xApply = clusterX;
+                int xSave = xApply + applyW + gap;
+                int xCancel = xSave + saveW + gap;
+                SetWindowPos(hApply, NULL, xApply, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+                SetWindowPos(hSave, NULL, xSave, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+                SetWindowPos(hCancel, NULL, xCancel, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+                // Resize tab control
+                HWND hTabs = st->hTabs; if (hTabs) {
+                    RECT rTabs; GetWindowRect(hTabs, &rTabs); MapWindowPoints(NULL, dlg, (POINT*)&rTabs, 2);
+                    int tabsX = rTabs.left; int tabsY = rTabs.top; // keep original top-left
+                    int tabsW = cw - tabsX - margin;
+                    int tabsH = btnY - tabsY - margin;
+                    if (tabsW < 100) tabsW = 100; if (tabsH < 100) tabsH = 100;
+                    SetWindowPos(hTabs, NULL, tabsX, tabsY, tabsW, tabsH, SWP_NOZORDER);
+                    // Adjust pages to new tab display area
+                    RECT rcClient; GetClientRect(hTabs, &rcClient); RECT rcDisplay = rcClient; TabCtrl_AdjustRect(hTabs, FALSE, &rcDisplay); MapWindowPoints(hTabs, dlg, (POINT*)&rcDisplay, 2);
+                    // Compute consistent padding like in init_tabs
+                    RECT rItem0; if (TabCtrl_GetItemRect(hTabs, 0, &rItem0)) { MapWindowPoints(hTabs, dlg, (POINT*)&rItem0, 2); } int headerBottom = rItem0.bottom; int gapBelowTabs = 6; int leftPadding = 12; int rightPadding = 8; int bottomPadding = 8;
+                    int x = rcDisplay.left + leftPadding; int y = headerBottom + gapBelowTabs; int w = (rcDisplay.right - leftPadding) - rightPadding - rcDisplay.left; int h = (rcDisplay.bottom - bottomPadding) - y; if (h < 0) h = 0;
+                    for (int i = 0; i < 6; i++) { if (st->pages[i]) { SetWindowPos(st->pages[i], NULL, x, y, w, h, SWP_NOZORDER); relayout_page(st->pages[i], w, h); } }
                 }
-                return TRUE; }
-            case IDC_MENU_ADD: menu_action_add(st, st->pages[2]); return TRUE;
-            case IDC_MENU_EDIT: menu_action_edit(st, st->pages[2]); return TRUE;
-            case IDC_MENU_DELETE: menu_action_delete(st, st->pages[2]); return TRUE;
-            case IDC_MENU_UP: menu_action_move(st, st->pages[2], -1); return TRUE;
-            case IDC_MENU_DOWN: menu_action_move(st, st->pages[2], 1); return TRUE;
-            case IDC_ICON_BROWSE_FILE: icons_action_browse(st, st->pages[3], 0); return TRUE;
-            case IDC_ICON_BROWSE_LIGHT: icons_action_browse(st, st->pages[3], 1); return TRUE;
-            case IDC_ICON_BROWSE_DARK: icons_action_browse(st, st->pages[3], 2); return TRUE;
-            case IDC_ICON_CLEAR: icons_action_clear(st, st->pages[3]); return TRUE;
+            }
+            return 0;
+        case WM_NOTIFY: {
+            LPNMHDR nh = (LPNMHDR)lParam;
+            if (nh->idFrom == IDC_SETTINGS_TABS && nh->code == TCN_SELCHANGE) {
+                int sel = TabCtrl_GetCurSel(st->hTabs);
+                show_page(st, sel);
+                if (sel == 2) menu_update_buttons(st, st->pages[2]);
+                if (sel == 3) icons_update_buttons(st, st->pages[3]);
+            }
+            // Live selection changes in Icons list
+            if (nh->idFrom == IDC_ICONS_LIST && nh->code == LVN_ITEMCHANGED) {
+                LPNMLISTVIEW lv = (LPNMLISTVIEW)nh; if ((lv->uChanged & LVIF_STATE) && ((lv->uNewState ^ lv->uOldState) & LVIS_SELECTED)) {
+                    icons_update_buttons(st, st->pages[3]);
+                }
+            }
+            // Live selection changes in Menu list
+            if (nh->idFrom == IDC_MENU_LIST && nh->code == LVN_ITEMCHANGED) {
+                LPNMLISTVIEW lv = (LPNMLISTVIEW)nh; if ((lv->uChanged & LVIF_STATE) && ((lv->uNewState ^ lv->uOldState) & LVIS_SELECTED)) {
+                    menu_update_buttons(st, st->pages[2]);
+                }
+            }
+            break;
         }
-        break;
-    case WM_DESTROY:
-        if(st){
-            if(st->hItalic){ DeleteObject(st->hItalic); st->hItalic=NULL; }
-            free(st); st=NULL;
-        }
-        break;
+        case WM_COMMAND:
+            switch (LOWORD(wParam)) {
+                case IDC_APPLY:
+                    save_all(st);
+                    // Do NOT reload app on Apply for tray icon changes
+                    return TRUE;
+                case IDC_SAVEEXIT:
+                    save_all(st);
+                    // Only reload app if tray icon settings changed and Save & Close was clicked
+                    if (st && st->reloadNeeded && g_settingsOwnerHwnd) {
+                        PostMessageW(g_settingsOwnerHwnd, WM_COMMAND, 10010, 0);
+                    }
+                    EndDialog(dlg, IDOK);
+                    return TRUE;
+                case IDC_CANCEL: EndDialog(dlg, IDCANCEL); return TRUE;
+                case IDC_OPEN_CONFIG_FOLDER: {
+                    if (st && st->cfg && st->cfg->iniPath[0]) {
+                        WCHAR folder[MAX_PATH]; lstrcpynW(folder, st->cfg->iniPath, ARRAYSIZE(folder));
+                        PathRemoveFileSpecW(folder);
+                        if (folder[0]) ShellExecuteW(dlg, L"open", folder, NULL, NULL, SW_SHOWNORMAL);
+                    }
+                    return TRUE;
+                }
+                case IDC_MENU_ADD: menu_action_add(st, st->pages[2]); return TRUE;
+                case IDC_MENU_EDIT: menu_action_edit(st, st->pages[2]); return TRUE;
+                case IDC_MENU_DELETE: menu_action_delete(st, st->pages[2]); return TRUE;
+                case IDC_MENU_UP: menu_action_move(st, st->pages[2], -1); return TRUE;
+                case IDC_MENU_DOWN: menu_action_move(st, st->pages[2], 1); return TRUE;
+                case IDC_ICON_BROWSE_FILE: icons_action_browse(st, st->pages[3], 0); return TRUE;
+                case IDC_ICON_BROWSE_LIGHT: icons_action_browse(st, st->pages[3], 1); return TRUE;
+                case IDC_ICON_BROWSE_DARK: icons_action_browse(st, st->pages[3], 2); return TRUE;
+                case IDC_ICON_CLEAR: icons_action_clear(st, st->pages[3]); return TRUE;
+                case IDC_POINTERRELATIVE: {
+                    // Live enable/disable of the Ignore Relative dropdown
+                    if (st && st->pages[1]) {
+                        HWND hRelative = GetDlgItem(st->pages[1], IDC_IGNORE_RELATIVE_COMBO);
+                        BOOL enabled = IsDlgButtonChecked(st->pages[1], IDC_POINTERRELATIVE) == BST_CHECKED;
+                        EnableWindow(hRelative, enabled);
+                    }
+                    return TRUE;
+                }
+            }
+            break;
     }
     return FALSE;
 }
-
-BOOL ShowSettingsDialog(HWND owner, Config* cfg){ UNREFERENCED_PARAMETER(owner); if(!cfg) return FALSE; static BOOL active=FALSE; if(active) return FALSE; active=TRUE; INT_PTR r=DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_SETTINGS),owner?owner:NULL,MainDlgProc,(LPARAM)cfg); active=FALSE; return (r==IDOK); }

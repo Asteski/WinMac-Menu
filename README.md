@@ -28,7 +28,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
 - Sorting of folder content by name, date, size and type
 - Granular extension hiding (global + recent-only override)
-- `WIP` Settings GUI available for those, who do not want to modify INI file directly
+- Settings GUI available for those, who do not want to modify INI file directly
 
 ## Run
 
@@ -96,8 +96,3 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different file names for ini file.
 - INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
 - You can reference either *.dll or *.exe file in [Icons] section as path or jsut a file name (if the file resides in directory defined in %PATH%).
-
-## Future plans
-- custom activation shortcuts
-- rewrite settings page in WinUI3
-- open folder of specific file entry in Recent Items list with middle mouse button
