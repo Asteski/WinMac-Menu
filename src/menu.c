@@ -258,10 +258,13 @@ static int compare_files(const void* a, const void* b) {
     const FileItem* fa = (const FileItem*)a;
     const FileItem* fb = (const FileItem*)b;
 
-    // Folders first logic
-    if (g_cfg.sortFoldersFirst) {
+    // Object type priority logic
+    if (g_cfg.sortObjectTypePriority == 1) { // Folders first
         if (fa->isDir && !fb->isDir) return -1;
         if (!fa->isDir && fb->isDir) return 1;
+    } else if (g_cfg.sortObjectTypePriority == 2) { // Files first
+        if (!fa->isDir && fb->isDir) return -1;
+        if (fa->isDir && !fb->isDir) return 1;
     }
 
     int res = 0;
