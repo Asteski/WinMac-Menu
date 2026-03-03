@@ -70,9 +70,12 @@ static HICON g_hTrayIconLight = NULL; // cached themed variants
 static HICON g_hTrayIconDark = NULL;
 static HHOOK g_hKbHook = NULL;
 static HHOOK g_hMouseHook = NULL;
+static HHOOK g_hWinKeyHook = NULL;
 static UINT g_msgTaskbarCreated = 0;
 static HWND g_hHookTargetWnd = NULL;
-static UINT g_winKeyHotkeyId = 0; // owner for posting close toggles
+static BOOL g_winKeyCaptureActive = FALSE;
+static DWORD g_winKeyCapturedVk = 0;
+static BOOL g_winKeyCaptureNeedsShift = FALSE;
 // Retrieve FileVersion (e.g., "0.4.0") from the executable's VERSIONINFO
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
@@ -554,6 +557,16 @@ static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam
             // When menu is showing, handle escape and Windows key to close menu
             if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN || ks->vkCode == VK_ESCAPE || ks->vkCode == VK_MENU)) {
                 PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+
+                // Swallow Win key while menu is visible so Start menu doesn't open.
+                if (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN) {
+                    return 1;
+                }
+            }
+
+            // Also swallow Win key releases while menu is visible.
+            if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) && (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN)) {
+                return 1;
             }
         }
     }
@@ -637,6 +650,76 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
     return CallNextHookEx(g_hMouseHook, nCode, wParam, lParam);
 }
 
+static LRESULT CALLBACK lowlevel_win_key_proc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && g_runInBackground && (g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger) && !g_menuShowingNow) {
+        const KBDLLHOOKSTRUCT* ks = (const KBDLLHOOKSTRUCT*)lParam;
+        if (ks->flags & LLKHF_INJECTED) {
+            return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
+        }
+
+        BOOL isWinKey = (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN);
+        BOOL shiftPressed = ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) || (ks->vkCode == VK_SHIFT);
+
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            if (isWinKey) {
+                if (!g_winKeyCaptureActive) {
+                    BOOL wantsShiftMode = shiftPressed && g_cfg.shiftWindowsKeyTrigger;
+                    BOOL wantsNormalMode = !shiftPressed && g_cfg.windowsKeyTrigger;
+                    if (wantsShiftMode || wantsNormalMode) {
+                        g_winKeyCaptureActive = TRUE;
+                        g_winKeyCapturedVk = ks->vkCode;
+                        g_winKeyCaptureNeedsShift = wantsShiftMode;
+                    } else {
+                        return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
+                    }
+                }
+                return 1;
+            } else if (g_winKeyCaptureActive) {
+                INPUT input;
+                ZeroMemory(&input, sizeof(input));
+                input.type = INPUT_KEYBOARD;
+                input.ki.wVk = (WORD)g_winKeyCapturedVk;
+                SendInput(1, &input, sizeof(input));
+
+                g_winKeyCaptureActive = FALSE;
+                g_winKeyCapturedVk = 0;
+                g_winKeyCaptureNeedsShift = FALSE;
+            }
+        } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
+            if (isWinKey) {
+                if (g_winKeyCaptureActive && ks->vkCode == g_winKeyCapturedVk) {
+                    BOOL shiftMatch = g_winKeyCaptureNeedsShift ? shiftPressed : !shiftPressed;
+                    g_winKeyCaptureActive = FALSE;
+                    g_winKeyCapturedVk = 0;
+                    g_winKeyCaptureNeedsShift = FALSE;
+                    if (shiftMatch) {
+                        ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, g_hMainWnd);
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+
+    return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
+}
+
+static void install_windows_key_hook(void) {
+    if (!g_hWinKeyHook) {
+        g_hWinKeyHook = SetWindowsHookExW(WH_KEYBOARD_LL, lowlevel_win_key_proc, GetModuleHandleW(NULL), 0);
+    }
+}
+
+static void uninstall_windows_key_hook(void) {
+    if (g_hWinKeyHook) {
+        UnhookWindowsHookEx(g_hWinKeyHook);
+        g_hWinKeyHook = NULL;
+    }
+    g_winKeyCaptureActive = FALSE;
+    g_winKeyCapturedVk = 0;
+    g_winKeyCaptureNeedsShift = FALSE;
+}
+
 static void install_menu_hooks(HWND hOwner) {
     g_hHookTargetWnd = hOwner;
     if (!g_hKbHook) g_hKbHook = SetWindowsHookExW(WH_KEYBOARD_LL, lowlevel_kb_proc, GetModuleHandleW(NULL), 0);
@@ -655,6 +738,90 @@ static DWORD simple_hash_w(const wchar_t* s) {
     DWORD h = 2166136261u; // FNV-1a base
     while (s && *s) { h ^= (DWORD)(*s++); h *= 16777619u; }
     return h;
+}
+
+static void open_config_folder(HWND owner) {
+    if (!g_cfg.iniPath[0]) return;
+    WCHAR folder[MAX_PATH];
+    lstrcpynW(folder, g_cfg.iniPath, ARRAYSIZE(folder));
+    PathRemoveFileSpecW(folder);
+    if (folder[0]) ShellExecuteW(owner, L"open", folder, NULL, NULL, SW_SHOWNORMAL);
+}
+
+static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    static HFONT hLinkFont = NULL;
+    (void)lParam;
+    switch (msg) {
+    case WM_INITDIALOG: {
+        int cx = GetSystemMetrics(SM_CXICON), cy = GetSystemMetrics(SM_CYICON);
+        int cxs = GetSystemMetrics(SM_CXSMICON), cys = GetSystemMetrics(SM_CYSMICON);
+        HICON hBig = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+        HICON hSmall = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, cxs, cys, LR_DEFAULTCOLOR);
+        if (hBig) SendMessageW(dlg, WM_SETICON, ICON_BIG, (LPARAM)hBig);
+        if (hSmall) SendMessageW(dlg, WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+
+        HICON hAboutArt = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_ABOUT_ICON), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+        if (hAboutArt) SendDlgItemMessageW(dlg, IDC_ABOUT_ART_ICON, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hAboutArt);
+
+        WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
+        WCHAR aboutText[512];
+        wsprintfW(
+            aboutText,
+            L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
+            (ver[0] ? ver : L"0.11.0")
+        );
+        SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
+
+        HWND hLink = GetDlgItem(dlg, IDC_ABOUT_LINK);
+        if (hLink) {
+            HFONT hBase = (HFONT)SendMessageW(hLink, WM_GETFONT, 0, 0);
+            LOGFONTW lf;
+            ZeroMemory(&lf, sizeof(lf));
+            if (hBase && GetObjectW(hBase, sizeof(lf), &lf) == sizeof(lf)) {
+                lf.lfUnderline = TRUE;
+                hLinkFont = CreateFontIndirectW(&lf);
+            }
+            if (hLinkFont) SendMessageW(hLink, WM_SETFONT, (WPARAM)hLinkFont, TRUE);
+        }
+        theme_apply_to_window(dlg);
+
+        {
+            RECT rc; GetWindowRect(dlg, &rc); RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+            int w = rc.right - rc.left; int h = rc.bottom - rc.top;
+            int x = wa.left + ((wa.right - wa.left) - w) / 2; int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+            SetWindowPos(dlg, NULL, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+        }
+        return TRUE;
+    }
+    case WM_CTLCOLORSTATIC:
+        if (GetDlgCtrlID((HWND)lParam) == IDC_ABOUT_LINK) {
+            SetTextColor((HDC)wParam, RGB(0, 102, 204));
+            SetBkMode((HDC)wParam, TRANSPARENT);
+            return (INT_PTR)GetSysColorBrush(COLOR_BTNFACE);
+        }
+        break;
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_ABOUT_LINK:
+            if (HIWORD(wParam) == STN_CLICKED || HIWORD(wParam) == STN_DBLCLK) {
+                ShellExecuteW(dlg, L"open", L"https://github.com/Asteski", NULL, NULL, SW_SHOWNORMAL);
+            }
+            return TRUE;
+        case IDC_ABOUT_OPEN_CONFIG:
+            open_config_folder(dlg);
+            return TRUE;
+        case IDOK:
+        case IDCANCEL:
+            if (hLinkFont) {
+                DeleteObject(hLinkFont);
+                hLinkFont = NULL;
+            }
+            EndDialog(dlg, LOWORD(wParam));
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -688,30 +855,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     case WM_CANCELMODE:
         if (g_menuShowingNow) { EndMenu(); return 0; }
-        break;
-    case WM_HOTKEY:
-        // Handle registered Windows key hotkey
-        if (wParam == g_winKeyHotkeyId && g_runInBackground) {
-            WCHAR debug[256];
-            wsprintfW(debug, L"WM_HOTKEY Windows key received, action=%d\n", g_cfg.windowsKeyAction);
-            OutputDebugStringW(debug);
-            
-            // Windows key was pressed - execute configured action
-            ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, hWnd);
-            return 0;
-        }
-        break;
-    case WM_SYSCOMMAND:
-        // Handle Windows key press via SC_TASKLIST (fallback approach)
-        if ((wParam & 0xFFF0) == SC_TASKLIST && g_runInBackground && g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
-            WCHAR debug[256];
-            wsprintfW(debug, L"WM_SYSCOMMAND SC_TASKLIST received, action=%d\n", g_cfg.windowsKeyAction);
-            OutputDebugStringW(debug);
-            
-            // Windows key was pressed - execute configured action
-            ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, hWnd);
-            return 0;
-        }
         break;
     default:
         break;
@@ -826,21 +969,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             } else if (cmd == 10006) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/Asteski/WinMac-Menu/wiki", NULL, NULL, SW_SHOWNORMAL);
             } else if (cmd == 10007) {
-                // About dialog using custom application icon instead of default information icon.
-                // Switching from MessageBoxW to MessageBoxIndirectW with MB_USERICON allows specifying IDI_APPICON.
-                WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
-                WCHAR msg[512];
-                wsprintfW(msg, L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Asteski\r\n\r\n\u00A9 2026 Asteski\r\nhttps://github.com/Asteski/WinMac-Menu", (ver[0]?ver:L"0.10.0"));
-                MSGBOXPARAMSW mbp = {0};
-                mbp.cbSize = sizeof(mbp);
-                mbp.hwndOwner = hWnd;
-                mbp.hInstance = GetModuleHandleW(NULL);
-                mbp.lpszText = msg;
-                mbp.lpszCaption = L"About WinMac Menu";
-                mbp.dwStyle = MB_OK | MB_USERICON; // custom icon style
-                mbp.lpszIcon = MAKEINTRESOURCEW(IDI_ABOUT_ICON); // use about-specific icon resource
-                mbp.dwLanguageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
-                MessageBoxIndirectW(&mbp);
+                DialogBoxParamW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDD_ABOUT), hWnd, AboutDlgProc, 0);
             } else if (cmd == 10002) {
                 PostMessageW(hWnd, WM_CLOSE, 0, 0);
             }
@@ -1216,23 +1345,16 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     g_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     if (g_runInBackground) {
+        SetTaskbarHookTargetWindow(hWnd);
+
         // Initialize taskbar hook to intercept start button clicks
         if (!InitTaskbarHook()) {
             OutputDebugStringW(L"Warning: Failed to initialize taskbar hook\n");
         }
         
-        // Register Windows key hotkey if the action is not to show Windows menu
-        if (g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
-            g_winKeyHotkeyId = GlobalAddAtom(L"WinMacMenu.WinKey");
-            if (g_winKeyHotkeyId && RegisterHotKey(hWnd, g_winKeyHotkeyId, MOD_WIN, 0)) {
-                OutputDebugStringW(L"Windows key hotkey registered successfully\n");
-            } else {
-                OutputDebugStringW(L"Warning: Failed to register Windows key hotkey\n");
-                if (g_winKeyHotkeyId) {
-                    GlobalDeleteAtom(g_winKeyHotkeyId);
-                    g_winKeyHotkeyId = 0;
-                }
-            }
+        // Optional Windows key trigger: handles lone Win key only and preserves Win+ combos.
+        if ((g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger) && g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
+            install_windows_key_hook();
         }
         
         // Optionally show menu on first launch (skip when started with --reload)
@@ -1251,12 +1373,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
             DispatchMessageW(&msg);
         }
         // Cleanup
+        uninstall_windows_key_hook();
         ShutdownTaskbarHook();
-        if (g_winKeyHotkeyId) {
-            UnregisterHotKey(hWnd, g_winKeyHotkeyId);
-            GlobalDeleteAtom(g_winKeyHotkeyId);
-            g_winKeyHotkeyId = 0;
-        }
         if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
         return 0;
     } else {

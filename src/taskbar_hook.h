@@ -9,6 +9,9 @@ extern "C" {
 // Initialize taskbar hooking to intercept start button clicks
 BOOL InitTaskbarHook(void);
 
+// Set target app window that should receive WinMac menu open requests (WM_APP)
+void SetTaskbarHookTargetWindow(HWND hWnd);
+
 // Shutdown taskbar hooking
 void ShutdownTaskbarHook(void);
 

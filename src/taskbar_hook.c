@@ -10,10 +10,31 @@ extern Config g_cfg;
 static HWND g_hTaskbar = NULL;
 static HWND g_hStartButton = NULL;
 static HHOOK g_hMsgHook = NULL;
+static HWND g_hOwnerWnd = NULL;
+static BOOL g_suppressNextLeftUp = FALSE;
+static BOOL g_suppressNextMiddleUp = FALSE;
+static BOOL g_suppressNextRightUp = FALSE;
+
+void SetTaskbarHookTargetWindow(HWND hWnd) {
+    g_hOwnerWnd = hWnd;
+}
 
 // Low-level mouse hook procedure to intercept start button clicks globally
 static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0) {
+        if (wParam == WM_LBUTTONUP && g_suppressNextLeftUp) {
+            g_suppressNextLeftUp = FALSE;
+            return 1;
+        }
+        if (wParam == WM_MBUTTONUP && g_suppressNextMiddleUp) {
+            g_suppressNextMiddleUp = FALSE;
+            return 1;
+        }
+        if (wParam == WM_RBUTTONUP && g_suppressNextRightUp) {
+            g_suppressNextRightUp = FALSE;
+            return 1;
+        }
+
         MSLLHOOKSTRUCT* pMouse = (MSLLHOOKSTRUCT*)lParam;
         
         // Check for mouse clicks
@@ -33,33 +54,35 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
                 
                 ControlActionType action = CA_NOTHING;
                 const WCHAR* command = NULL;
+                BOOL shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
                 
                 if (bLeftClick) {
-                    BOOL shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-                    if (shiftPressed) {
-                        // TODO: Handle Shift+Left click when implemented
-                        action = g_cfg.leftClickAction;
-                        command = g_cfg.leftClickCommand;
-                    } else {
+                    if ((!shiftPressed && g_cfg.leftClickTrigger) || (shiftPressed && g_cfg.shiftLeftClickTrigger)) {
                         action = g_cfg.leftClickAction;
                         command = g_cfg.leftClickCommand;
                     }
                 } else if (bMiddleClick) {
-                    // TODO: Handle middle click when implemented
-                    action = g_cfg.leftClickAction; // For now, use left click action
-                    command = g_cfg.leftClickCommand;
+                    if ((!shiftPressed && g_cfg.middleClickTrigger) || (shiftPressed && g_cfg.shiftMiddleClickTrigger)) {
+                        action = g_cfg.leftClickAction;
+                        command = g_cfg.leftClickCommand;
+                    }
                 } else if (bRightClick) {
-                    // TODO: Handle right click when implemented  
-                    action = g_cfg.leftClickAction; // For now, use left click action
-                    command = g_cfg.leftClickCommand;
+                    if ((!shiftPressed && g_cfg.rightClickTrigger) || (shiftPressed && g_cfg.shiftRightClickTrigger)) {
+                        action = g_cfg.leftClickAction;
+                        command = g_cfg.leftClickCommand;
+                    }
                 }
                 
                 if (action != CA_NOTHING) {
                     // Execute the configured action
-                    ExecuteControlAction(action, command, g_hTaskbar);
+                    HWND hTarget = g_hOwnerWnd ? g_hOwnerWnd : g_hTaskbar;
+                    ExecuteControlAction(action, command, hTarget);
                     
                     // Suppress the click if we're not showing Windows menu
                     if (action != CA_WINDOWS_MENU) {
+                        if (bLeftClick) g_suppressNextLeftUp = TRUE;
+                        if (bMiddleClick) g_suppressNextMiddleUp = TRUE;
+                        if (bRightClick) g_suppressNextRightUp = TRUE;
                         return 1; // Suppress the mouse event
                     }
                 }
@@ -154,4 +177,8 @@ void ShutdownTaskbarHook(void) {
     
     g_hTaskbar = NULL;
     g_hStartButton = NULL;
+    g_hOwnerWnd = NULL;
+    g_suppressNextLeftUp = FALSE;
+    g_suppressNextMiddleUp = FALSE;
+    g_suppressNextRightUp = FALSE;
 }

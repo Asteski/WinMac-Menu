@@ -69,6 +69,16 @@ static void write_default_ini(const WCHAR* path) {
         "SortDirection=ascending\r\n"\
         "FoldersFirst=true\r\n"\
         "\r\n"\
+        "[Controls]\r\n"\
+        "WindowsKey=false\r\n"\
+        "ShiftWindowsKey=false\r\n"\
+        "LeftClick=false\r\n"\
+        "RightClick=false\r\n"\
+        "MiddleClick=false\r\n"\
+        "ShiftLeftClick=false\r\n"\
+        "ShiftRightClick=false\r\n"\
+        "ShiftMiddleClick=false\r\n"\
+        "\r\n"\
         "[Menu]\r\n"\
         "Item1=Apps and Features|URI|ms-settings:appsfeatures\r\n"\
         "Item2=About Windows|URI|winver\r\n"\
@@ -673,6 +683,79 @@ BOOL config_load(Config* out) {
         expand_env(out->windowsKeyCommand, expanded, ARRAYSIZE(expanded));
         lstrcpynW(out->windowsKeyCommand, expanded, ARRAYSIZE(out->windowsKeyCommand));
     }
+
+    // Parse Controls section (Start button triggers; disabled by default)
+    GetPrivateProfileStringW(L"Controls", L"WindowsKey", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"WindowsKey", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->windowsKeyTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShiftWindowsKey", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"ShiftWindowsKey", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->shiftWindowsKeyTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"LeftClick", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"LeftClick", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Controls", L"StartLeftClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->leftClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"RightClick", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"RightClick", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Controls", L"StartRightClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->rightClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"MiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"MiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->middleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShiftLeftClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"ShiftLeftClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->shiftLeftClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShiftRightClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"ShiftRightClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->shiftRightClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShiftMiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Control", L"ShiftMiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->shiftMiddleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     
     parse_menu(out);
     parse_icons(out);

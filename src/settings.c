@@ -15,6 +15,15 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
 
 // Shows the settings dialog (modal). Returns TRUE if any values were changed and saved.
 BOOL ShowSettingsDialog(HWND owner, Config* cfg) {
+    if (cfg) {
+        WCHAR iniPath[MAX_PATH] = {0};
+        if (cfg->iniPath[0]) {
+            lstrcpynW(iniPath, cfg->iniPath, ARRAYSIZE(iniPath));
+            config_set_default_path(iniPath);
+        }
+        config_load(cfg);
+    }
+
     g_settingsOwnerHwnd = owner;
     INT_PTR result = DialogBoxParamW(
         GetModuleHandleW(NULL),
@@ -32,7 +41,7 @@ typedef struct SettingsState {
     // Track original power option states
     BOOL origExcludeSleep, origExcludeHibernate, origExcludeShutdown, origExcludeRestart, origExcludeLock, origExcludeLogoff;
     HWND hTabs;
-    HWND pages[6]; // General, Placement, Menu, Icons, Sorting, Advanced
+    HWND pages[7]; // General, Placement, Menu, Icons, Sorting, Controls, Advanced
     // Working copy of menu/icon items so Apply/Save commits atomically
     ConfigItem workingItems[64];
     int workingCount;
@@ -41,6 +50,17 @@ typedef struct SettingsState {
     HFONT hItalic; // italic font for filename label
     BOOL reloadNeeded; // set if tray reload is needed after Save & Close
 } SettingsState;
+
+enum {
+    PAGE_GENERAL = 0,
+    PAGE_PLACEMENT,
+    PAGE_MENU,
+    PAGE_ICONS,
+    PAGE_SORTING,
+    PAGE_CONTROLS,
+    PAGE_ADVANCED,
+    PAGE_COUNT
+};
 
 // Prototype so early helpers can reference selection utility without ordering issues
 static int icons_get_selected_index(HWND lv);
@@ -51,6 +71,10 @@ static void working_commit(SettingsState* st);
 static BOOL Icons_Save(HWND pg, Config* c);
 static void Sorting_Load(HWND pg, Config* c);
 static BOOL Sorting_Save(HWND pg, Config* c);
+static void Controls_Load(HWND pg, Config* c);
+static BOOL Controls_Save(HWND pg, Config* c);
+static void relayout_page(HWND page, int w, int h);
+static void show_page(SettingsState* st,int idx);
 
 // Generic child page dialog procedure: forward button commands to main dialog
 static INT_PTR CALLBACK PageDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
@@ -353,6 +377,45 @@ static BOOL Sorting_Save(HWND pg, Config* c){
         if (c->sortObjectTypePriority == 1) objTypeStr = L"true";
         else if (c->sortObjectTypePriority == 2) objTypeStr = L"files";
         WritePrivateProfileStringW(L"Sorting",L"FoldersFirst",objTypeStr,c->iniPath);
+    }
+    return TRUE;
+}
+
+// -------- Controls Page --------
+static void Controls_Load(HWND pg, Config* c){
+    set_check(pg, IDC_CTRL_LEFT_CLICK, c->leftClickTrigger);
+    set_check(pg, IDC_CTRL_RIGHT_CLICK, c->rightClickTrigger);
+    set_check(pg, IDC_CTRL_MIDDLE_CLICK, c->middleClickTrigger);
+    set_check(pg, IDC_CTRL_SHIFT_LEFT_CLICK, c->shiftLeftClickTrigger);
+    set_check(pg, IDC_CTRL_SHIFT_RIGHT_CLICK, c->shiftRightClickTrigger);
+    set_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK, c->shiftMiddleClickTrigger);
+    set_check(pg, IDC_CTRL_WINDOWS_KEY, c->windowsKeyTrigger);
+    set_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY, c->shiftWindowsKeyTrigger);
+}
+
+static BOOL Controls_Save(HWND pg, Config* c){
+    BOOL ch = FALSE;
+    BOOL b;
+
+    b = get_check(pg, IDC_CTRL_LEFT_CLICK); if(c->leftClickTrigger != b){ c->leftClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_RIGHT_CLICK); if(c->rightClickTrigger != b){ c->rightClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_MIDDLE_CLICK); if(c->middleClickTrigger != b){ c->middleClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_SHIFT_LEFT_CLICK); if(c->shiftLeftClickTrigger != b){ c->shiftLeftClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_SHIFT_RIGHT_CLICK); if(c->shiftRightClickTrigger != b){ c->shiftRightClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK); if(c->shiftMiddleClickTrigger != b){ c->shiftMiddleClickTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_WINDOWS_KEY); if(c->windowsKeyTrigger != b){ c->windowsKeyTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY); if(c->shiftWindowsKeyTrigger != b){ c->shiftWindowsKeyTrigger = b; ch = TRUE; }
+
+    if(!ch) return FALSE;
+    if(c->iniPath[0]){
+        WritePrivateProfileStringW(L"Controls", L"LeftClick", c->leftClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"RightClick", c->rightClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"MiddleClick", c->middleClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"ShiftLeftClick", c->shiftLeftClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"ShiftRightClick", c->shiftRightClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"ShiftMiddleClick", c->shiftMiddleClickTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"WindowsKey", c->windowsKeyTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"ShiftWindowsKey", c->shiftWindowsKeyTrigger?L"true":L"false", c->iniPath);
     }
     return TRUE;
 }
@@ -783,16 +846,25 @@ static void menu_update_buttons(SettingsState* st, HWND page){
 // Refresh both list views after working copy changes
 static void refresh_lists(SettingsState* st){
     if(!st) return;
-    if(st->pages[2]){ Menu_Load(st->pages[2],st->cfg); menu_update_buttons(st, st->pages[2]); }
-    if(st->pages[3]){ Icons_Load(st->pages[3],st->cfg); icons_update_buttons(st, st->pages[3]); }
+    if(st->pages[PAGE_MENU]){ Menu_Load(st->pages[PAGE_MENU],st->cfg); menu_update_buttons(st, st->pages[PAGE_MENU]); }
+    if(st->pages[PAGE_ICONS]){ Icons_Load(st->pages[PAGE_ICONS],st->cfg); icons_update_buttons(st, st->pages[PAGE_ICONS]); }
+}
+
+static void layout_pages(SettingsState* st, int x, int y, int w, int h){
+    if(!st) return;
+    for(int i=0; i<PAGE_COUNT; i++){
+        if(!st->pages[i]) continue;
+        SetWindowPos(st->pages[i], NULL, x, y, w, h, SWP_NOZORDER);
+        relayout_page(st->pages[i], w, h);
+    }
 }
 
 
 static void init_tabs(HWND dlg, SettingsState* st){
     st->hTabs=GetDlgItem(dlg,IDC_SETTINGS_TABS);
     TCITEMW ti; ZeroMemory(&ti,sizeof(ti)); ti.mask=TCIF_TEXT; WCHAR label[32];
-    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Sorting",L"Advanced"};
-    for(int i=0;i<6;i++){
+    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Sorting",L"Controls",L"Advanced"};
+    for(int i=0;i<PAGE_COUNT;i++){
         lstrcpynW(label,names[i],ARRAYSIZE(label));
         ti.pszText=label;
         TabCtrl_InsertItem(st->hTabs,i,&ti);
@@ -804,39 +876,35 @@ static void init_tabs(HWND dlg, SettingsState* st){
     // Map to dialog coordinates.
     MapWindowPoints(st->hTabs, dlg, (POINT*)&rcDisplay, 2);
 
-    // Determine header bottom using first tab item rectangle.
-    RECT rcItem0; SetRectEmpty(&rcItem0);
-    if(TabCtrl_GetItemRect(st->hTabs,0,&rcItem0)){
-        MapWindowPoints(st->hTabs, dlg, (POINT*)&rcItem0, 2);
-    }
-    int headerBottom = rcItem0.bottom; // in dialog coords
+    const int inset = 3;
+    int x = rcDisplay.left + inset;
+    int y = rcDisplay.top + inset;
+    int w = (rcDisplay.right - rcDisplay.left) - (inset * 2);
+    int h = (rcDisplay.bottom - rcDisplay.top) - (inset * 2);
+    if(w < 0) w = 0;
+    if(h < 0) h = 0;
 
-    const int gapBelowTabs = 6;   // vertical gap under tabs
-    const int leftPadding   = 12; // pad from left edge of tab control frame
-    const int rightPadding  = 8;  // right margin inside frame
-    const int bottomPadding = 8;  // bottom margin inside frame
+    st->pages[PAGE_GENERAL]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_GENERAL),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_PLACEMENT]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_PLACEMENT),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_MENU]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_MENU),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_ICONS]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ICONS),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_SORTING]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_SORTING),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_CONTROLS]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_CONTROLS),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_ADVANCED]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ADVANCED),dlg,PageDlgProc,(LPARAM)st);
 
-    int x = rcDisplay.left + leftPadding;
-    int y = headerBottom + gapBelowTabs;
-    int w = (rcDisplay.right - leftPadding) - rightPadding - rcDisplay.left;
-    int h = (rcDisplay.bottom - bottomPadding) - y; if(h < 0) h = 0;
-
-    st->pages[0]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_GENERAL),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[0],NULL,x,y,w,h,SWP_SHOWWINDOW);
-    st->pages[1]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_PLACEMENT),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[1],NULL,x,y,w,h,SWP_HIDEWINDOW);
-    st->pages[2]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_MENU),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[2],NULL,x,y,w,h,SWP_HIDEWINDOW);
-    st->pages[3]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ICONS),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[3],NULL,x,y,w,h,SWP_HIDEWINDOW);
-    st->pages[4]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_SORTING),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[4],NULL,x,y,w,h,SWP_HIDEWINDOW);
-    st->pages[5]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ADVANCED),dlg,PageDlgProc,(LPARAM)st); SetWindowPos(st->pages[5],NULL,x,y,w,h,SWP_HIDEWINDOW);
+    layout_pages(st, x, y, w, h);
+    show_page(st, PAGE_GENERAL);
 
     // Attach st pointer to parent dialog for child retrieval (used in loads)
     SetWindowLongPtrW(dlg,GWLP_USERDATA,(LONG_PTR)st);
     working_clone(st);
-    General_Load(st->pages[0],st->cfg);
-    Placement_Load(st->pages[1],st->cfg);
-    Menu_Load(st->pages[2],st->cfg);
-    Icons_Load(st->pages[3],st->cfg);
-    Sorting_Load(st->pages[4],st->cfg);
-    Advanced_Load(st->pages[5],st->cfg);
+    General_Load(st->pages[PAGE_GENERAL],st->cfg);
+    Placement_Load(st->pages[PAGE_PLACEMENT],st->cfg);
+    Menu_Load(st->pages[PAGE_MENU],st->cfg);
+    Icons_Load(st->pages[PAGE_ICONS],st->cfg);
+    Sorting_Load(st->pages[PAGE_SORTING],st->cfg);
+    Controls_Load(st->pages[PAGE_CONTROLS],st->cfg);
+    Advanced_Load(st->pages[PAGE_ADVANCED],st->cfg);
 }
 // Re-layout controls inside a page (currently only Menu & Icons) when page resized
 static void relayout_page(HWND page, int w, int h){
@@ -883,7 +951,7 @@ static void relayout_page(HWND page, int w, int h){
         return;
     }
 }
-static void show_page(SettingsState* st,int idx){ for(int i=0;i<6;i++){ if(st->pages[i]) ShowWindow(st->pages[i], i==idx?SW_SHOW:SW_HIDE); } }
+static void show_page(SettingsState* st,int idx){ for(int i=0;i<PAGE_COUNT;i++){ if(st->pages[i]) ShowWindow(st->pages[i], i==idx?SW_SHOW:SW_HIDE); } }
 static BOOL save_all(SettingsState* st) {
     if(!st) return FALSE;
     if(st->workingDirty){ working_commit(st); }
@@ -891,11 +959,12 @@ static BOOL save_all(SettingsState* st) {
     if (generalResult == 2)
         st->reloadNeeded = TRUE;
     BOOL any = (generalResult != 0);
-    any |= Placement_Save(st->pages[1],st->cfg);
-    any |= Advanced_Save(st->pages[5],st->cfg);
-    any |= Menu_Save(st->pages[2],st->cfg);
-    any |= Icons_Save(st->pages[3],st->cfg);
-    any |= Sorting_Save(st->pages[4],st->cfg);
+    any |= Placement_Save(st->pages[PAGE_PLACEMENT],st->cfg);
+    any |= Controls_Save(st->pages[PAGE_CONTROLS],st->cfg);
+    any |= Advanced_Save(st->pages[PAGE_ADVANCED],st->cfg);
+    any |= Menu_Save(st->pages[PAGE_MENU],st->cfg);
+    any |= Icons_Save(st->pages[PAGE_ICONS],st->cfg);
+    any |= Sorting_Save(st->pages[PAGE_SORTING],st->cfg);
     return any;
 }
 
@@ -948,22 +1017,26 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 // Layout: buttons anchored bottom-right, tabs fill remaining above button row
                 HWND hApply = GetDlgItem(dlg, IDC_APPLY);
                 HWND hSave = GetDlgItem(dlg, IDC_SAVEEXIT);
+                HWND hExit = GetDlgItem(dlg, IDC_EXIT);
                 HWND hCancel = GetDlgItem(dlg, IDC_CANCEL);
                 RECT rb; GetWindowRect(hApply, &rb); MapWindowPoints(NULL, dlg, (POINT*)&rb, 2); int btnH = rb.bottom - rb.top; int btnW = rb.right - rb.left;
                 int margin = 6; int gap = 4;
                 int cancelW, cancelH; RECT rc; GetWindowRect(hCancel, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); cancelW = rc.right - rc.left; cancelH = rc.bottom - rc.top;
+                int exitW, exitH; GetWindowRect(hExit, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); exitW = rc.right - rc.left; exitH = rc.bottom - rc.top;
                 int saveW, saveH; GetWindowRect(hSave, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); saveW = rc.right - rc.left; saveH = rc.bottom - rc.top;
                 int applyW, applyH; GetWindowRect(hApply, &rc); MapWindowPoints(NULL, dlg, (POINT*)&rc, 2); applyW = rc.right - rc.left; applyH = rc.bottom - rc.top;
                 int btnY = ch - margin - btnH;
                 // Total width of button cluster with equal gaps
-                int totalW = applyW + saveW + cancelW + gap * 2;
+                int totalW = applyW + saveW + exitW + cancelW + gap * 3;
                 // Center cluster; keep at least margin from edges
                 int clusterX = (cw - totalW) / 2; if (clusterX < margin) clusterX = margin; if (clusterX + totalW > cw - margin) clusterX = cw - margin - totalW;
                 int xApply = clusterX;
                 int xSave = xApply + applyW + gap;
-                int xCancel = xSave + saveW + gap;
+                int xExit = xSave + saveW + gap;
+                int xCancel = xExit + exitW + gap;
                 SetWindowPos(hApply, NULL, xApply, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
                 SetWindowPos(hSave, NULL, xSave, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+                SetWindowPos(hExit, NULL, xExit, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
                 SetWindowPos(hCancel, NULL, xCancel, btnY, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
                 // Resize tab control
                 HWND hTabs = st->hTabs; if (hTabs) {
@@ -975,10 +1048,14 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     SetWindowPos(hTabs, NULL, tabsX, tabsY, tabsW, tabsH, SWP_NOZORDER);
                     // Adjust pages to new tab display area
                     RECT rcClient; GetClientRect(hTabs, &rcClient); RECT rcDisplay = rcClient; TabCtrl_AdjustRect(hTabs, FALSE, &rcDisplay); MapWindowPoints(hTabs, dlg, (POINT*)&rcDisplay, 2);
-                    // Compute consistent padding like in init_tabs
-                    RECT rItem0; if (TabCtrl_GetItemRect(hTabs, 0, &rItem0)) { MapWindowPoints(hTabs, dlg, (POINT*)&rItem0, 2); } int headerBottom = rItem0.bottom; int gapBelowTabs = 6; int leftPadding = 12; int rightPadding = 8; int bottomPadding = 8;
-                    int x = rcDisplay.left + leftPadding; int y = headerBottom + gapBelowTabs; int w = (rcDisplay.right - leftPadding) - rightPadding - rcDisplay.left; int h = (rcDisplay.bottom - bottomPadding) - y; if (h < 0) h = 0;
-                    for (int i = 0; i < 6; i++) { if (st->pages[i]) { SetWindowPos(st->pages[i], NULL, x, y, w, h, SWP_NOZORDER); relayout_page(st->pages[i], w, h); } }
+                    const int inset = 3;
+                    int x = rcDisplay.left + inset;
+                    int y = rcDisplay.top + inset;
+                    int w = (rcDisplay.right - rcDisplay.left) - (inset * 2);
+                    int h = (rcDisplay.bottom - rcDisplay.top) - (inset * 2);
+                    if (w < 0) w = 0;
+                    if (h < 0) h = 0;
+                    layout_pages(st, x, y, w, h);
                 }
             }
             return 0;
@@ -987,19 +1064,19 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
             if (nh->idFrom == IDC_SETTINGS_TABS && nh->code == TCN_SELCHANGE) {
                 int sel = TabCtrl_GetCurSel(st->hTabs);
                 show_page(st, sel);
-                if (sel == 2) menu_update_buttons(st, st->pages[2]);
-                if (sel == 3) icons_update_buttons(st, st->pages[3]);
+                if (sel == PAGE_MENU) menu_update_buttons(st, st->pages[PAGE_MENU]);
+                if (sel == PAGE_ICONS) icons_update_buttons(st, st->pages[PAGE_ICONS]);
             }
             // Live selection changes in Icons list
             if (nh->idFrom == IDC_ICONS_LIST && nh->code == LVN_ITEMCHANGED) {
                 LPNMLISTVIEW lv = (LPNMLISTVIEW)nh; if ((lv->uChanged & LVIF_STATE) && ((lv->uNewState ^ lv->uOldState) & LVIS_SELECTED)) {
-                    icons_update_buttons(st, st->pages[3]);
+                    icons_update_buttons(st, st->pages[PAGE_ICONS]);
                 }
             }
             // Live selection changes in Menu list
             if (nh->idFrom == IDC_MENU_LIST && nh->code == LVN_ITEMCHANGED) {
                 LPNMLISTVIEW lv = (LPNMLISTVIEW)nh; if ((lv->uChanged & LVIF_STATE) && ((lv->uNewState ^ lv->uOldState) & LVIS_SELECTED)) {
-                    menu_update_buttons(st, st->pages[2]);
+                    menu_update_buttons(st, st->pages[PAGE_MENU]);
                 }
             }
             break;
@@ -1018,6 +1095,12 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     }
                     EndDialog(dlg, IDOK);
                     return TRUE;
+                case IDC_EXIT:
+                    if (g_settingsOwnerHwnd) {
+                        PostMessageW(g_settingsOwnerHwnd, WM_CLOSE, 0, 0);
+                    }
+                    EndDialog(dlg, IDCANCEL);
+                    return TRUE;
                 case IDC_CANCEL: EndDialog(dlg, IDCANCEL); return TRUE;
                 case IDC_OPEN_CONFIG_FOLDER: {
                     if (st && st->cfg && st->cfg->iniPath[0]) {
@@ -1027,20 +1110,20 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     }
                     return TRUE;
                 }
-                case IDC_MENU_ADD: menu_action_add(st, st->pages[2]); return TRUE;
-                case IDC_MENU_EDIT: menu_action_edit(st, st->pages[2]); return TRUE;
-                case IDC_MENU_DELETE: menu_action_delete(st, st->pages[2]); return TRUE;
-                case IDC_MENU_UP: menu_action_move(st, st->pages[2], -1); return TRUE;
-                case IDC_MENU_DOWN: menu_action_move(st, st->pages[2], 1); return TRUE;
-                case IDC_ICON_BROWSE_FILE: icons_action_browse(st, st->pages[3], 0); return TRUE;
-                case IDC_ICON_BROWSE_LIGHT: icons_action_browse(st, st->pages[3], 1); return TRUE;
-                case IDC_ICON_BROWSE_DARK: icons_action_browse(st, st->pages[3], 2); return TRUE;
-                case IDC_ICON_CLEAR: icons_action_clear(st, st->pages[3]); return TRUE;
+                case IDC_MENU_ADD: menu_action_add(st, st->pages[PAGE_MENU]); return TRUE;
+                case IDC_MENU_EDIT: menu_action_edit(st, st->pages[PAGE_MENU]); return TRUE;
+                case IDC_MENU_DELETE: menu_action_delete(st, st->pages[PAGE_MENU]); return TRUE;
+                case IDC_MENU_UP: menu_action_move(st, st->pages[PAGE_MENU], -1); return TRUE;
+                case IDC_MENU_DOWN: menu_action_move(st, st->pages[PAGE_MENU], 1); return TRUE;
+                case IDC_ICON_BROWSE_FILE: icons_action_browse(st, st->pages[PAGE_ICONS], 0); return TRUE;
+                case IDC_ICON_BROWSE_LIGHT: icons_action_browse(st, st->pages[PAGE_ICONS], 1); return TRUE;
+                case IDC_ICON_BROWSE_DARK: icons_action_browse(st, st->pages[PAGE_ICONS], 2); return TRUE;
+                case IDC_ICON_CLEAR: icons_action_clear(st, st->pages[PAGE_ICONS]); return TRUE;
                 case IDC_POINTERRELATIVE: {
                     // Live enable/disable of the Ignore Relative dropdown
-                    if (st && st->pages[1]) {
-                        HWND hRelative = GetDlgItem(st->pages[1], IDC_IGNORE_RELATIVE_COMBO);
-                        BOOL enabled = IsDlgButtonChecked(st->pages[1], IDC_POINTERRELATIVE) == BST_CHECKED;
+                    if (st && st->pages[PAGE_PLACEMENT]) {
+                        HWND hRelative = GetDlgItem(st->pages[PAGE_PLACEMENT], IDC_IGNORE_RELATIVE_COMBO);
+                        BOOL enabled = IsDlgButtonChecked(st->pages[PAGE_PLACEMENT], IDC_POINTERRELATIVE) == BST_CHECKED;
                         EnableWindow(hRelative, enabled);
                     }
                     return TRUE;

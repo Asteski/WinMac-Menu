@@ -138,6 +138,14 @@ typedef struct Config {
     WCHAR leftClickCommand[MAX_PATH];      // Custom command for left click (when action = CA_CUSTOM_COMMAND)
     ControlActionType windowsKeyAction;    // Windows key action
     WCHAR windowsKeyCommand[MAX_PATH];     // Custom command for Windows key (when action = CA_CUSTOM_COMMAND)
+    BOOL windowsKeyTrigger;                // [Controls] WindowsKey=true enables Windows key trigger
+    BOOL shiftWindowsKeyTrigger;           // [Controls] ShiftWindowsKey=true enables Shift+Windows key trigger
+    BOOL leftClickTrigger;                 // [Controls] LeftClick=true enables Start button left-click trigger
+    BOOL rightClickTrigger;                // [Controls] RightClick=true enables Start button right-click trigger
+    BOOL middleClickTrigger;               // [Controls] MiddleClick=true enables Start button middle-click trigger
+    BOOL shiftLeftClickTrigger;            // [Controls] ShiftLeftClick=true enables Shift+left-click trigger on Start button
+    BOOL shiftRightClickTrigger;           // [Controls] ShiftRightClick=true enables Shift+right-click trigger on Start button
+    BOOL shiftMiddleClickTrigger;          // [Controls] ShiftMiddleClick=true enables Shift+middle-click trigger on Start button
     BOOL thisPCItemsAsSubmenus; // [General] ThisPCItemsAsSubmenus=true|false (default true)
     BOOL thisPCShowIcons;       // [General] ThisPCShowIcons=true|false (default true)
     BOOL thisPCAsSubmenu;       // [ThisPC] ThisPCAsSubmenu=true|false (default false)
