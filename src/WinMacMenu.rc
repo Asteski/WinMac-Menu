@@ -12,8 +12,8 @@ IDI_ABOUT_ICON ICON "res/about.ico"
 // Version information block
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,10,0
- PRODUCTVERSION 0,10,0
+ FILEVERSION 0,11,0
+ PRODUCTVERSION 0,11,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -30,11 +30,11 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName",      "Asteski"
 			VALUE "FileDescription", "WinMac Menu"
-			VALUE "FileVersion",     "0.10.0"
+			VALUE "FileVersion",     "0.11.0"
 			VALUE "InternalName",    "WinMacMenu.exe"
 			VALUE "OriginalFilename", "WinMacMenu.exe"
 			VALUE "ProductName",     "WinMac Menu"
-			VALUE "ProductVersion",  "0.10.0"
+			VALUE "ProductVersion",  "0.11.0"
 			VALUE "LegalCopyright",  "Copyright 2026 Asteski"
 		END // BLOCK "040904B0"
 	END // BLOCK "StringFileInfo"
@@ -54,6 +54,7 @@ BEGIN
 	CONTROL         "", IDC_SETTINGS_TABS, "SysTabControl32", WS_TABSTOP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 6, 6, 303, 240
 	DEFPUSHBUTTON   "Apply", IDC_APPLY, 120, 257, 60, 16
 	PUSHBUTTON      "Save && Close", IDC_SAVEEXIT, 184, 257, 80, 16
+	PUSHBUTTON      "Exit", IDC_EXIT, 220, 257, 44, 16
 	PUSHBUTTON      "Cancel", IDC_CANCEL, 268, 257, 44, 16
 END
 
@@ -85,6 +86,7 @@ BEGIN
 	CONTROL       "Sign out", IDC_POWER_LOGOFF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 168, 70, 10
 	CONTROL       "Shutdown", IDC_POWER_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 168, 70, 10
 	CONTROL       "Sleep", IDC_POWER_SLEEP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 168, 50, 10
+	LTEXT         "Changes to the ""Show tray icon"" and ""Monochrome tray icon"" settings require a reload to take effect. The reload option is available from the WInMac Menu tray icon context menu.", -1, 8, 190, 278, 24
 END
 
 // Placement Page
@@ -150,6 +152,30 @@ BEGIN
 	COMBOBOX      IDC_SORT_FOLDERSFIRST, 110, 60, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
+// Controls Page
+IDD_PAGE_CONTROLS DIALOGEX 0,0,295,120
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT         "Enable activation of WinMac Menu using the triggers listed below:", -1, 8, 8, 279, 8
+
+	GROUPBOX      "Start Menu button", -1, 6, 24, 283, 26
+	CONTROL       "Left click", IDC_CTRL_LEFT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 36, 70, 10
+	CONTROL       "Right click", IDC_CTRL_RIGHT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 36, 74, 10
+	CONTROL       "Middle click", IDC_CTRL_MIDDLE_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 36, 80, 10
+
+	GROUPBOX      "Start Menu button while holding Shift", -1, 6, 56, 283, 26
+	CONTROL       "Shift + Left click", IDC_CTRL_SHIFT_LEFT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 68, 86, 10
+	CONTROL       "Shift + Right click", IDC_CTRL_SHIFT_RIGHT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 68, 90, 10
+	CONTROL       "Shift + Middle click", IDC_CTRL_SHIFT_MIDDLE_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 68, 84, 10
+
+	GROUPBOX      "Windows Key", -1, 6, 88, 283, 26
+	CONTROL       "Windows Key", IDC_CTRL_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 100, 80, 10
+	CONTROL       "Shift + Windows Key", IDC_CTRL_SHIFT_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 100, 120, 10
+
+	LTEXT         "A reload is required for the changes to take effect. The reload option is available from the WinMac Menu tray icon context menu.", -1, 8, 122, 279, 16
+END
+
 // Advanced Page
 IDD_PAGE_ADVANCED DIALOGEX 0,0,295,240
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
@@ -208,4 +234,17 @@ BEGIN
 	EDITTEXT        IDC_ITEM_PARAMS, 50, 60, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
 	DEFPUSHBUTTON   "OK", IDOK, 70, 100, 40, 14
 	PUSHBUTTON      "Cancel", IDCANCEL, 120, 100, 40, 14
+END
+
+// About Dialog
+IDD_ABOUT DIALOGEX 0,0,170,110
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "About WinMac Menu"
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT         "", IDC_ABOUT_TEXT, 12, 12, 118, 46
+	CONTROL       "https://github.com/Asteski", IDC_ABOUT_LINK, "Static", SS_NOTIFY, 12, 60, 118, 10
+	CONTROL       "", IDC_ABOUT_ART_ICON, "Static", SS_ICON, 132, 15, 32, 32
+	PUSHBUTTON    "Open config folder", IDC_ABOUT_OPEN_CONFIG, 12, 78, 92, 14
+	DEFPUSHBUTTON "OK", IDOK, 110, 78, 48, 14
 END

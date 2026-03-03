@@ -27,8 +27,10 @@
 
 // Dialogs
 #define IDD_SETTINGS 200
+#define IDD_ABOUT 201
 // Sorting page dialog
 #define IDD_PAGE_SORTING 1205
+#define IDD_PAGE_CONTROLS 1206
 
 // Controls (Settings Dialog)
 #define IDC_RUNINBACKGROUND    1000
@@ -58,6 +60,7 @@
 #define IDC_SHOWHIDDEN         1026
 #define IDC_SHOWDOTFILES       1027
 #define IDC_MONOTRAYICON       1028
+#define IDC_EXIT               1029
 // Sorting controls
 #define IDC_SORT_FIELD        1100
 #define IDC_SORT_DIRECTION    1101
@@ -100,6 +103,12 @@
 #define IDC_ITEM_PARAMS         1804
 #define IDC_ITEM_SUBMENU        1805
 
+// About dialog controls
+#define IDC_ABOUT_TEXT          1810
+#define IDC_ABOUT_OPEN_CONFIG   1811
+#define IDC_ABOUT_ART_ICON      1812
+#define IDC_ABOUT_LINK          1813
+
 // Advanced page controls
 #define IDC_RECENT_SHOW_EXT     1500
 #define IDC_RECENT_SHOW_CLEAN   1501
@@ -117,6 +126,16 @@
 // Recent name mode radios
 #define IDC_RECENT_NAME_FULL     1700
 #define IDC_RECENT_NAME_FILE     1701
+
+// Controls page checkboxes
+#define IDC_CTRL_LEFT_CLICK          1600
+#define IDC_CTRL_RIGHT_CLICK         1601
+#define IDC_CTRL_MIDDLE_CLICK        1602
+#define IDC_CTRL_SHIFT_LEFT_CLICK    1603
+#define IDC_CTRL_SHIFT_RIGHT_CLICK   1604
+#define IDC_CTRL_SHIFT_MIDDLE_CLICK  1605
+#define IDC_CTRL_WINDOWS_KEY         1606
+#define IDC_CTRL_SHIFT_WINDOWS_KEY   1607
 
 // Power exclusion checkboxes (Advanced tab)
 

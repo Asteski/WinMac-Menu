@@ -29,6 +29,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Sorting of folder content by name, date, size and type
 - Granular extension hiding (global + recent-only override)
 - Settings GUI available for those, who do not want to modify INI file directly
+- Enable activation of WinMac Menu using various Start button and Windows key triggers
 
 ## Run
 
@@ -50,6 +51,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 - [Power] exclude specific power options
 - [Sorting] sort folder content
+- [Controls] enable pre-defined triggers
 - [RecentItems] item settings
 - [TaskKill] item settings
 - [ThisPC] item settings
