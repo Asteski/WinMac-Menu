@@ -101,6 +101,8 @@ typedef struct Config {
     int recentLabelMode; // [General] RecentLabel=fullpath|name (0=full path, 1=file name)
     BOOL showExtensions; // [General] ShowFileExtensions=true keeps file extensions visible (back-compat: ShowExtensions, inverse of deprecated HideExtensions)
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
+    BOOL showFileIcons; // [General] ShowFileIcons=true shows file icons for file entries inside folder-style submenus
+    BOOL keepMenuOpenAfterContextAction; // [General] KeepMenuOpenAfterContextAction=true keeps WinMac menu visible after running an item from shell context menu
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
     BOOL recentShowIcons;      // [General] RecentShowIcons=true shows file icons in recent submenu

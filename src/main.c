@@ -618,6 +618,22 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
                 }
             }
         }
+
+        if (wParam == WM_RBUTTONUP) {
+            HWND hMenuWnd = WindowFromPoint(ms->pt);
+            WCHAR cls[64];
+            if (hMenuWnd && GetClassNameW(hMenuWnd, cls, ARRAYSIZE(cls)) && !lstrcmpW(cls, L"#32768")) {
+                HMENU hMenu = (HMENU)SendMessageW(hMenuWnd, MN_GETHMENU, 0, 0);
+                if (hMenu) {
+                    int pos = MenuItemFromPoint(hMenuWnd, hMenu, ms->pt);
+                    if (pos != -1) {
+                        if (MenuOnMenuRButtonUp(g_hHookTargetWnd, (UINT)pos, hMenu)) {
+                            return CallNextHookEx(g_hMouseHook, nCode, wParam, lParam);
+                        }
+                    }
+                }
+            }
+        }
         
         // Handle middle-click to open parent folder of recent items
         if (wParam == WM_MBUTTONUP) {
@@ -768,7 +784,7 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"0.11.0")
+            (ver[0] ? ver : L"0.12.0")
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 

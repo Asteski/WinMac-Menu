@@ -51,6 +51,8 @@ static UINT g_itemIconCount = 0;
 typedef struct ItemBmp { UINT id; HBITMAP hbmp; } ItemBmp;
 static ItemBmp g_itemBmps[256];
 static UINT g_itemBmpCount = 0;
+static UINT g_suppressCmd = 0;
+static DWORD g_suppressCmdTick = 0;
 // Forward declarations for legacy icon helpers
 static HBITMAP icon_to_hbmp(HICON hico, int cx, int cy);
 static void assign_legacy_item_bitmap(HMENU hMenu, UINT id, HICON hico);
@@ -159,6 +161,149 @@ static void map_add(UINT id, const WCHAR* path) {
         lstrcpynW(g_map[g_mapCount].path, path, ARRAYSIZE(g_map[g_mapCount].path));
         g_mapCount++;
     }
+}
+
+static const WCHAR* map_find(UINT id) {
+    for (UINT i = 0; i < g_mapCount; ++i) {
+        if (g_map[i].id == id) return g_map[i].path;
+    }
+    return NULL;
+}
+
+static BOOL is_filesystem_target(const WCHAR* path);
+
+static BOOL resolve_filesystem_path_by_command(UINT cmd, WCHAR* outPath, size_t cchOut) {
+    if (!outPath || cchOut == 0) return FALSE;
+    outPath[0] = 0;
+
+    const WCHAR* mapped = map_find(cmd);
+    if (mapped && is_filesystem_target(mapped)) {
+        lstrcpynW(outPath, mapped, (int)cchOut);
+        return TRUE;
+    }
+
+    if (cmd >= IDM_RECENT_BASE && cmd < IDM_RECENT_BASE + 1000 && cmd != IDM_RECENT_BASE + 900) {
+        RecentItem* items = NULL;
+        int n = recent_get_items(&items, g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
+        int idx = (int)(cmd - IDM_RECENT_BASE);
+        if (idx >= 0 && idx < n && items && is_filesystem_target(items[idx].path)) {
+            lstrcpynW(outPath, items[idx].path, (int)cchOut);
+            LocalFree(items);
+            return TRUE;
+        }
+        if (items) LocalFree(items);
+    }
+
+    UINT id = IDM_DYNAMIC_BASE;
+    for (int i = 0; i < g_cfg.count; ++i) {
+        ConfigItem* it = &g_cfg.items[i];
+        switch (it->type) {
+        case CI_SEPARATOR:
+        case CI_CATEGORY:
+        case CI_FOLDER_SUBMENU:
+        case CI_RECENT_SUBMENU:
+        case CI_POWER_MENU:
+        case CI_THISPC:
+        case CI_HOME:
+        case CI_TASKKILL:
+            break;
+        case CI_URI:
+        case CI_CMD:
+            id++;
+            break;
+        case CI_FILE:
+            if (id == cmd && is_filesystem_target(it->path)) {
+                lstrcpynW(outPath, it->path, (int)cchOut);
+                return TRUE;
+            }
+            id++;
+            break;
+        case CI_FOLDER:
+            if (!it->submenu) {
+                if (!it->inlineExpand) {
+                    if (id == cmd && is_filesystem_target(it->path)) {
+                        lstrcpynW(outPath, it->path, (int)cchOut);
+                        return TRUE;
+                    }
+                    id++;
+                }
+            }
+            break;
+        case CI_POWER_SLEEP:
+        case CI_POWER_SHUTDOWN:
+        case CI_POWER_RESTART:
+        case CI_POWER_LOCK:
+        case CI_POWER_LOGOFF:
+        case CI_POWER_HIBERNATE:
+            id++;
+            break;
+        }
+    }
+
+    return FALSE;
+}
+
+static BOOL is_filesystem_target(const WCHAR* path) {
+    if (!path || !path[0]) return FALSE;
+    if (!PathFileExistsW(path)) return FALSE;
+    DWORD attrs = GetFileAttributesW(path);
+    return (attrs != INVALID_FILE_ATTRIBUTES);
+}
+
+static BOOL show_shell_context_menu_for_path(HWND owner, const WCHAR* path, POINT pt) {
+    BOOL handled = FALSE;
+    LPITEMIDLIST pidl = NULL;
+    IShellFolder* parent = NULL;
+    LPCITEMIDLIST child = NULL;
+    IContextMenu* pcm = NULL;
+    HMENU hCtx = NULL;
+
+    HRESULT hrCo = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    BOOL coInit = SUCCEEDED(hrCo);
+
+    if (!path || !path[0]) goto cleanup;
+    if (!is_filesystem_target(path)) goto cleanup;
+
+    if (FAILED(SHParseDisplayName(path, NULL, &pidl, 0, NULL))) goto cleanup;
+    if (FAILED(SHBindToParent(pidl, &IID_IShellFolder, (void**)&parent, &child))) goto cleanup;
+    if (FAILED(parent->lpVtbl->GetUIObjectOf(parent, owner, 1, &child, &IID_IContextMenu, NULL, (void**)&pcm))) goto cleanup;
+
+    hCtx = CreatePopupMenu();
+    if (!hCtx) goto cleanup;
+
+    UINT qFlags = CMF_NORMAL;
+    if (GetKeyState(VK_SHIFT) & 0x8000) qFlags |= CMF_EXTENDEDVERBS;
+    if (FAILED(pcm->lpVtbl->QueryContextMenu(pcm, hCtx, 0, 1, 0x7FFF, qFlags))) goto cleanup;
+
+    SetForegroundWindow(owner);
+    UINT cmd = TrackPopupMenuEx(hCtx, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RECURSE, pt.x, pt.y, owner, NULL);
+    PostMessageW(owner, WM_NULL, 0, 0);
+
+    if (cmd >= 1) {
+        CMINVOKECOMMANDINFOEX cmi;
+        ZeroMemory(&cmi, sizeof(cmi));
+        cmi.cbSize = sizeof(cmi);
+        cmi.fMask = CMIC_MASK_UNICODE;
+        cmi.hwnd = owner;
+        cmi.lpVerb = (LPCSTR)MAKEINTRESOURCEA(cmd - 1);
+        cmi.lpVerbW = (LPCWSTR)MAKEINTRESOURCEW(cmd - 1);
+        cmi.nShow = SW_SHOWNORMAL;
+        if (SUCCEEDED(pcm->lpVtbl->InvokeCommand(pcm, (LPCMINVOKECOMMANDINFO)&cmi))) {
+            handled = TRUE;
+        }
+        if (!g_cfg.keepMenuOpenAfterContextAction) {
+            EndMenu();
+        }
+    }
+    g_shouldReopenMenu = FALSE;
+
+cleanup:
+    if (hCtx) DestroyMenu(hCtx);
+    if (pcm) pcm->lpVtbl->Release(pcm);
+    if (parent) parent->lpVtbl->Release(parent);
+    if (pidl) CoTaskMemFree(pidl);
+    if (coInit) CoUninitialize();
+    return handled;
 }
 
 static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks) {
@@ -435,6 +580,19 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
             InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
             map_add(mii.wID, items[i].fullPath);
+
+            if (g_cfg.showFileIcons && g_cfg.showIcons != 0) {
+                HICON hFile = get_file_icon(items[i].fullPath);
+                if (hFile) {
+                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                        assign_legacy_item_bitmap(hMenu, mii.wID, hFile);
+#ifdef ENABLE_MODERN_STYLE
+                    } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                        add_item_icon(mii.wID, hFile);
+#endif
+                    }
+                }
+            }
         }
         added++;
     }
@@ -1513,8 +1671,46 @@ void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu) 
     }
 }
 
+BOOL MenuOnMenuRButtonUp(HWND owner, UINT itemPos, HMENU hMenu) {
+    if (!hMenu) return FALSE;
+
+    MENUITEMINFOW mii;
+    ZeroMemory(&mii, sizeof(mii));
+    mii.cbSize = sizeof(mii);
+    mii.fMask = MIIM_ID | MIIM_DATA;
+
+    if (!GetMenuItemInfoW(hMenu, itemPos, TRUE, &mii)) return FALSE;
+
+    WCHAR path[MAX_PATH];
+    path[0] = 0;
+
+    if (mii.dwItemData) {
+        lstrcpynW(path, (const WCHAR*)mii.dwItemData, ARRAYSIZE(path));
+    }
+    if (!path[0]) {
+        if (!resolve_filesystem_path_by_command(mii.wID, path, ARRAYSIZE(path))) return FALSE;
+    }
+    if (!is_filesystem_target(path)) return FALSE;
+
+    POINT pt;
+    GetCursorPos(&pt);
+
+    // Keep WinMac menu visible and display shell context menu recursively.
+    g_suppressCmd = mii.wID;
+    g_suppressCmdTick = GetTickCount();
+    return show_shell_context_menu_for_path(owner, path, pt);
+}
+
 void MenuExecuteCommand(HWND owner, UINT cmd) {
     if (!cmd) return;
+
+    if (g_suppressCmd) {
+        BOOL same = (cmd == g_suppressCmd);
+        DWORD age = GetTickCount() - g_suppressCmdTick;
+        g_suppressCmd = 0;
+        if (same && age <= 2000) return;
+    }
+
     for (UINT i = 0; i < g_mapCount; ++i) {
         if (g_map[i].id == (UINT)cmd) {
             // Interpret special power markers
@@ -1639,29 +1835,34 @@ BOOL MenuOpenRecentParentFolder(UINT cmd) {
 }
 
 void ShowWinXMenu(HWND owner, POINT screenPt) {
-    HMENU hMenu = build_menu();
+    g_suppressCmd = 0;
     if (screenPt.x == 0 && screenPt.y == 0) {
         screenPt = compute_menu_pos(owner);
     }
-    SetForegroundWindow(owner);
-    UINT flags = TPM_RIGHTBUTTON | TPM_VERPOSANIMATION | TPM_HORIZONTAL | TPM_RETURNCMD;
-    if (g_cfg.pointerRelative) {
-        // Anchor at pointer; default to left/top align so menu grows down/right from cursor
-        flags |= TPM_LEFTALIGN | TPM_TOPALIGN;
-    } else {
-        // Align according to configured placement
-        if (g_cfg.hPlacement == 0) flags |= TPM_LEFTALIGN;
-        else if (g_cfg.hPlacement == 1) flags |= TPM_CENTERALIGN;
-        else flags |= TPM_RIGHTALIGN;
+    do {
+        HMENU hMenu = build_menu();
+        SetForegroundWindow(owner);
+        UINT flags = TPM_RIGHTBUTTON | TPM_VERPOSANIMATION | TPM_HORIZONTAL | TPM_RETURNCMD;
+        if (g_cfg.pointerRelative) {
+            // Anchor at pointer; default to left/top align so menu grows down/right from cursor
+            flags |= TPM_LEFTALIGN | TPM_TOPALIGN;
+        } else {
+            // Align according to configured placement
+            if (g_cfg.hPlacement == 0) flags |= TPM_LEFTALIGN;
+            else if (g_cfg.hPlacement == 1) flags |= TPM_CENTERALIGN;
+            else flags |= TPM_RIGHTALIGN;
 
-        if (g_cfg.vPlacement == 0) flags |= TPM_TOPALIGN;
-        else if (g_cfg.vPlacement == 1) flags |= TPM_VCENTERALIGN;
-        else flags |= TPM_BOTTOMALIGN;
+            if (g_cfg.vPlacement == 0) flags |= TPM_TOPALIGN;
+            else if (g_cfg.vPlacement == 1) flags |= TPM_VCENTERALIGN;
+            else flags |= TPM_BOTTOMALIGN;
+        }
+        g_shouldReopenMenu = FALSE;
+        int cmd = TrackPopupMenu(hMenu, flags, screenPt.x, screenPt.y, 0, owner, NULL);
+        PostMessageW(owner, WM_NULL, 0, 0);
+        MenuExecuteCommand(owner, (UINT)cmd);
+        DestroyMenu(hMenu);
     }
-    int cmd = TrackPopupMenu(hMenu, flags, screenPt.x, screenPt.y, 0, owner, NULL);
-    PostMessageW(owner, WM_NULL, 0, 0);
-    MenuExecuteCommand(owner, (UINT)cmd);
-    DestroyMenu(hMenu);
+    while (g_shouldReopenMenu);
     // In background mode the window stays alive; WM_CLOSE is posted by caller when needed.
 }
 

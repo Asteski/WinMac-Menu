@@ -52,6 +52,8 @@ static void write_default_ini(const WCHAR* path) {
         "ShowDotfiles=false\r\n"\
         "ShowFileExtensions=true\r\n"\
         "ShowFolderIcons=false\r\n"\
+        "ShowFileIcons=true\r\n"\
+        "KeepMenuOpenAfterContextAction=false\r\n"\
         "ShowHidden=false\r\n"\
         "ShowIcons=true\r\n"\
         "ShowOnLaunch=false\r\n"\
@@ -625,6 +627,18 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"ShowFolderIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->showFolderIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    // ShowFileIcons (new). Back-compat: ShowSubmenuFileIcons.
+    GetPrivateProfileStringW(L"General", L"ShowFileIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"General", L"ShowSubmenuFileIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->showFileIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    // KeepMenuOpenAfterContextAction (default false)
+    GetPrivateProfileStringW(L"General", L"KeepMenuOpenAfterContextAction", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->keepMenuOpenAfterContextAction = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // RecentShowExtensions (default true). Back compat: RecentHideExtensions overrides if present.
     GetPrivateProfileStringW(L"RecentItems", L"RecentShowExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -777,7 +791,7 @@ BOOL config_load(Config* out) {
     if (out->logLevel > 0) {
         WCHAR msg[4096];
         wsprintfW(msg,
-            L"[WinMacMenu Config]\n Level=%d Style=%s ShowIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d ShowFolderIcons=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n ThisPCSubmenus=%d ThisPCAsSubmenu=%d HomeAsSubmenu=%d TaskKillAllDesktops=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
+            L"[WinMacMenu Config]\n Level=%d Style=%s ShowIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d ShowFolderIcons=%d ShowFileIcons=%d KeepMenuOpenAfterContextAction=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n ThisPCSubmenus=%d ThisPCAsSubmenu=%d HomeAsSubmenu=%d TaskKillAllDesktops=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
             out->logLevel,
             out->menuStyle==0?L"legacy":L"modern",
             out->showIcons,
@@ -795,6 +809,8 @@ BOOL config_load(Config* out) {
             out->showExtensions,
             out->recentShowExtensions,
             out->showFolderIcons,
+            out->showFileIcons,
+            out->keepMenuOpenAfterContextAction,
             out->folderMaxDepth,
             out->folderSingleClickOpen,
             out->folderShowOpenEntry,
