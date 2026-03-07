@@ -137,6 +137,8 @@ static void General_Load(HWND pg, Config* c){
     set_check(pg,IDC_STARTONLOGIN,c->startOnLogin);
     set_check(pg,IDC_SHOWICONS,c->showIcons);
     set_check(pg,IDC_SHOWFOLDERICONS,c->showFolderIcons);
+    set_check(pg,IDC_SHOWFILEICONS,c->showFileIcons);
+    set_check(pg,IDC_KEEPCTXOPEN,c->keepMenuOpenAfterContextAction);
     set_check(pg,IDC_SHOWEXTENSIONS,c->showExtensions);
     set_check(pg,IDC_SHOWHIDDEN,c->showHidden);
     set_check(pg,IDC_SHOWDOTFILES,c->showDotfiles);
@@ -198,6 +200,8 @@ static BOOL General_Save(HWND pg, Config* c){
     b=get_check(pg,IDC_STARTONLOGIN);               if(c->startOnLogin!=b){c->startOnLogin=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWICONS);                  if(c->showIcons!=b){c->showIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWFOLDERICONS);            if(c->showFolderIcons!=b){c->showFolderIcons=b;ch=TRUE;}
+    b=get_check(pg,IDC_SHOWFILEICONS);              if(c->showFileIcons!=b){c->showFileIcons=b;ch=TRUE;}
+    b=get_check(pg,IDC_KEEPCTXOPEN);                if(c->keepMenuOpenAfterContextAction!=b){c->keepMenuOpenAfterContextAction=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWEXTENSIONS);             if(c->showExtensions!=b){c->showExtensions=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWHIDDEN);                 if(c->showHidden!=b){c->showHidden=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWDOTFILES);               if(c->showDotfiles!=b){c->showDotfiles=b;ch=TRUE;}
@@ -216,6 +220,9 @@ static BOOL General_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"General",L"ShowTrayIcon",      c->showTrayIcon?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"StartOnLogin",      c->startOnLogin?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowIcons",         c->showIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"ShowFolderIcons",   c->showFolderIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"ShowFileIcons",     c->showFileIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"KeepMenuOpenAfterContextAction", c->keepMenuOpenAfterContextAction?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowHidden",        c->showHidden?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowDotfiles",      c->showDotfiles?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"MonochromeTrayIcon",c->monochromeTrayIcon?L"true":L"false",c->iniPath);

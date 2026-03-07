@@ -12,8 +12,8 @@ IDI_ABOUT_ICON ICON "res/about.ico"
 // Version information block
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,11,0
- PRODUCTVERSION 0,11,0
+ FILEVERSION 0,12,0
+ PRODUCTVERSION 0,12,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -30,11 +30,11 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName",      "Asteski"
 			VALUE "FileDescription", "WinMac Menu"
-			VALUE "FileVersion",     "0.11.0"
+			VALUE "FileVersion",     "0.12.0"
 			VALUE "InternalName",    "WinMacMenu.exe"
 			VALUE "OriginalFilename", "WinMacMenu.exe"
 			VALUE "ProductName",     "WinMac Menu"
-			VALUE "ProductVersion",  "0.11.0"
+			VALUE "ProductVersion",  "0.12.0"
 			VALUE "LegalCopyright",  "Copyright 2026 Asteski"
 		END // BLOCK "040904B0"
 	END // BLOCK "StringFileInfo"
@@ -63,30 +63,34 @@ IDD_PAGE_GENERAL DIALOGEX 0,0,295,220
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
 FONT 9, "Segoe UI"
 BEGIN
-	GROUPBOX      "Menus behaviour", -1, 8, 6, 278, 60
+	GROUPBOX      "Menus behaviour", -1, 8, 6, 278, 74
 	CONTROL       "Show hidden files", IDC_SHOWHIDDEN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 20, 120, 10
 	CONTROL       "Show dotfiles", IDC_SHOWDOTFILES, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 32, 120, 10
 	CONTROL       "Show file extensions", IDC_SHOWEXTENSIONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 44, 120, 10
-	LTEXT         "Folder submenu depth:", -1, 150, 44, 80, 10
-	EDITTEXT      IDC_FOLDERDEPTH_EDIT, 235, 42, 24, 12, ES_NUMBER | WS_TABSTOP
-	CONTROL       "", IDC_FOLDERDEPTH_SPIN, "msctls_updown32", UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_NOTHOUSANDS, 259, 42, 10, 12
+	CONTROL       "", IDC_KEEPCTXOPEN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 56, 10, 10
+	LTEXT         "Keep menu open after triggering", -1, 28, 56, 125, 8
+	LTEXT         "context menu action", -1, 28, 66, 100, 8
+	LTEXT         "Folder submenu depth:", -1, 150, 58, 82, 10
+	EDITTEXT      IDC_FOLDERDEPTH_EDIT, 235, 56, 24, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL       "", IDC_FOLDERDEPTH_SPIN, "msctls_updown32", UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_NOTHOUSANDS, 259, 56, 10, 12
 	CONTROL       "Show menu icons", IDC_SHOWICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 20, 120, 10
 	CONTROL       "Show folder icons", IDC_SHOWFOLDERICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 32, 120, 10
+	CONTROL       "Show file icons", IDC_SHOWFILEICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 44, 120, 10
 
-	GROUPBOX      "Program behaviour", -1, 8, 74, 278, 60
-	CONTROL       "Start on login", IDC_STARTONLOGIN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 88, 120, 10
-	CONTROL       "Run in background", IDC_RUNINBACKGROUND, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 100, 120, 10
-	CONTROL       "Show on launch", IDC_SHOWONLAUNCH, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 88, 120, 10
-	CONTROL       "Show tray icon", IDC_SHOWTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 100, 120, 10
-	CONTROL       "Monochrome tray icon", IDC_MONOTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 112, 120, 10
-	GROUPBOX      "Included power options", -1, 8, 140, 278, 44
-	CONTROL       "Hibernate", IDC_POWER_HIBERNATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 154, 70, 10
-	CONTROL       "Lock", IDC_POWER_LOCK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 154, 50, 10
-	CONTROL       "Restart", IDC_POWER_RESTART, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 154, 60, 10
-	CONTROL       "Sign out", IDC_POWER_LOGOFF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 168, 70, 10
-	CONTROL       "Shutdown", IDC_POWER_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 168, 70, 10
-	CONTROL       "Sleep", IDC_POWER_SLEEP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 168, 50, 10
-	LTEXT         "Changes to the ""Show tray icon"" and ""Monochrome tray icon"" settings require a reload to take effect. The reload option is available from the WInMac Menu tray icon context menu.", -1, 8, 190, 278, 24
+	GROUPBOX      "Program behaviour", -1, 8, 82, 278, 50
+	CONTROL       "Start on login", IDC_STARTONLOGIN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 92, 120, 10
+	CONTROL       "Run in background", IDC_RUNINBACKGROUND, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 104, 120, 10
+	CONTROL       "Show on launch", IDC_SHOWONLAUNCH, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 92, 120, 10
+	CONTROL       "Show tray icon", IDC_SHOWTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 104, 120, 10
+	CONTROL       "Monochrome tray icon", IDC_MONOTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 116, 120, 10
+	GROUPBOX      "Included power options", -1, 8, 144, 278, 44
+	CONTROL       "Hibernate", IDC_POWER_HIBERNATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 158, 70, 10
+	CONTROL       "Lock", IDC_POWER_LOCK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 158, 50, 10
+	CONTROL       "Restart", IDC_POWER_RESTART, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 158, 60, 10
+	CONTROL       "Sign out", IDC_POWER_LOGOFF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 172, 70, 10
+	CONTROL       "Shutdown", IDC_POWER_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 172, 70, 10
+	CONTROL       "Sleep", IDC_POWER_SLEEP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 172, 50, 10
+	LTEXT         "Changes to the ""Show tray icon"" and ""Monochrome tray icon"" settings require a reload to take effect. The reload option is available from the WInMac Menu tray icon context menu.", -1, 8, 194, 278, 24
 END
 
 // Placement Page

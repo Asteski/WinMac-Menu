@@ -68,6 +68,8 @@
 #define IDC_MAXITEMS_EDIT     1103
 #define IDC_MAXITEMS_SPIN     1104
 #define IDC_CONFIG_FILE_LABEL  1025
+#define IDC_SHOWFILEICONS      1032
+#define IDC_KEEPCTXOPEN        1033
 
 // Tab control main
 #define IDC_SETTINGS_TABS       1100

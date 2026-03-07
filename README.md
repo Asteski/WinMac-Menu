@@ -21,7 +21,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - This PC - dynamic submenu to list This PC content
 - Home - dynamic submenu to show User Profile folder
 - Light/Dark auto-adaptation - immersive dark hint on the invisible owner window
-- Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
+- Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional folder or files icon retrieval
 - Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
@@ -29,6 +29,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Granular extension hiding (global + recent-only override)
 - Settings GUI available for those, who do not want to modify INI file directly
 - Enable activation of WinMac Menu using various Start button and Windows key triggers
+- Trigger folder or file context menu directly from WinMac's submenu
 
 ## Run
 
