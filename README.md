@@ -16,14 +16,13 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 ## Features
 
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
-- Recent Items - dynamic submenu from %AppData%\Microsoft\Windows\ folder
-- Force Quit - dynamic submenu to forcibly end tasks
+- Recent Items - dynamic submenu from *%AppData%\Microsoft\Windows\Recent Items* folder
+- Task Kill - dynamic submenu to forcibly end tasks
 - This PC - dynamic submenu to list This PC content
 - Home - dynamic submenu to show User Profile folder
 - Light/Dark auto-adaptation - immersive dark hint on the invisible owner window
 - Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional system folder icon retrieval
 - Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
-- First-letter activation, outside-click dismissal
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
 - Sorting of folder content by name, date, size and type
@@ -33,7 +32,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Run
 
-**Quick Start**: Double‑click the EXE. By default, it runs in background mode with a system tray icon.
+**Quick Start**: By default, it runs in background mode with a system tray icon.
 
 **Modes**:
 - **Background Mode (default)** - App stays running in background. Launch again to toggle/show menu.
@@ -61,7 +60,6 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
 
 ## Behavior Details
-- First-letter activation
 - Outside click dismisses menu
 - DPI-aware scaling via system menu metrics
 - Icons in legacy mode use MIIM_BITMAP, keeping native look (no custom owner-draw)
@@ -83,18 +81,12 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - Folder icons not appearing: set ShowFolderIcons=true; the system folder icon only shows when no per-item icon exists
 
 ## Notes
-> [!NOTE]
-**Please be informed that this is a beta version - you're using it at your own risk!**
 - WinMacMenu reads an INI. If missing, a default (config.ini) is created.
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
-- Settings GUI window is still in experimental phase, so I can't promise its stability for now.
 - Indices N in [Icons]/[IconsLight]/[IconsDark] map to ItemN in [Menu].
 - Generated default INI contains no comments (to keep the file minimal). Comments are still supported by the parser if you add them manually: lines beginning with `;` or `#` are ignored.
-- Duplicate keys: The last occurrence in a section wins (standard Win32 profile API behavior).
-- Unknown keys are ignored.
 - Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
-- This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System for now
-- It's recommended to use it together with Open-Shell, so the WinMacMenu can be triggered by clicking the Start menu button with the left mouse button or by pressing the Windows key.
-- You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different file names for ini file.
+- This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System
+- You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different ini file names.
 - INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
-- You can reference either *.dll or *.exe file in [Icons] section as path or jsut a file name (if the file resides in directory defined in %PATH%).
+- You can reference either *.dll or *.exe file in [Icons] section as path or just a file name (if the file resides in directory defined in %PATH%).
