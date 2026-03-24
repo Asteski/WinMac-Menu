@@ -784,7 +784,7 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"0.12.0")
+            (ver[0] ? ver : L"0.13.0")
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 
@@ -877,6 +877,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     // Handle taskbar recreation (Explorer restart broadcasts this)
     if (msg == g_msgTaskbarCreated) {
+        if (g_runInBackground) {
+            ShutdownTaskbarHook();
+            SetTaskbarHookTargetWindow(hWnd);
+            if (!InitTaskbarHook()) {
+                OutputDebugStringW(L"Warning: Failed to reinitialize taskbar hook after Explorer restart\n");
+            }
+        }
         if (g_runInBackground && g_cfg.showTrayIcon) {
             tray_reload(hWnd);
         }
