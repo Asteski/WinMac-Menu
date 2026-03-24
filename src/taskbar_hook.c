@@ -15,6 +15,26 @@ static BOOL g_suppressNextLeftUp = FALSE;
 static BOOL g_suppressNextMiddleUp = FALSE;
 static BOOL g_suppressNextRightUp = FALSE;
 
+static BOOL RefreshTaskbarHandles(void) {
+    if (!IsWindow(g_hTaskbar)) {
+        g_hTaskbar = FindTaskbarWindow();
+    }
+    if (!g_hTaskbar) {
+        g_hStartButton = NULL;
+        return FALSE;
+    }
+
+    if (!IsWindow(g_hStartButton)) {
+        g_hStartButton = FindStartButton(g_hTaskbar);
+    }
+
+    if (!g_hStartButton) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 void SetTaskbarHookTargetWindow(HWND hWnd) {
     g_hOwnerWnd = hWnd;
 }
@@ -42,6 +62,10 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
         BOOL bMiddleClick = (wParam == WM_MBUTTONDOWN);
         BOOL bRightClick = (wParam == WM_RBUTTONDOWN);
         
+        if (bLeftClick || bMiddleClick || bRightClick) {
+            RefreshTaskbarHandles();
+        }
+
         if ((bLeftClick || bMiddleClick || bRightClick) && g_hStartButton) {
             // Check if click is over start button
             RECT startButtonRect;
@@ -135,11 +159,9 @@ HWND FindStartButton(HWND hTaskbar) {
 
 BOOL InitTaskbarHook(void) {
     OutputDebugStringW(L"InitTaskbarHook: Starting taskbar hook initialization\n");
-    
-    // Find taskbar window
-    g_hTaskbar = FindTaskbarWindow();
-    if (!g_hTaskbar) {
-        OutputDebugStringW(L"InitTaskbarHook: Could not find taskbar window\n");
+
+    if (!RefreshTaskbarHandles()) {
+        OutputDebugStringW(L"InitTaskbarHook: Could not resolve taskbar/start button handles\n");
         return FALSE;
     }
     
@@ -158,13 +180,17 @@ BOOL InitTaskbarHook(void) {
     OutputDebugStringW(debug);
     
     // Install low-level mouse hook to intercept mouse messages globally
-    g_hMsgHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), 0);
     if (!g_hMsgHook) {
-        OutputDebugStringW(L"InitTaskbarHook: Failed to install mouse hook\n");
-        return FALSE;
+        g_hMsgHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), 0);
+        if (!g_hMsgHook) {
+            OutputDebugStringW(L"InitTaskbarHook: Failed to install mouse hook\n");
+            return FALSE;
+        }
+        OutputDebugStringW(L"InitTaskbarHook: Mouse hook installed successfully\n");
+    } else {
+        OutputDebugStringW(L"InitTaskbarHook: Mouse hook already installed, refreshed handles only\n");
     }
-    
-    OutputDebugStringW(L"InitTaskbarHook: Mouse hook installed successfully\n");
+
     return TRUE;
 }
 

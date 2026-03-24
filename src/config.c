@@ -51,7 +51,7 @@ static void write_default_ini(const WCHAR* path) {
         "RunInBackground=true\r\n"\
         "ShowDotfiles=false\r\n"\
         "ShowFileExtensions=true\r\n"\
-        "ShowFolderIcons=false\r\n"\
+        "ShowFolderIcons=true\r\n"\
         "ShowFileIcons=true\r\n"\
         "KeepMenuOpenAfterContextAction=false\r\n"\
         "ShowHidden=false\r\n"\
@@ -91,7 +91,7 @@ static void write_default_ini(const WCHAR* path) {
         "Item7=---\r\n"\
         "Item8=Recent Items|RECENT\r\n"\
         "Item9=---\r\n"\
-        "Item10=Force Quit|TASKKILL\r\n"\
+        "Item10=End task|TASKKILL\r\n"\
         "Item11=---\r\n"\
         "Item12=Sleep|POWER_SLEEP\r\n"\
         "Item13=Restart|POWER_RESTART\r\n"\
@@ -101,8 +101,8 @@ static void write_default_ini(const WCHAR* path) {
         "Item17=Task Scheduler|URI|taskschd.msc\r\n"\
         "Item18=Task Manager|URI|taskmgr\r\n"\
         "Item19=---\r\n"\
-        "Item20=Lock Screen|POWER_LOCK\r\n"\
-        "Item21=Log Out %USERNAME%|POWER_LOGOFF\r\n"\
+        "Item20=Lock screen|POWER_LOCK\r\n"\
+        "Item21=Sign out %USERNAME%|POWER_LOGOFF\r\n"\
         "\r\n"\
         "[Icons]\r\n"\
         "Icon1=shell32.dll,-271\r\n"\
@@ -111,7 +111,7 @@ static void write_default_ini(const WCHAR* path) {
         "Icon5=imageres.dll,-5325\r\n"\
         "Icon6=imageres.dll,-88\r\n"\
         "Icon8=shell32.dll,-327\r\n"\
-        "Icon10=shell32.dll,-240\r\n"\
+        "Icon10=shell32.dll,-200\r\n"\
         "Icon16=eventvwr.exe,0\r\n"\
         "Icon17=powercpl.dll,-513\r\n"\
         "Icon18=taskmgr.exe,0\r\n"\
@@ -624,7 +624,7 @@ BOOL config_load(Config* out) {
     }
     out->showExtensions = showExt;
     // ShowFolderIcons
-    GetPrivateProfileStringW(L"General", L"ShowFolderIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"General", L"ShowFolderIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->showFolderIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // ShowFileIcons (new). Back-compat: ShowSubmenuFileIcons.

@@ -35,10 +35,11 @@ typedef struct FolderMenuData {
     int depth;
     int offset;
     BOOL forceLinks;
+    BOOL allowMixedIcons;
 } FolderMenuData;
 
 // Forward declaration
-static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks);
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons);
 
 
 static Config g_cfg; // loaded on demand
@@ -306,13 +307,14 @@ cleanup:
     return handled;
 }
 
-static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks) {
+static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons) {
     FolderMenuData* data = (FolderMenuData*)LocalAlloc(LMEM_FIXED|LMEM_ZEROINIT, sizeof(FolderMenuData));
     if (!data) return;
     lstrcpynW(data->path, path, ARRAYSIZE(data->path));
     data->depth = depth;
     data->offset = offset;
     data->forceLinks = forceLinks;
+    data->allowMixedIcons = allowMixedIcons;
     MENUINFO mi = { sizeof(mi) };
     mi.fMask = MIM_MENUDATA;
     mi.dwMenuData = (ULONG_PTR)data;
@@ -448,7 +450,7 @@ static int compare_files(const void* a, const void* b) {
     return res;
 }
 
-static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset, BOOL forceLinks) {
+static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons) {
     WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
     PathCombineW(pattern, path, L"*");
     HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
@@ -523,7 +525,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
             if (!forceLinks && depth < g_cfg.folderMaxDepth) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, items[i].fullPath, depth + 1, 0, FALSE);
+                attach_menu_data(sub, items[i].fullPath, depth + 1, 0, FALSE, allowMixedIcons);
                 
                 MENUITEMINFOW mii = { sizeof(mii) };
                 UINT folderId = g_nextFolderId++;
@@ -538,7 +540,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
                     HICON hFolder = get_system_folder_icon();
                     if (hFolder) {
-                        if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
                             assign_legacy_item_bitmap(hMenu, folderId, hFolder);
 #ifdef ENABLE_MODERN_STYLE
                         } else if (g_cfg.menuStyle == STYLE_MODERN) {
@@ -560,7 +562,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
                     HICON hFolder = get_system_folder_icon();
                     if (hFolder) {
-                        if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
                             assign_legacy_item_bitmap(hMenu, mii.wID, hFolder);
 #ifdef ENABLE_MODERN_STYLE
                         } else if (g_cfg.menuStyle == STYLE_MODERN) {
@@ -584,7 +586,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
             if (g_cfg.showFileIcons && g_cfg.showIcons != 0) {
                 HICON hFile = get_file_icon(items[i].fullPath);
                 if (hFile) {
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                    if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
                         assign_legacy_item_bitmap(hMenu, mii.wID, hFile);
 #ifdef ENABLE_MODERN_STYLE
                     } else if (g_cfg.menuStyle == STYLE_MODERN) {
@@ -601,7 +603,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
         // Show More Items
         HMENU sub = CreatePopupMenu();
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-        attach_menu_data(sub, path, depth, end, forceLinks);
+        attach_menu_data(sub, path, depth, end, forceLinks, allowMixedIcons);
         
         InsertMenuW(hMenu, insertPos + added, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
         added++;
@@ -635,7 +637,7 @@ static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
         while (GetMenuItemCount(parent) > 0) DeleteMenu(parent, 0, MF_BYPOSITION);
     }
 
-    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset, data->forceLinks);
+    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset, data->forceLinks, data->allowMixedIcons);
 }
 
 typedef struct TaskKillData {
@@ -993,7 +995,7 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
             if (asSubmenu) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, path, 1, 0, FALSE);
+                attach_menu_data(sub, path, 1, 0, FALSE, TRUE);
                 
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
@@ -1108,7 +1110,7 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
         if (g_cfg.thisPCItemsAsSubmenus) {
             HMENU sub = CreatePopupMenu();
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-            attach_menu_data(sub, p, 1, 0, FALSE);
+            attach_menu_data(sub, p, 1, 0, FALSE, TRUE);
             
             mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
             mii.dwTypeData = label;
@@ -1218,7 +1220,7 @@ static HMENU build_menu(void) {
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-                attach_menu_data(sub, it->path, 1, 0, FALSE);
+                attach_menu_data(sub, it->path, 1, 0, FALSE, TRUE);
                 AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_DATA | MIIM_SUBMENU;
@@ -1240,7 +1242,7 @@ static HMENU build_menu(void) {
                     }
                 }
                 
-                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE);
+                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE, FALSE);
                 
                 // No automatic trailing separator; user controls separators explicitly in config.
             } else {
@@ -1351,7 +1353,7 @@ static HMENU build_menu(void) {
         {
             HMENU sub = CreatePopupMenu();
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
-            attach_menu_data(sub, it->path, 1, 0, FALSE);
+            attach_menu_data(sub, it->path, 1, 0, FALSE, TRUE);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
             UINT popupId = g_nextFolderId++;
             if (g_cfg.showIcons != 0) {
