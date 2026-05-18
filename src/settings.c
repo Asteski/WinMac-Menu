@@ -9,6 +9,7 @@
 #include <shlwapi.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 
 // Forward declaration for dialog procedure
 static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -41,7 +42,7 @@ typedef struct SettingsState {
     // Track original power option states
     BOOL origExcludeSleep, origExcludeHibernate, origExcludeShutdown, origExcludeRestart, origExcludeLock, origExcludeLogoff;
     HWND hTabs;
-    HWND pages[7]; // General, Placement, Menu, Icons, Sorting, Controls, Advanced
+    HWND pages[8]; // General, Placement, Menu, Icons, Sorting, Controls, Appearance, Advanced
     // Working copy of menu/icon items so Apply/Save commits atomically
     ConfigItem workingItems[64];
     int workingCount;
@@ -58,6 +59,7 @@ enum {
     PAGE_ICONS,
     PAGE_SORTING,
     PAGE_CONTROLS,
+    PAGE_APPEARANCE,
     PAGE_ADVANCED,
     PAGE_COUNT
 };
@@ -105,6 +107,24 @@ static BOOL get_check(HWND d,int id){ return IsDlgButtonChecked(d,id)==BST_CHECK
 static void set_int(HWND d,int id,int v){ WCHAR b[32]; wsprintfW(b,L"%d",v); SetDlgItemTextW(d,id,b);} 
 static int  get_int(HWND d,int id,int def){ WCHAR b[32]; if(!GetDlgItemTextW(d,id,b,ARRAYSIZE(b))) return def; int v=_wtoi(b); return (v==0)?def:v; }
 
+static int show_icons_combo_index_from_value(int showIcons){
+    if(showIcons == 1) return 0;
+    if(showIcons == 2) return 1;
+    return 2;
+}
+
+static int show_icons_value_from_combo_index(int sel){
+    if(sel == 0) return 1;
+    if(sel == 1) return 2;
+    return 0;
+}
+
+static const WCHAR* show_icons_ini_value(int showIcons){
+    if(showIcons == 1) return L"true";
+    if(showIcons == 2) return L"other";
+    return L"false";
+}
+
 static void apply_dialog_icon(HWND dlg,const Config* cfg){
     int cx=GetSystemMetrics(SM_CXICON), cy=GetSystemMetrics(SM_CYICON);
     int cxs=GetSystemMetrics(SM_CXSMICON), cys=GetSystemMetrics(SM_CYSMICON);
@@ -125,17 +145,21 @@ static void apply_dialog_icon(HWND dlg,const Config* cfg){
 
 // -------- General Page --------
 static void General_Load(HWND pg, Config* c){
+    HWND hShowIcons = GetDlgItem(pg, IDC_SHOWICONS);
+    SendMessageW(hShowIcons, CB_RESETCONTENT, 0, 0);
+    SendMessageW(hShowIcons, CB_ADDSTRING, 0, (LPARAM)L"Enable");
+    SendMessageW(hShowIcons, CB_ADDSTRING, 0, (LPARAM)L"Submenus only");
+    SendMessageW(hShowIcons, CB_ADDSTRING, 0, (LPARAM)L"Disable");
+    SendMessageW(hShowIcons, CB_SETCURSEL, show_icons_combo_index_from_value(c->showIcons), 0);
         set_check(pg, IDC_POWER_HIBERNATE, !c->excludeHibernate);
         set_check(pg, IDC_POWER_LOCK,      !c->excludeLock);
         set_check(pg, IDC_POWER_LOGOFF,    !c->excludeLogoff);
         set_check(pg, IDC_POWER_RESTART,   !c->excludeRestart);
         set_check(pg, IDC_POWER_SHUTDOWN,  !c->excludeShutdown);
         set_check(pg, IDC_POWER_SLEEP,     !c->excludeSleep);
-    set_check(pg,IDC_RUNINBACKGROUND,c->runInBackground);
     set_check(pg,IDC_SHOWONLAUNCH,c->showOnLaunch);
     set_check(pg,IDC_SHOWTRAYICON,c->showTrayIcon);
     set_check(pg,IDC_STARTONLOGIN,c->startOnLogin);
-    set_check(pg,IDC_SHOWICONS,c->showIcons);
     set_check(pg,IDC_SHOWFOLDERICONS,c->showFolderIcons);
     set_check(pg,IDC_SHOWFILEICONS,c->showFileIcons);
     set_check(pg,IDC_KEEPCTXOPEN,c->keepMenuOpenAfterContextAction);
@@ -143,9 +167,6 @@ static void General_Load(HWND pg, Config* c){
     set_check(pg,IDC_SHOWHIDDEN,c->showHidden);
     set_check(pg,IDC_SHOWDOTFILES,c->showDotfiles);
     set_check(pg,IDC_MONOTRAYICON,c->monochromeTrayIcon);
-        // Folder Submenu Depth
-        set_int(pg, IDC_FOLDERDEPTH_EDIT, c->folderMaxDepth);
-        SendDlgItemMessageW(pg, IDC_FOLDERDEPTH_SPIN, UDM_SETRANGE, 0, MAKELPARAM(4, 1));
     // ...existing code...
     // Power Menu checkboxes removed from GUI
     // Populate filename label (separate static now). Button text remains static in resource.
@@ -178,6 +199,7 @@ static BOOL General_Save(HWND pg, Config* c){
     BOOL ch=FALSE;
     BOOL reloadNeeded=FALSE;
     BOOL b;
+    int v;
     BOOL origExcludeHibernate = c->excludeHibernate;
     BOOL origExcludeLock = c->excludeLock;
     BOOL origExcludeLogoff = c->excludeLogoff;
@@ -194,11 +216,10 @@ static BOOL General_Save(HWND pg, Config* c){
 
     if (origExcludeHibernate != c->excludeHibernate || origExcludeLock != c->excludeLock || origExcludeLogoff != c->excludeLogoff || origExcludeRestart != c->excludeRestart || origExcludeShutdown != c->excludeShutdown || origExcludeSleep != c->excludeSleep) ch = TRUE;
 
-    b=get_check(pg,IDC_RUNINBACKGROUND);            if(c->runInBackground!=b){c->runInBackground=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWONLAUNCH);               if(c->showOnLaunch!=b){c->showOnLaunch=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWTRAYICON);               if(c->showTrayIcon!=b){c->showTrayIcon=b;ch=TRUE;reloadNeeded=TRUE;}
     b=get_check(pg,IDC_STARTONLOGIN);               if(c->startOnLogin!=b){c->startOnLogin=b;ch=TRUE;}
-    b=get_check(pg,IDC_SHOWICONS);                  if(c->showIcons!=b){c->showIcons=b;ch=TRUE;}
+    v=(int)SendDlgItemMessageW(pg,IDC_SHOWICONS,CB_GETCURSEL,0,0); if(v>=0){ int showIcons=show_icons_value_from_combo_index(v); if(c->showIcons!=showIcons){c->showIcons=showIcons;ch=TRUE;} }
     b=get_check(pg,IDC_SHOWFOLDERICONS);            if(c->showFolderIcons!=b){c->showFolderIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_SHOWFILEICONS);              if(c->showFileIcons!=b){c->showFileIcons=b;ch=TRUE;}
     b=get_check(pg,IDC_KEEPCTXOPEN);                if(c->keepMenuOpenAfterContextAction!=b){c->keepMenuOpenAfterContextAction=b;ch=TRUE;}
@@ -207,10 +228,6 @@ static BOOL General_Save(HWND pg, Config* c){
     b=get_check(pg,IDC_SHOWDOTFILES);               if(c->showDotfiles!=b){c->showDotfiles=b;ch=TRUE;}
     b=get_check(pg,IDC_MONOTRAYICON);               if(c->monochromeTrayIcon!=b){c->monochromeTrayIcon=b;ch=TRUE;reloadNeeded=TRUE;}
 
-    int vFolderDepth = get_int(pg, IDC_FOLDERDEPTH_EDIT, c->folderMaxDepth);
-    if (vFolderDepth < 1) vFolderDepth = 1;
-    if (vFolderDepth > 4) vFolderDepth = 4;
-    if (c->folderMaxDepth != vFolderDepth) { c->folderMaxDepth = vFolderDepth; ch = TRUE; }
     if(c->iniPath[0]){
         WCHAR bufDepth[8];
         wsprintfW(bufDepth, L"%d", c->folderMaxDepth);
@@ -219,7 +236,7 @@ static BOOL General_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"General",L"ShowOnLaunch",      c->showOnLaunch?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowTrayIcon",      c->showTrayIcon?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"StartOnLogin",      c->startOnLogin?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"General",L"ShowIcons",         c->showIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"General",L"ShowIcons",         show_icons_ini_value(c->showIcons),c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowFolderIcons",   c->showFolderIcons?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"ShowFileIcons",     c->showFileIcons?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"General",L"KeepMenuOpenAfterContextAction", c->keepMenuOpenAfterContextAction?L"true":L"false",c->iniPath);
@@ -240,10 +257,14 @@ static BOOL General_Save(HWND pg, Config* c){
     WCHAR exe[MAX_PATH];
     GetModuleFileNameW(NULL, exe, ARRAYSIZE(exe));
     WCHAR cmd[2048];
-    if(c->iniPath[0])
-        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exe, c->iniPath);
-    else
+    if(c->iniPath[0]) {
+        WCHAR cfgAbs[MAX_PATH];
+        DWORD n = GetFullPathNameW(c->iniPath, ARRAYSIZE(cfgAbs), cfgAbs, NULL);
+        if (n == 0 || n >= ARRAYSIZE(cfgAbs)) lstrcpynW(cfgAbs, c->iniPath, ARRAYSIZE(cfgAbs));
+        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exe, cfgAbs);
+    } else {
         wsprintfW(cmd, L"\"%s\"", exe);
+    }
     WCHAR runName[32];
     lstrcpynW(runName, L"WinMac Menu", ARRAYSIZE(runName));
     if(c->startOnLogin)
@@ -291,6 +312,11 @@ static void Placement_Load(HWND pg, Config* c){
     SendMessageW(hRelative, CB_SETCURSEL, relativeSel, 0);
     // Enable/disable relative combobox based on pointer relative
     EnableWindow(hRelative, c->pointerRelative);
+    {
+        HWND hRelativeLabel = GetDlgItem(pg, IDC_IGNORE_RELATIVE_LABEL);
+        if (hRelativeLabel) EnableWindow(hRelativeLabel, c->pointerRelative);
+    }
+
 }
 static BOOL Placement_Save(HWND pg, Config* c){
     BOOL ch=FALSE; BOOL b;
@@ -314,6 +340,7 @@ static BOOL Placement_Save(HWND pg, Config* c){
     if(relativeSel == 0) { c->ignoreHOffsetWhenRelative = TRUE; c->ignoreVOffsetWhenRelative = TRUE; }
     else if(relativeSel == 2) { c->ignoreHOffsetWhenRelative = TRUE; }
     else if(relativeSel == 3) { c->ignoreVOffsetWhenRelative = TRUE; }
+
     if(!ch) return FALSE;
     if(c->iniPath[0]){
         WCHAR buf[32];
@@ -398,6 +425,8 @@ static void Controls_Load(HWND pg, Config* c){
     set_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK, c->shiftMiddleClickTrigger);
     set_check(pg, IDC_CTRL_WINDOWS_KEY, c->windowsKeyTrigger);
     set_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY, c->shiftWindowsKeyTrigger);
+    set_check(pg, IDC_IGNORE_FULLSCREEN_CHECK, c->ignoreTriggersWhenFullscreen);
+    SetDlgItemTextW(pg, IDC_FULLSCREEN_EXCLUSION_EDIT, c->fullscreenExclusionList);
 }
 
 static BOOL Controls_Save(HWND pg, Config* c){
@@ -412,6 +441,14 @@ static BOOL Controls_Save(HWND pg, Config* c){
     b = get_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK); if(c->shiftMiddleClickTrigger != b){ c->shiftMiddleClickTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_WINDOWS_KEY); if(c->windowsKeyTrigger != b){ c->windowsKeyTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY); if(c->shiftWindowsKeyTrigger != b){ c->shiftWindowsKeyTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_IGNORE_FULLSCREEN_CHECK); if(c->ignoreTriggersWhenFullscreen != b){ c->ignoreTriggersWhenFullscreen = b; ch = TRUE; }
+    
+    WCHAR exclusionBuf[1024];
+    GetDlgItemTextW(pg, IDC_FULLSCREEN_EXCLUSION_EDIT, exclusionBuf, ARRAYSIZE(exclusionBuf));
+    if(lstrcmpW(c->fullscreenExclusionList, exclusionBuf) != 0){
+        lstrcpynW(c->fullscreenExclusionList, exclusionBuf, ARRAYSIZE(c->fullscreenExclusionList));
+        ch = TRUE;
+    }
 
     if(!ch) return FALSE;
     if(c->iniPath[0]){
@@ -423,6 +460,75 @@ static BOOL Controls_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"Controls", L"ShiftMiddleClick", c->shiftMiddleClickTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"WindowsKey", c->windowsKeyTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"ShiftWindowsKey", c->shiftWindowsKeyTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", c->ignoreTriggersWhenFullscreen?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"FullscreenExclusionList", c->fullscreenExclusionList, c->iniPath);
+    }
+    return TRUE;
+}
+
+// -------- Appearance Page --------
+static void Appearance_Load(HWND pg, Config* c){
+    set_check(pg, IDC_ROOT_MENU_ICON_SIZE, c->rootMenuLargeIcons);
+    set_check(pg, IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR, c->keepLargeMenuHighlightTextColor);
+    {
+        HWND hAnim = GetDlgItem(pg, IDC_ANIMATION_COMBO);
+        if (hAnim) {
+            SendMessageW(hAnim, CB_RESETCONTENT, 0, 0);
+            SendMessageW(hAnim, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
+            SendMessageW(hAnim, CB_ADDSTRING, 0, (LPARAM)L"Top");
+            SendMessageW(hAnim, CB_ADDSTRING, 0, (LPARAM)L"Bottom");
+            SendMessageW(hAnim, CB_ADDSTRING, 0, (LPARAM)L"Left");
+            SendMessageW(hAnim, CB_ADDSTRING, 0, (LPARAM)L"Right");
+            {
+                int animSel = 2;
+                if (c->animationDirection == ANIM_AUTO) animSel = 0;
+                else if (c->animationDirection == ANIM_TOP) animSel = 1;
+                else if (c->animationDirection == ANIM_LEFT) animSel = 3;
+                else if (c->animationDirection == ANIM_RIGHT) animSel = 4;
+                SendMessageW(hAnim, CB_SETCURSEL, animSel, 0);
+            }
+            BOOL animEnabled = IsDlgButtonChecked(pg, IDC_ROOT_MENU_ICON_SIZE) == BST_CHECKED;
+            EnableWindow(hAnim, animEnabled);
+            {
+                HWND hAnimLabel = GetDlgItem(pg, IDC_ANIMATION_LABEL);
+                if (hAnimLabel) EnableWindow(hAnimLabel, animEnabled);
+            }
+        }
+    }
+}
+
+static BOOL Appearance_Save(HWND pg, Config* c){
+    BOOL ch=FALSE; BOOL b;
+    b=get_check(pg,IDC_ROOT_MENU_ICON_SIZE); if(c->rootMenuLargeIcons!=b){c->rootMenuLargeIcons=b;ch=TRUE;}
+    b=get_check(pg,IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR); if(c->keepLargeMenuHighlightTextColor!=b){c->keepLargeMenuHighlightTextColor=b;ch=TRUE;}
+    {
+        HWND hAnim = GetDlgItem(pg, IDC_ANIMATION_COMBO);
+        if (hAnim) {
+            int animSel = (int)SendMessageW(hAnim, CB_GETCURSEL, 0, 0);
+            int animValue = ANIM_BOTTOM;
+            if (animSel == 0) animValue = ANIM_AUTO;
+            else if (animSel == 1) animValue = ANIM_TOP;
+            else if (animSel == 3) animValue = ANIM_LEFT;
+            else if (animSel == 4) animValue = ANIM_RIGHT;
+            if (c->animationDirection != animValue) { c->animationDirection = animValue; ch = TRUE; }
+        }
+    }
+    if(!ch) return FALSE;
+    if(c->iniPath[0]){
+        WritePrivateProfileStringW(L"Appearance",L"LargeMenuIcons",c->rootMenuLargeIcons?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"KeepLargeMenuHighlightTextColor",c->keepLargeMenuHighlightTextColor?L"true":L"false",c->iniPath);
+        {
+            const WCHAR* anim = L"bottom";
+            if (c->animationDirection == ANIM_AUTO) anim = L"disabled";
+            else if (c->animationDirection == ANIM_TOP) anim = L"top";
+            else if (c->animationDirection == ANIM_LEFT) anim = L"left";
+            else if (c->animationDirection == ANIM_RIGHT) anim = L"right";
+            WritePrivateProfileStringW(L"Appearance", L"LargeMenuAnimation", anim, c->iniPath);
+        }
+        // Cleanup old location keys after migration.
+        WritePrivateProfileStringW(L"Advanced",L"LargeMenuIcons",NULL,c->iniPath);
+        WritePrivateProfileStringW(L"Advanced",L"LargeMenuAnimation",NULL,c->iniPath);
+        WritePrivateProfileStringW(L"Advanced",L"KeepLargeMenuHighlightTextColor",NULL,c->iniPath);
     }
     return TRUE;
 }
@@ -560,7 +666,21 @@ static void lv_add_col(HWND lv,int i,int w,const WCHAR* txt){
     c.pszText = tmp;
     c.iSubItem = i;
     ListView_InsertColumn(lv,i,&c);
-} 
+}
+static void lv_autosize_cols(HWND lv){
+    if(!lv) return;
+    HWND header = ListView_GetHeader(lv);
+    int colCount = header ? Header_GetItemCount(header) : 0;
+    for(int i=0; i<colCount; ++i){
+        int widthContent;
+        int widthHeader;
+        ListView_SetColumnWidth(lv, i, LVSCW_AUTOSIZE);
+        widthContent = ListView_GetColumnWidth(lv, i);
+        ListView_SetColumnWidth(lv, i, LVSCW_AUTOSIZE_USEHEADER);
+        widthHeader = ListView_GetColumnWidth(lv, i);
+        ListView_SetColumnWidth(lv, i, (widthContent > widthHeader) ? widthContent : widthHeader);
+    }
+}
 static void lv_set_text(HWND lv,int row,int col,const WCHAR* text){ WCHAR tmp[512]; if(!text) text=L""; lstrcpynW(tmp,text,ARRAYSIZE(tmp)); ListView_SetItemText(lv,row,col,tmp);} 
 static void Menu_Load(HWND pg, Config* c){
     HWND lv=GetDlgItem(pg,IDC_MENU_LIST);
@@ -597,6 +717,7 @@ static void Menu_Load(HWND pg, Config* c){
         else { lv_set_text(lv,i,3,L""); }
         if(it->params[0]) ListView_SetItemText(lv,i,4,it->params);
     }
+    lv_autosize_cols(lv);
 }
 // Map internal enum to legacy textual token used in original INI format
 static const WCHAR* item_type_token(ConfigItemType t){
@@ -686,6 +807,7 @@ static void Icons_Load(HWND pg, Config* c){
     if(it->iconPathLight[0]) { ListView_SetItemText(lv,row,3,it->iconPathLight); } else { lv_set_text(lv,row,3,L""); }
     if(it->iconPathDark[0]) { ListView_SetItemText(lv,row,4,it->iconPathDark); } else { lv_set_text(lv,row,4,L""); }
     }
+    lv_autosize_cols(lv);
 }
 // Selection helper for Icons list (placed early so later helpers can call without forward decl)
 static int icons_get_selected_index(HWND lv){
@@ -737,6 +859,79 @@ static BOOL Icons_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!
 
 // ---------------- Item Edit Dialog -----------------
 typedef struct ItemEditCtx { ConfigItem tmp; BOOL editing; } ItemEditCtx;
+static BOOL item_type_uses_path_params(ConfigItemType t){
+    switch(t){
+        case CI_URI:
+        case CI_FILE:
+        case CI_CMD:
+        case CI_FOLDER:
+        case CI_FOLDER_SUBMENU:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+static BOOL item_type_browse_uses_file(ConfigItemType t){
+    return (t == CI_FILE || t == CI_CMD);
+}
+static BOOL item_type_browse_uses_folder(ConfigItemType t){
+    return (t == CI_FOLDER || t == CI_FOLDER_SUBMENU);
+}
+static BOOL item_browse_file(HWND owner, WCHAR* out, int cap, BOOL executableHint){
+    OPENFILENAMEW ofn;
+    WCHAR fileBuf[MAX_PATH] = {0};
+    ZeroMemory(&ofn, sizeof(ofn));
+    if (out && out[0]) lstrcpynW(fileBuf, out, ARRAYSIZE(fileBuf));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFile = fileBuf;
+    ofn.nMaxFile = ARRAYSIZE(fileBuf);
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    if (executableHint) {
+        ofn.lpstrFilter = L"Executables (*.exe;*.bat;*.cmd)\0*.exe;*.bat;*.cmd\0All Files (*.*)\0*.*\0";
+        ofn.lpstrTitle = L"Select Command";
+    } else {
+        ofn.lpstrFilter = L"All Files (*.*)\0*.*\0";
+        ofn.lpstrTitle = L"Select File";
+    }
+    if (!GetOpenFileNameW(&ofn)) return FALSE;
+    lstrcpynW(out, fileBuf, cap);
+    return TRUE;
+}
+static BOOL item_browse_folder(HWND owner, WCHAR* out, int cap){
+    BROWSEINFOW bi;
+    LPITEMIDLIST pidl;
+    WCHAR path[MAX_PATH] = {0};
+    ZeroMemory(&bi, sizeof(bi));
+    bi.hwndOwner = owner;
+    bi.lpszTitle = L"Select Folder";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    pidl = SHBrowseForFolderW(&bi);
+    if (!pidl) return FALSE;
+    if (!SHGetPathFromIDListW(pidl, path)) {
+        CoTaskMemFree(pidl);
+        return FALSE;
+    }
+    CoTaskMemFree(pidl);
+    lstrcpynW(out, path, cap);
+    return TRUE;
+}
+static ConfigItemType item_get_selected_type(HWND dlg){
+    HWND hType = GetDlgItem(dlg, IDC_ITEM_TYPE_COMBO);
+    int sel = (int)SendMessageW(hType, CB_GETCURSEL, 0, 0);
+    if (sel >= 0) return (ConfigItemType)SendMessageW(hType, CB_GETITEMDATA, sel, 0);
+    return CI_FILE;
+}
+static void item_update_path_controls(HWND dlg, ConfigItemType t){
+    BOOL usesPathParams = item_type_uses_path_params(t);
+    BOOL canBrowse = item_type_browse_uses_file(t) || item_type_browse_uses_folder(t);
+    EnableWindow(GetDlgItem(dlg,IDC_ITEM_PATH),usesPathParams);
+    EnableWindow(GetDlgItem(dlg,IDC_ITEM_PARAMS),usesPathParams);
+    EnableWindow(GetDlgItem(dlg,IDC_ITEM_PATH_LABEL),usesPathParams);
+    EnableWindow(GetDlgItem(dlg,IDC_ITEM_PARAMS_LABEL),usesPathParams);
+    EnableWindow(GetDlgItem(dlg,IDC_ITEM_BROWSE), canBrowse && usesPathParams);
+    SetDlgItemTextW(dlg, IDC_ITEM_BROWSE, L"Browse");
+}
 static void item_fill_type_combo(HWND h){
     const struct { ConfigItemType t; const WCHAR* n; } types[]={
         {CI_SEPARATOR,L"Separator"},
@@ -773,9 +968,31 @@ static INT_PTR CALLBACK ItemEditDlg(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
         SetDlgItemTextW(dlg,IDC_ITEM_LABEL,ctx->tmp.label);
         SetDlgItemTextW(dlg,IDC_ITEM_PATH,ctx->tmp.path);
         SetDlgItemTextW(dlg,IDC_ITEM_PARAMS,ctx->tmp.params);
+        item_update_path_controls(dlg, ctx->tmp.type);
         return TRUE; }
     case WM_COMMAND:
         switch(LOWORD(wParam)){
+        case IDC_ITEM_TYPE_COMBO:{
+            if(HIWORD(wParam)==CBN_SELCHANGE){
+                item_update_path_controls(dlg, item_get_selected_type(dlg));
+                RedrawWindow(dlg,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW);
+            }
+            break;
+        }
+        case IDC_ITEM_BROWSE:{
+            WCHAR picked[MAX_PATH] = {0};
+            ConfigItemType t = item_get_selected_type(dlg);
+            if (item_type_browse_uses_folder(t)) {
+                if (item_browse_folder(dlg, picked, ARRAYSIZE(picked))) {
+                    SetDlgItemTextW(dlg, IDC_ITEM_PATH, picked);
+                }
+            } else if (item_type_browse_uses_file(t)) {
+                if (item_browse_file(dlg, picked, ARRAYSIZE(picked), t == CI_CMD)) {
+                    SetDlgItemTextW(dlg, IDC_ITEM_PATH, picked);
+                }
+            }
+            return TRUE;
+        }
         case IDOK:{
             HWND hType=GetDlgItem(dlg,IDC_ITEM_TYPE_COMBO); int sel=(int)SendMessageW(hType,CB_GETCURSEL,0,0); if(sel>=0){ ctx->tmp.type=(ConfigItemType)SendMessageW(hType,CB_GETITEMDATA,sel,0);} else ctx->tmp.type=CI_FILE;
             GetDlgItemTextW(dlg,IDC_ITEM_LABEL,ctx->tmp.label,ARRAYSIZE(ctx->tmp.label));
@@ -870,7 +1087,7 @@ static void layout_pages(SettingsState* st, int x, int y, int w, int h){
 static void init_tabs(HWND dlg, SettingsState* st){
     st->hTabs=GetDlgItem(dlg,IDC_SETTINGS_TABS);
     TCITEMW ti; ZeroMemory(&ti,sizeof(ti)); ti.mask=TCIF_TEXT; WCHAR label[32];
-    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Sorting",L"Controls",L"Advanced"};
+    const WCHAR* names[] = {L"General",L"Placement",L"Menu",L"Icons",L"Sorting",L"Controls",L"Appearance",L"Advanced"};
     for(int i=0;i<PAGE_COUNT;i++){
         lstrcpynW(label,names[i],ARRAYSIZE(label));
         ti.pszText=label;
@@ -897,6 +1114,7 @@ static void init_tabs(HWND dlg, SettingsState* st){
     st->pages[PAGE_ICONS]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ICONS),dlg,PageDlgProc,(LPARAM)st);
     st->pages[PAGE_SORTING]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_SORTING),dlg,PageDlgProc,(LPARAM)st);
     st->pages[PAGE_CONTROLS]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_CONTROLS),dlg,PageDlgProc,(LPARAM)st);
+    st->pages[PAGE_APPEARANCE]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_APPEARANCE),dlg,PageDlgProc,(LPARAM)st);
     st->pages[PAGE_ADVANCED]=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDD_PAGE_ADVANCED),dlg,PageDlgProc,(LPARAM)st);
 
     layout_pages(st, x, y, w, h);
@@ -911,6 +1129,7 @@ static void init_tabs(HWND dlg, SettingsState* st){
     Icons_Load(st->pages[PAGE_ICONS],st->cfg);
     Sorting_Load(st->pages[PAGE_SORTING],st->cfg);
     Controls_Load(st->pages[PAGE_CONTROLS],st->cfg);
+    Appearance_Load(st->pages[PAGE_APPEARANCE],st->cfg);
     Advanced_Load(st->pages[PAGE_ADVANCED],st->cfg);
 }
 // Re-layout controls inside a page (currently only Menu & Icons) when page resized
@@ -968,6 +1187,7 @@ static BOOL save_all(SettingsState* st) {
     BOOL any = (generalResult != 0);
     any |= Placement_Save(st->pages[PAGE_PLACEMENT],st->cfg);
     any |= Controls_Save(st->pages[PAGE_CONTROLS],st->cfg);
+    any |= Appearance_Save(st->pages[PAGE_APPEARANCE],st->cfg);
     any |= Advanced_Save(st->pages[PAGE_ADVANCED],st->cfg);
     any |= Menu_Save(st->pages[PAGE_MENU],st->cfg);
     any |= Icons_Save(st->pages[PAGE_ICONS],st->cfg);
@@ -1130,8 +1350,22 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     // Live enable/disable of the Ignore Relative dropdown
                     if (st && st->pages[PAGE_PLACEMENT]) {
                         HWND hRelative = GetDlgItem(st->pages[PAGE_PLACEMENT], IDC_IGNORE_RELATIVE_COMBO);
+                        HWND hRelativeLabel = GetDlgItem(st->pages[PAGE_PLACEMENT], IDC_IGNORE_RELATIVE_LABEL);
                         BOOL enabled = IsDlgButtonChecked(st->pages[PAGE_PLACEMENT], IDC_POINTERRELATIVE) == BST_CHECKED;
                         EnableWindow(hRelative, enabled);
+                        if (hRelativeLabel) EnableWindow(hRelativeLabel, enabled);
+                    }
+                    return TRUE;
+                }
+                case IDC_ROOT_MENU_ICON_SIZE: {
+                    if (st && st->pages[PAGE_APPEARANCE]) {
+                        HWND hAnim = GetDlgItem(st->pages[PAGE_APPEARANCE], IDC_ANIMATION_COMBO);
+                        BOOL enabled = IsDlgButtonChecked(st->pages[PAGE_APPEARANCE], IDC_ROOT_MENU_ICON_SIZE) == BST_CHECKED;
+                        EnableWindow(hAnim, enabled);
+                        {
+                            HWND hAnimLabel = GetDlgItem(st->pages[PAGE_APPEARANCE], IDC_ANIMATION_LABEL);
+                            if (hAnimLabel) EnableWindow(hAnimLabel, enabled);
+                        }
                     }
                     return TRUE;
                 }

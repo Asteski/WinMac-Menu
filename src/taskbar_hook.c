@@ -1,6 +1,7 @@
 #include "taskbar_hook.h"
 #include "controls.h"
 #include "config.h"
+#include "util.h"
 #include <stdio.h>
 
 // External reference to global config
@@ -67,6 +68,10 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
         }
 
         if ((bLeftClick || bMiddleClick || bRightClick) && g_hStartButton) {
+            if (should_block_triggers_for_fullscreen(g_cfg.ignoreTriggersWhenFullscreen, g_cfg.fullscreenExclusionList, g_hOwnerWnd)) {
+                return CallNextHookEx(g_hMsgHook, nCode, wParam, lParam);
+            }
+
             // Check if click is over start button
             RECT startButtonRect;
             if (GetWindowRect(g_hStartButton, &startButtonRect) && PtInRect(&startButtonRect, pMouse->pt)) {

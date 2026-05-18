@@ -11,6 +11,7 @@ BOOL MenuOnMenuRButtonUp(HWND owner, UINT itemPos, HMENU hMenu);
 BOOL MenuOnMeasureItem(HWND owner, MEASUREITEMSTRUCT* mis);
 BOOL MenuOnDrawItem(HWND owner, const DRAWITEMSTRUCT* dis);
 BOOL MenuOpenRecentParentFolder(UINT cmd);
+void MenuRefreshVisibleMenuWindows(void);
 
 extern BOOL g_shouldReopenMenu;
 

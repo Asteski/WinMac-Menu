@@ -1,0 +1,270 @@
+#include <windows.h>
+#include "resource.h"
+
+// Application icon
+IDI_APPICON ICON "res/app.ico"
+// Themed tray icon variants
+IDI_TRAY_LIGHT ICON "res/tray_light.ico"
+IDI_TRAY_DARK ICON "res/tray_dark.ico"
+// About dialog specific icon
+IDI_ABOUT_ICON ICON "res/about.ico"
+
+// Version information block
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,14,0
+ PRODUCTVERSION 0,14,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName",      "Asteski"
+			VALUE "FileDescription", "WinMac Menu"
+			VALUE "FileVersion",     "0.14.0"
+			VALUE "InternalName",    "WinMacMenu.exe"
+			VALUE "OriginalFilename", "WinMacMenu.exe"
+			VALUE "ProductName",     "WinMac Menu"
+			VALUE "ProductVersion",  "0.14.0"
+			VALUE "LegalCopyright",  "Copyright 2026 Asteski"
+		END // BLOCK "040904B0"
+	END // BLOCK "StringFileInfo"
+	BLOCK "VarFileInfo"
+		BEGIN
+			VALUE "Translation", 0x0409, 1200
+		END // BLOCK "VarFileInfo"
+END // VS_VERSION_INFO
+
+
+// Settings dialog (basic subset of INI options)
+IDD_SETTINGS DIALOGEX 0, 0, 315, 292
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+CAPTION "WinMac Menu Settings"
+FONT 9, "Segoe UI", 0, 0, 0x0
+BEGIN
+	CONTROL         "", IDC_SETTINGS_TABS, "SysTabControl32", WS_TABSTOP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 6, 6, 303, 240
+	DEFPUSHBUTTON   "Apply", IDC_APPLY, 120, 257, 60, 16
+	PUSHBUTTON      "Save && Close", IDC_SAVEEXIT, 184, 257, 80, 16
+	PUSHBUTTON      "Exit", IDC_EXIT, 220, 257, 44, 16
+	PUSHBUTTON      "Cancel", IDC_CANCEL, 268, 257, 44, 16
+END
+
+// General Page
+IDD_PAGE_GENERAL DIALOGEX 0,0,295,220
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	GROUPBOX      "Menus behaviour", -1, 8, 6, 278, 74
+	CONTROL       "Show hidden files", IDC_SHOWHIDDEN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 20, 120, 10
+	CONTROL       "Show dotfiles", IDC_SHOWDOTFILES, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 32, 120, 10
+	CONTROL       "Show file extensions", IDC_SHOWEXTENSIONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 44, 120, 10
+	CONTROL       "", IDC_KEEPCTXOPEN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 56, 10, 10
+	LTEXT         "Keep menu open after triggering", -1, 28, 56, 125, 8
+	LTEXT         "context menu action", -1, 28, 66, 100, 8
+	LTEXT         "Show menu icons", -1, 150, 20, 120, 8
+	COMBOBOX      IDC_SHOWICONS, 150, 30, 120, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	CONTROL       "Show folder icons", IDC_SHOWFOLDERICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 46, 120, 10
+	CONTROL       "Show file icons", IDC_SHOWFILEICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 58, 120, 10
+
+	GROUPBOX      "Program behaviour", -1, 8, 86, 278, 40
+	CONTROL       "Start on login", IDC_STARTONLOGIN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 98, 120, 10
+	CONTROL       "Show on launch", IDC_SHOWONLAUNCH, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 98, 120, 10
+	CONTROL       "Monochrome tray icon", IDC_MONOTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 110, 120, 10
+	CONTROL       "Show tray icon", IDC_SHOWTRAYICON, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 110, 120, 10
+	GROUPBOX      "Included power options", -1, 8, 130, 278, 40
+	CONTROL       "Hibernate", IDC_POWER_HIBERNATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 144, 70, 10
+	CONTROL       "Lock", IDC_POWER_LOCK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 144, 50, 10
+	CONTROL       "Restart", IDC_POWER_RESTART, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 144, 60, 10
+	CONTROL       "Sign out", IDC_POWER_LOGOFF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 156, 70, 10
+	CONTROL       "Shutdown", IDC_POWER_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 156, 70, 10
+	CONTROL       "Sleep", IDC_POWER_SLEEP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 200, 156, 50, 10
+	LTEXT         "Changes to the ""Show tray icon"" and ""Monochrome tray icon"" settings require a reload to take effect. The reload option is available from the WinMac Menu tray icon context menu.", -1, 8, 176, 278, 24
+END
+
+// Placement Page
+IDD_PAGE_PLACEMENT DIALOGEX 0,0,295,220
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	GROUPBOX        "Positioning", -1, 6, 10, 280, 88
+	LTEXT           "Horizontal", -1, 16, 28, 50, 8
+	COMBOBOX        IDC_HPLACEMENT_COMBO, 100, 26, 46, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT           "Vertical", -1, 16, 44, 50, 8
+	COMBOBOX        IDC_VPLACEMENT_COMBO, 100, 42, 46, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT           "Horizontal offset", -1, 16, 60, 80, 8
+	EDITTEXT        IDC_HOFFSET_EDIT, 100, 58, 50, 12, ES_NUMBER | WS_TABSTOP
+	LTEXT           "Vertical offset", -1, 16, 76, 80, 8
+	EDITTEXT        IDC_VOFFSET_EDIT, 100, 74, 50, 12, ES_NUMBER | WS_TABSTOP
+
+	GROUPBOX        "Behaviour", -1, 6, 109, 280, 60
+	CONTROL         "Pointer relative", IDC_POINTERRELATIVE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 123, 120, 10
+	LTEXT           "Ignore offset when WinMac Menu is centered", -1, 16, 138, 204, 8
+	COMBOBOX        IDC_IGNORE_CENTERED_COMBO, 228, 136, 42, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT           "Ignore offset when WinMac Menu positioning is pointer relative", IDC_IGNORE_RELATIVE_LABEL, 16, 154, 204, 8
+	COMBOBOX        IDC_IGNORE_RELATIVE_COMBO, 228, 152, 42, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | WS_DISABLED
+END
+
+// Menu Page
+IDD_PAGE_MENU DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	// Geometry matched exactly to Icons page: list 220 wide, buttons at x=232 width=82
+	CONTROL         "", IDC_MENU_LIST, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 6, 10, 220, 146
+	PUSHBUTTON      "Add", IDC_MENU_ADD, 232, 10, 82, 20
+	PUSHBUTTON      "Edit", IDC_MENU_EDIT, 232, 34, 82, 20
+	PUSHBUTTON      "Delete", IDC_MENU_DELETE, 232, 58, 82, 20
+	PUSHBUTTON      "Up", IDC_MENU_UP, 232, 92, 82, 20
+	PUSHBUTTON      "Down", IDC_MENU_DOWN, 232, 116, 82, 20
+END
+
+// Icons Page
+IDD_PAGE_ICONS DIALOGEX 0,0,295,190
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	CONTROL         "", IDC_ICONS_LIST, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 6, 10, 220, 146
+	PUSHBUTTON      "Browse main", IDC_ICON_BROWSE_FILE, 232, 10, 82, 20
+	PUSHBUTTON      "Browse light", IDC_ICON_BROWSE_LIGHT, 232, 34, 82, 20
+	PUSHBUTTON      "Browse dark", IDC_ICON_BROWSE_DARK, 232, 58, 82, 20
+	PUSHBUTTON      "Clear", IDC_ICON_CLEAR, 232, 82, 82, 20
+END
+
+// Sorting Page
+IDD_PAGE_SORTING DIALOGEX 0,0,295,70
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	GROUPBOX      "Sorting", -1, 4, 2, 285, 82
+	LTEXT         "Sort by", -1, 12, 22, 70, 8
+	COMBOBOX      IDC_SORT_FIELD, 110, 20, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT         "Direction", -1, 12, 42, 70, 8
+	COMBOBOX      IDC_SORT_DIRECTION, 110, 40, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT         "Object type priority", -1, 12, 62, 90, 8
+	COMBOBOX      IDC_SORT_FOLDERSFIRST, 110, 60, 80, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+END
+
+// Controls Page
+IDD_PAGE_CONTROLS DIALOGEX 0,0,295,160
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT         "Enable activation of WinMac Menu using the triggers listed below:", -1, 8, 8, 279, 8
+
+	GROUPBOX      "Start Menu button", -1, 6, 24, 283, 26
+	CONTROL       "Left click", IDC_CTRL_LEFT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 36, 70, 10
+	CONTROL       "Right click", IDC_CTRL_RIGHT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 36, 74, 10
+	CONTROL       "Middle click", IDC_CTRL_MIDDLE_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 36, 80, 10
+
+	GROUPBOX      "Start Menu button while holding Shift", -1, 6, 56, 283, 26
+	CONTROL       "Shift + Left click", IDC_CTRL_SHIFT_LEFT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 68, 86, 10
+	CONTROL       "Shift + Right click", IDC_CTRL_SHIFT_RIGHT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 68, 90, 10
+	CONTROL       "Shift + Middle click", IDC_CTRL_SHIFT_MIDDLE_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 68, 84, 10
+
+	GROUPBOX      "Windows Key", -1, 6, 88, 283, 26
+	CONTROL       "Windows Key", IDC_CTRL_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 100, 80, 10
+	CONTROL       "Shift + Windows Key", IDC_CTRL_SHIFT_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 100, 120, 10
+
+	GROUPBOX      "Fullscreen applications", -1, 6, 120, 283, 56
+	CONTROL       "Ignore triggers when fullscreen app is focused", IDC_IGNORE_FULLSCREEN_CHECK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 132, 260, 10
+
+	LTEXT         "Exclusion list (comma-separated app names):", -1, 14, 148, 260, 8
+	EDITTEXT      IDC_FULLSCREEN_EXCLUSION_EDIT, 14, 158, 260, 12, ES_AUTOHSCROLL | ES_MULTILINE | WS_TABSTOP
+
+	LTEXT         "A reload is required for the changes to take effect. The reload option is available from the WinMac Menu tray icon context menu.", -1, 8, 178, 279, 36
+END
+
+// Advanced Page
+IDD_PAGE_ADVANCED DIALOGEX 0,0,295,240
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	GROUPBOX      "Recent Items", -1, 6, 8, 283, 48
+	// Row 1
+	CONTROL        "Show file extensions", IDC_RECENT_SHOW_EXT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 22, 120, 10
+	LTEXT          "Show items as", -1, 120, 22, 60, 8
+	COMBOBOX       1702, 235, 20, 44, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	// Row 2
+	CONTROL        "Show 'Clean Recent Items'", IDC_RECENT_SHOW_CLEAN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 36, 140, 10
+	LTEXT          "Number of jumplist items", -1, 120, 36, 110, 8
+	EDITTEXT       IDC_RECENTMAX_EDIT, 235, 34, 34, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL        "", IDC_RECENTMAX_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 269, 34, 12, 12
+	GROUPBOX      "Task Kill", -1, 6, 60, 283, 74
+	// First row of checkboxes
+	CONTROL       "Show tasks from all desktops", 2000, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 74, 120, 10
+	CONTROL       "Ignore system processes", 2001, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 74, 120, 10
+	// Second row of checkboxes
+	CONTROL       "List tasks as separate windows", 2002, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 88, 140, 10
+	CONTROL       "Show icons", 2004, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 88, 120, 10
+	// Exclude processes textbox below checkboxes
+	LTEXT         "Exclude processes", -1, 14, 102, 80, 8
+	EDITTEXT      2005, 100, 100, 170, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	// Number of tasks to display below exclude processes, like jumplist style
+	LTEXT         "Number of tasks", -1, 14, 119, 110, 8
+	EDITTEXT      2003, 100, 117, 34, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL       "", 2103, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 134, 117, 12, 12
+	// This PC section (bottom, moved up)
+	GROUPBOX      "This PC", -1, 6, 140, 283, 24
+	CONTROL       "Show as a submenu", IDC_THISPC_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 150, 90, 10
+	CONTROL       "Expand menu items as submenus", IDC_THISPC_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 150, 120, 10
+	CONTROL       "Show icons", IDC_THISPC_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 150, 50, 10
+
+	// Home section (same size as This PC)
+	GROUPBOX      "Home", -1, 6, 168, 283, 24
+	CONTROL       "Show as a submenu", IDC_HOME_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 178, 90, 10
+	CONTROL       "Expand menu items as submenus", IDC_HOME_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 178, 120, 10
+	CONTROL       "Show icons", IDC_HOME_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 178, 50, 10
+END
+
+// Appearance Page
+IDD_PAGE_APPEARANCE DIALOGEX 0,0,295,110
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 9, "Segoe UI"
+BEGIN
+	GROUPBOX      "Size and Animation", -1, 6, 8, 283, 34
+	CONTROL       "Enable large icons", IDC_ROOT_MENU_ICON_SIZE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 22, 104, 10
+	LTEXT         "Animation direction", IDC_ANIMATION_LABEL, 120, 22, 90, 8
+	COMBOBOX      IDC_ANIMATION_COMBO, 214, 20, 66, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	CONTROL       "Keep large menu highlight text color", IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 48, 180, 10
+END
+
+// Item Edit Dialog
+IDD_ITEM_EDIT DIALOGEX 0,0,220,132
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU | WS_VISIBLE
+CAPTION "Edit Item"
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT           "Type:", -1, 6, 8, 40, 8
+	COMBOBOX        IDC_ITEM_TYPE_COMBO, 50, 6, 160, 72, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT           "Label:", -1, 6, 26, 40, 8
+	EDITTEXT        IDC_ITEM_LABEL, 50, 24, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	LTEXT           "Path / URI:", IDC_ITEM_PATH_LABEL, 6, 44, 48, 8
+	EDITTEXT        IDC_ITEM_PATH, 50, 42, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	LTEXT           "Parameters:", IDC_ITEM_PARAMS_LABEL, 6, 62, 40, 8
+	EDITTEXT        IDC_ITEM_PARAMS, 50, 60, 160, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	PUSHBUTTON      "Browse", IDC_ITEM_BROWSE, 148, 78, 62, 14
+	DEFPUSHBUTTON   "OK", IDOK, 70, 100, 40, 14
+	PUSHBUTTON      "Cancel", IDCANCEL, 120, 100, 40, 14
+END
+
+// About Dialog
+IDD_ABOUT DIALOGEX 0,0,170,110
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "About WinMac Menu"
+FONT 9, "Segoe UI"
+BEGIN
+	LTEXT         "", IDC_ABOUT_TEXT, 12, 12, 118, 46
+	CONTROL       "https://github.com/Asteski", IDC_ABOUT_LINK, "Static", SS_NOTIFY, 12, 60, 118, 10
+	CONTROL       "", IDC_ABOUT_ART_ICON, "Static", SS_ICON, 132, 15, 32, 32
+	PUSHBUTTON    "Open config folder", IDC_ABOUT_OPEN_CONFIG, 12, 78, 92, 14
+	DEFPUSHBUTTON "OK", IDOK, 110, 78, 48, 14
+END
