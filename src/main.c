@@ -76,6 +76,7 @@ static HWND g_hHookTargetWnd = NULL;
 static BOOL g_winKeyCaptureActive = FALSE;
 static DWORD g_winKeyCapturedVk = 0;
 static BOOL g_winKeyCaptureNeedsShift = FALSE;
+static DWORD g_skipNextOpenUntil = 0;
 // Retrieve FileVersion (e.g., "0.4.0") from the executable's VERSIONINFO
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
@@ -573,12 +574,41 @@ static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam
     return CallNextHookEx(g_hKbHook, nCode, wParam, lParam);
 }
 
+static const WCHAR kBigMenuClassName[] = L"WinMacMenu.BigMenuWindow";
+
+static BOOL is_big_menu_window(HWND hwnd) {
+    WCHAR cls[64];
+    if (!hwnd) return FALSE;
+    if (!GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) return FALSE;
+    return (lstrcmpW(cls, kBigMenuClassName) == 0);
+}
+
+static HWND find_big_menu_window(void) {
+    HWND hwnd = FindWindowW(kBigMenuClassName, NULL);
+    DWORD pid = 0;
+    while (hwnd) {
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (pid == GetCurrentProcessId()) return hwnd;
+        hwnd = FindWindowExW(NULL, hwnd, kBigMenuClassName, NULL);
+    }
+    return NULL;
+}
+
+static BOOL try_close_big_menu(void) {
+    HWND bigMenu = find_big_menu_window();
+    if (!bigMenu) return FALSE;
+    PostMessageW(bigMenu, WM_CANCELMODE, 0, 0);
+    g_skipNextOpenUntil = GetTickCount() + 250;
+    return TRUE;
+}
+
 static BOOL is_point_in_menu_window(POINT pt) {
     HWND hw = WindowFromPoint(pt);
     if (!hw) return FALSE;
     WCHAR cls[64];
     if (GetClassNameW(hw, cls, ARRAYSIZE(cls))) {
         if (!lstrcmpW(cls, L"#32768")) return TRUE; // menu window class
+        if (!lstrcmpW(cls, kBigMenuClassName)) return TRUE;
     }
     return FALSE;
 }
@@ -659,7 +689,9 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
 
         if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN || wParam == WM_MOUSEWHEEL) {
             if (!is_point_in_menu_window(ms->pt)) {
-                PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+                if (!try_close_big_menu()) {
+                    PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
+                }
             }
         }
     }
@@ -669,6 +701,14 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
 static LRESULT CALLBACK lowlevel_win_key_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && g_runInBackground && (g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger) && !g_menuShowingNow) {
         const KBDLLHOOKSTRUCT* ks = (const KBDLLHOOKSTRUCT*)lParam;
+
+        if (should_block_triggers_for_fullscreen(g_cfg.ignoreTriggersWhenFullscreen, g_cfg.fullscreenExclusionList, g_hMainWnd)) {
+            g_winKeyCaptureActive = FALSE;
+            g_winKeyCapturedVk = 0;
+            g_winKeyCaptureNeedsShift = FALSE;
+            return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
+        }
+
         if (ks->flags & LLKHF_INJECTED) {
             return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
         }
@@ -784,7 +824,7 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"0.13.0")
+            (ver[0] ? ver : L"0.14.0")
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 
@@ -867,10 +907,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         break;
     case WM_ACTIVATEAPP:
-        if (g_menuShowingNow && wParam == FALSE) { EndMenu(); return 0; }
+        if (g_menuShowingNow && wParam == FALSE) {
+            if (!try_close_big_menu()) {
+                EndMenu();
+            }
+            return 0;
+        }
         break;
     case WM_CANCELMODE:
-        if (g_menuShowingNow) { EndMenu(); return 0; }
+        if (g_menuShowingNow) {
+            if (!try_close_big_menu()) {
+                EndMenu();
+            }
+            return 0;
+        }
         break;
     default:
         break;
@@ -918,6 +968,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
             // Insert Reload option (restart the application) before Start on login per request
             AppendMenuW(m, MF_STRING, 10010, L"Reload");
+            // Sync StartOnLogin setting with actual registry state before showing the menu
+            config_sync_startup(&g_cfg, L"WinMac Menu");
             // Toggles with check marks
             UINT fSOL = (g_cfg.startOnLogin ? MF_CHECKED : MF_UNCHECKED);
             AppendMenuW(m, MF_STRING | fSOL, 10008, L"Start on login");
@@ -977,8 +1029,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // Update registry Run entry immediately
                 WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
                 WCHAR cmdline[2048];
-                if (g_cfg.iniPath[0]) wsprintfW(cmdline, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
-                else wsprintfW(cmdline, L"\"%s\"", exePath);
+                if (g_cfg.iniPath[0]) {
+                    WCHAR cfgAbs[MAX_PATH];
+                    DWORD n = GetFullPathNameW(g_cfg.iniPath, ARRAYSIZE(cfgAbs), cfgAbs, NULL);
+                    if (n == 0 || n >= ARRAYSIZE(cfgAbs)) lstrcpynW(cfgAbs, g_cfg.iniPath, ARRAYSIZE(cfgAbs));
+                    wsprintfW(cmdline, L"\"%s\" --config \"%s\"", exePath, cfgAbs);
+                } else {
+                    wsprintfW(cmdline, L"\"%s\"", exePath);
+                }
                 WCHAR runValName[64]; lstrcpynW(runValName, L"WinMac Menu", ARRAYSIZE(runValName));
                 if (g_cfg.startOnLogin) set_run_at_login(runValName, cmdline); else remove_run_at_login(runValName);
             } else if (cmd == 10009) {
@@ -1089,9 +1147,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_APP:
         // Toggle behavior: if menu visible, close it; else open it.
         if (g_menuShowingNow) {
-            EndMenu(); // dismiss current popup
+            if (!try_close_big_menu()) {
+                EndMenu(); // dismiss current popup
+            }
+            g_skipNextOpenUntil = GetTickCount() + 250;
             return 0;
         } else if (!g_menuActive) {
+            if (g_skipNextOpenUntil && GetTickCount() < g_skipNextOpenUntil) {
+                g_skipNextOpenUntil = 0;
+                return 0;
+            }
+            g_skipNextOpenUntil = 0;
             g_menuActive = TRUE; g_menuShowingNow = TRUE;
             install_menu_hooks(hWnd);
             POINT pt = {0,0};
@@ -1107,6 +1173,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_INITMENUPOPUP:
         MenuOnInitMenuPopup(hWnd, (HMENU)wParam, LOWORD(lParam), HIWORD(lParam));
         return 0;
+    case WM_TIMER:
+        if (wParam == 0x5A11) {
+            MenuRefreshVisibleMenuWindows();
+            return 0;
+        }
+        break;
     case WM_MEASUREITEM:
         if (MenuOnMeasureItem(hWnd, (MEASUREITEMSTRUCT*)lParam)) return TRUE;
         break;
@@ -1346,22 +1418,25 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     g_hMainWnd = hWnd;
 
     // Command line parsing already done above (for mutex)
-    // Honor StartOnLogin by setting/removing HKCU Run entry for this config
-    // Use per-config value name so multiple configs won't collide
+    // Honor StartOnLogin by ensuring HKCU Run entry exists when enabled.
+    // Do not auto-remove on launch when disabled; removal should happen only
+    // from explicit user actions (settings/tray toggle) to avoid accidental
+    // self-unregistration when config resolution differs at startup.
     // Startup Apps title: friendly value name
     wchar_t runValName[64]; lstrcpynW(runValName, L"WinMac Menu", ARRAYSIZE(runValName));
     // Build command line: quoted exe path plus optional --config "path"
     WCHAR exePath[MAX_PATH]; GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
     WCHAR cmd[2048];
     if (g_cfg.iniPath[0]) {
-        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exePath, g_cfg.iniPath);
+        WCHAR cfgAbs[MAX_PATH];
+        DWORD n = GetFullPathNameW(g_cfg.iniPath, ARRAYSIZE(cfgAbs), cfgAbs, NULL);
+        if (n == 0 || n >= ARRAYSIZE(cfgAbs)) lstrcpynW(cfgAbs, g_cfg.iniPath, ARRAYSIZE(cfgAbs));
+        wsprintfW(cmd, L"\"%s\" --config \"%s\"", exePath, cfgAbs);
     } else {
         wsprintfW(cmd, L"\"%s\"", exePath);
     }
     if (g_cfg.startOnLogin) {
         set_run_at_login(runValName, cmd);
-    } else {
-        remove_run_at_login(runValName);
     }
     g_runInBackground = g_cfg.runInBackground;
     // TaskbarCreated broadcast to detect Explorer restarts

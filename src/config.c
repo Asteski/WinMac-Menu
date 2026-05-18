@@ -1,4 +1,5 @@
 #include "config.h"
+#include "util.h"
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <stdio.h>
@@ -66,6 +67,11 @@ static void write_default_ini(const WCHAR* path) {
         "HOffset=0\r\n"\
         "VOffset=0\r\n"\
         "\r\n"\
+        "[Appearance]\r\n"\
+        "LargeMenuIcons=false\r\n"\
+        "KeepLargeMenuHighlightTextColor=false\r\n"\
+        "LargeMenuAnimation=bottom\r\n"\
+        "\r\n"\
         "[Sorting]\r\n"\
         "SortBy=name\r\n"\
         "SortDirection=ascending\r\n"\
@@ -76,10 +82,12 @@ static void write_default_ini(const WCHAR* path) {
         "ShiftWindowsKey=false\r\n"\
         "LeftClick=false\r\n"\
         "RightClick=false\r\n"\
-        "MiddleClick=false\r\n"\
+        "MiddleClick=true\r\n"\
         "ShiftLeftClick=false\r\n"\
         "ShiftRightClick=false\r\n"\
         "ShiftMiddleClick=false\r\n"\
+        "IgnoreTriggersWhenFullscreen=false\r\n"\
+        "FullscreenExclusionList=\r\n"\
         "\r\n"\
         "[Menu]\r\n"\
         "Item1=Apps and Features|URI|ms-settings:appsfeatures\r\n"\
@@ -508,17 +516,42 @@ BOOL config_load(Config* out) {
 #else
     out->roundedCorners = FALSE;
 #endif
-    GetPrivateProfileStringW(L"Placement", L"Horizontal", L"right", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"Placement", L"Horizontal", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    if (!lstrcmpiW(buf, L"left")) out->hPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->hPlacement = 1; else out->hPlacement = 2;
+    if (!buf[0] || !lstrcmpiW(buf, L"left")) out->hPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->hPlacement = 1; else out->hPlacement = 2;
     out->hOffset = GetPrivateProfileIntW(L"Placement", L"HOffset", 0, out->iniPath);
-    GetPrivateProfileStringW(L"Placement", L"Vertical", L"bottom", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"Placement", L"Vertical", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    if (!lstrcmpiW(buf, L"top")) out->vPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->vPlacement = 1; else out->vPlacement = 2;
+    if (!buf[0] || !lstrcmpiW(buf, L"top")) out->vPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->vPlacement = 1; else out->vPlacement = 2;
     out->vOffset = GetPrivateProfileIntW(L"Placement", L"VOffset", 0, out->iniPath);
     GetPrivateProfileStringW(L"Placement", L"PointerRelative", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->pointerRelative = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"Appearance", L"LargeMenuAnimation", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Advanced", L"LargeMenuAnimation", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Placement", L"RootMenuLargeAnimation", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Placement", L"animation", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Placement", L"AnimationDirection", L"auto", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0] || !lstrcmpiW(buf, L"auto")) out->animationDirection = ANIM_BOTTOM;
+    else if (!lstrcmpiW(buf, L"disabled") || !lstrcmpiW(buf, L"off") || !lstrcmpiW(buf, L"none")) out->animationDirection = ANIM_AUTO;
+    else if (!lstrcmpiW(buf, L"top")) out->animationDirection = ANIM_TOP;
+    else if (!lstrcmpiW(buf, L"bottom")) out->animationDirection = ANIM_BOTTOM;
+    else if (!lstrcmpiW(buf, L"left")) out->animationDirection = ANIM_LEFT;
+    else if (!lstrcmpiW(buf, L"right")) out->animationDirection = ANIM_RIGHT;
+    else out->animationDirection = ANIM_BOTTOM;
     // Optional: IgnoreOffsetWhenCentered = false|true|hoffset|voffset (controls whether HOffset/VOffset are ignored when centered)
     out->ignoreHOffsetWhenCentered = FALSE;
     out->ignoreVOffsetWhenCentered = FALSE;
@@ -635,6 +668,39 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     out->showFileIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"Appearance", L"LargeMenuIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Advanced", L"LargeMenuIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"General", L"RootMenuLargeIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"General", L"RootMenuIconSize", L"small", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) out->rootMenuLargeIcons = FALSE;
+    else if (!lstrcmpiW(buf, L"large") || !lstrcmpiW(buf, L"l") || !lstrcmpiW(buf, L"32") || !lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1")) {
+        out->rootMenuLargeIcons = TRUE;
+    } else if (!lstrcmpiW(buf, L"small") || !lstrcmpiW(buf, L"s") || !lstrcmpiW(buf, L"16") || !lstrcmpiW(buf, L"false") || !lstrcmpiW(buf, L"0")) {
+        out->rootMenuLargeIcons = FALSE;
+    } else {
+        out->rootMenuLargeIcons = FALSE;
+    }
+    GetPrivateProfileStringW(L"Appearance", L"KeepLargeMenuHighlightTextColor", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Advanced", L"KeepLargeMenuHighlightTextColor", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Advanced", L"RevertBigMenuHighlightTextArrowColor", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->keepLargeMenuHighlightTextColor = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // KeepMenuOpenAfterContextAction (default false)
     GetPrivateProfileStringW(L"General", L"KeepMenuOpenAfterContextAction", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -739,10 +805,10 @@ BOOL config_load(Config* out) {
     }
     out->rightClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"Controls", L"MiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"Controls", L"MiddleClick", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0]) {
-        GetPrivateProfileStringW(L"Control", L"MiddleClick", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        GetPrivateProfileStringW(L"Control", L"MiddleClick", L"true", buf, ARRAYSIZE(buf), out->iniPath);
         trim_inplace(buf);
     }
     out->middleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
@@ -770,6 +836,14 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     out->shiftMiddleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    
+    // Fullscreen app detection
+    GetPrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->ignoreTriggersWhenFullscreen = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    
+    GetPrivateProfileStringW(L"Controls", L"FullscreenExclusionList", L"", out->fullscreenExclusionList, ARRAYSIZE(out->fullscreenExclusionList), out->iniPath);
+    trim_inplace(out->fullscreenExclusionList);
     
     parse_menu(out);
     parse_icons(out);
@@ -875,6 +949,22 @@ void config_set_path(Config* out, const WCHAR* path) {
     lstrcpynW(out->iniPath, path, ARRAYSIZE(out->iniPath));
     if (!PathFileExistsW(out->iniPath)) {
         write_default_ini(out->iniPath);
+    }
+}
+
+// Synchronizes StartOnLogin with actual registry state
+// This ensures the config.ini file reflects whether the startup entry actually exists in the registry
+void config_sync_startup(Config* out, const WCHAR* runValName) {
+    if (!out || !runValName) return;
+    
+    // Check if the registry entry actually exists
+    BOOL inRegistry = check_run_at_login(runValName);
+    BOOL inConfig = out->startOnLogin;
+    
+    // If they're out of sync, update the config and INI file to match registry state
+    if (inRegistry != inConfig) {
+        out->startOnLogin = inRegistry;
+        WritePrivateProfileStringW(L"General", L"StartOnLogin", inRegistry ? L"true" : L"false", out->iniPath);
     }
 }
 

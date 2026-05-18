@@ -88,6 +88,7 @@ typedef struct Config {
     int hOffset; // pixels from left/right when not centered
     enum { VP_TOP=0, VP_CENTER=1, VP_BOTTOM=2 } vPlacement;
     int vOffset; // pixels from top/bottom when not centered
+    enum { ANIM_AUTO=0, ANIM_TOP=1, ANIM_BOTTOM=2, ANIM_LEFT=3, ANIM_RIGHT=4 } animationDirection; // [Appearance] LargeMenuAnimation=disabled|top|bottom|left|right
     // When placement is center on an axis, optionally ignore the corresponding offset
     BOOL ignoreHOffsetWhenCentered; // [Placement] IgnoreOffsetWhenCentered=true|hoffset|voffset|false
     BOOL ignoreVOffsetWhenCentered; // derived from the same key
@@ -102,6 +103,8 @@ typedef struct Config {
     BOOL showExtensions; // [General] ShowFileExtensions=true keeps file extensions visible (back-compat: ShowExtensions, inverse of deprecated HideExtensions)
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
     BOOL showFileIcons; // [General] ShowFileIcons=true shows file icons for file entries inside folder-style submenus
+    BOOL rootMenuLargeIcons; // [Appearance] LargeMenuIcons=true uses larger icons on root menu entries only
+    BOOL keepLargeMenuHighlightTextColor; // [Appearance] KeepLargeMenuHighlightTextColor=true keeps normal font/arrow color on highlighted large-menu items
     BOOL keepMenuOpenAfterContextAction; // [General] KeepMenuOpenAfterContextAction=true keeps WinMac menu visible after running an item from shell context menu
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
@@ -148,6 +151,8 @@ typedef struct Config {
     BOOL shiftLeftClickTrigger;            // [Controls] ShiftLeftClick=true enables Shift+left-click trigger on Start button
     BOOL shiftRightClickTrigger;           // [Controls] ShiftRightClick=true enables Shift+right-click trigger on Start button
     BOOL shiftMiddleClickTrigger;          // [Controls] ShiftMiddleClick=true enables Shift+middle-click trigger on Start button
+    BOOL ignoreTriggersWhenFullscreen;    // [Controls] IgnoreTriggersWhenFullscreen=true enables fullscreen app detection
+    WCHAR fullscreenExclusionList[1024];  // [Controls] FullscreenExclusionList=comma-separated list of excluded apps
     BOOL thisPCItemsAsSubmenus; // [General] ThisPCItemsAsSubmenus=true|false (default true)
     BOOL thisPCShowIcons;       // [General] ThisPCShowIcons=true|false (default true)
     BOOL thisPCAsSubmenu;       // [ThisPC] ThisPCAsSubmenu=true|false (default false)
@@ -161,6 +166,8 @@ typedef struct Config {
 // Resolves config path, creates default file if missing; returns TRUE if path is available
 BOOL config_ensure(Config* out);
 BOOL config_load(Config* out);
+// Synchronizes StartOnLogin setting with registry state (checks registry and updates config.ini if out of sync)
+void config_sync_startup(Config* out, const WCHAR* runValName);
 // Overrides the default INI path; call before config_load. Will create defaults if missing.
 void config_set_path(Config* out, const WCHAR* path);
 // Set a global default path override used by config_ensure/load callers that supply a fresh Config.

@@ -17,6 +17,10 @@
 #define IDC_TASKKILL_EXCLUDES 2005
 #define IDC_IGNORE_CENTERED_COMBO   1050
 #define IDC_IGNORE_RELATIVE_COMBO   1051
+#define IDC_ANIMATION_COMBO         1052
+#define IDC_ANIMATION_LABEL         1053
+#define IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR 1054
+#define IDC_IGNORE_RELATIVE_LABEL   1055
 #pragma once
 // Resource identifiers
 #define IDI_APPICON 101
@@ -31,6 +35,7 @@
 // Sorting page dialog
 #define IDD_PAGE_SORTING 1205
 #define IDD_PAGE_CONTROLS 1206
+#define IDD_PAGE_APPEARANCE 1207
 
 // Controls (Settings Dialog)
 #define IDC_RUNINBACKGROUND    1000
@@ -70,6 +75,7 @@
 #define IDC_CONFIG_FILE_LABEL  1025
 #define IDC_SHOWFILEICONS      1032
 #define IDC_KEEPCTXOPEN        1033
+#define IDC_ROOT_MENU_ICON_SIZE   1034
 
 // Tab control main
 #define IDC_SETTINGS_TABS       1100
@@ -104,6 +110,9 @@
 #define IDC_ITEM_PATH           1803
 #define IDC_ITEM_PARAMS         1804
 #define IDC_ITEM_SUBMENU        1805
+#define IDC_ITEM_PATH_LABEL     1806
+#define IDC_ITEM_PARAMS_LABEL   1807
+#define IDC_ITEM_BROWSE         1808
 
 // About dialog controls
 #define IDC_ABOUT_TEXT          1810
@@ -138,6 +147,8 @@
 #define IDC_CTRL_SHIFT_MIDDLE_CLICK  1605
 #define IDC_CTRL_WINDOWS_KEY         1606
 #define IDC_CTRL_SHIFT_WINDOWS_KEY   1607
+#define IDC_IGNORE_FULLSCREEN_CHECK  1608
+#define IDC_FULLSCREEN_EXCLUSION_EDIT 1609
 
 // Power exclusion checkboxes (Advanced tab)
 

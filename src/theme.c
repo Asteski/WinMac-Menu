@@ -45,15 +45,72 @@ HMENU theme_style_menu(HMENU hMenu) {
     return hMenu;
 }
 
+static BOOL parse_shell_color_dword(DWORD raw, COLORREF* color) {
+    BYTE r;
+    BYTE g;
+    BYTE b;
+
+    if (!color) return FALSE;
+    r = (BYTE)(raw & 0xFF);
+    g = (BYTE)((raw >> 8) & 0xFF);
+    b = (BYTE)((raw >> 16) & 0xFF);
+    *color = RGB(r, g, b);
+    return TRUE;
+}
+
+BOOL theme_get_menu_highlight(COLORREF* color) {
+    DWORD raw = 0;
+
+    if (!color) return FALSE;
+    if (read_reg_dword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent", L"AccentColorMenu", &raw)) {
+        return parse_shell_color_dword(raw, color);
+    }
+    if (read_reg_dword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent", L"StartColorMenu", &raw)) {
+        return parse_shell_color_dword(raw, color);
+    }
+    return FALSE;
+}
+
 BOOL theme_get_accent(COLORREF* color) {
     if (!color) return FALSE;
-    DWORD raw=0; BOOL opaque=FALSE;
-    if (DwmGetColorizationColor(&raw, &opaque) == S_OK) {
-        BYTE r = GetRValue(raw);
-        BYTE g = GetGValue(raw);
-        BYTE b = GetBValue(raw);
-        *color = RGB(r,g,b);
-        return TRUE;
+
+    {
+        DWORD raw = 0;
+        if (theme_get_menu_highlight(color)) {
+            return TRUE;
+        }
     }
+
+    {
+        DWORD raw = 0;
+        if (read_reg_dword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent", L"AccentColorMenu", &raw)) {
+            return parse_shell_color_dword(raw, color);
+        }
+    }
+
+    {
+        DWORD raw = 0;
+        if (read_reg_dword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"AccentColor", &raw)) {
+            return parse_shell_color_dword(raw, color);
+        }
+    }
+
+    {
+        DWORD raw = 0; BOOL opaque = FALSE;
+        if (DwmGetColorizationColor(&raw, &opaque) == S_OK) {
+            BYTE r = (BYTE)((raw >> 16) & 0xFF);
+            BYTE g = (BYTE)((raw >> 8) & 0xFF);
+            BYTE b = (BYTE)(raw & 0xFF);
+            *color = RGB(r, g, b);
+            return TRUE;
+        }
+    }
+
+    {
+        wchar_t buf[128];
+        wsprintfW(buf, L"[theme_get_accent] Retrieved accent color: 0x%06X\n", *color);
+        OutputDebugStringW(buf);
+    }
+
     return FALSE;
 }
