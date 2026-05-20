@@ -841,7 +841,19 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
             InflateRect(&sel, -1, 0);
             sel.top -= 1;
             sel.bottom += 1;
-            COLORREF selectedTextColor = big_menu_get_highlight_text_color(highlight);
+            // Use system highlight text color as default
+            COLORREF selectedTextColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
+            // If not keeping normal text color, and dark mode is active, prefer a dark text color
+            // so highlighted items in dark mode show dark text over the accent highlight (user wants revert)
+            if (!state->params->keepLargeMenuHighlightTextColor && state->params->darkMode) {
+                selectedTextColor = RGB(32,32,32);
+            }
+            // Debug: log selection color decision
+            {
+                WCHAR dbg[256];
+                wsprintfW(dbg, L"[big_menu] keep=%d dark=%d highlight=0x%06X selectedText=0x%06X\n", (int)state->params->keepLargeMenuHighlightTextColor, (int)state->params->darkMode, (unsigned)highlight, (unsigned)selectedTextColor);
+                OutputDebugStringW(dbg);
+            }
             big_menu_draw_fake_rounded_highlight(hdc, &sel, 0, highlight, backgroundColor);
             SetBkColor(hdc, highlight);
             if (state->params->keepLargeMenuHighlightTextColor) itemTextColor = textColor;

@@ -30,6 +30,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Settings GUI available for those, who do not want to modify INI file directly
 - Enable activation of WinMac Menu using various Start button and Windows key triggers
 - Trigger folder or file context menu directly from WinMac's submenu
+- Large sized menu with large icons
 
 ## Run
 
@@ -51,6 +52,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
 - [Power] exclude specific power options
 - [Sorting] sort folder content
+- [Appearance] enable and configure large menu
 - [Controls] enable pre-defined triggers
 - [RecentItems] item settings
 - [TaskKill] item settings
