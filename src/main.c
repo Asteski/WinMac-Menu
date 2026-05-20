@@ -824,7 +824,7 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"0.14.0")
+            (ver[0] ? ver : L"0.14.1")
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 

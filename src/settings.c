@@ -6,6 +6,12 @@
 #include "util.h"
 #include <windows.h>
 #include <commctrl.h>
+#ifndef LVIM_BEFORE
+#define LVIM_BEFORE 0x00000001
+#endif
+#ifndef LVIM_AFTER
+#define LVIM_AFTER 0x00000002
+#endif
 #include <shlwapi.h>
 #include <commdlg.h>
 #include <shellapi.h>
@@ -50,6 +56,11 @@ typedef struct SettingsState {
     int baseW, baseH; // initial dialog size for min constraint
     HFONT hItalic; // italic font for filename label
     BOOL reloadNeeded; // set if tray reload is needed after Save & Close
+    // Drag state for menu list reordering
+    BOOL dragging;
+    int dragSource; // index in workingItems being dragged
+    HIMAGELIST hDragImage; // Image list for drag-and-drop operations
+    int insertTarget; // visual row index for insert mark
 } SettingsState;
 
 enum {
@@ -717,7 +728,11 @@ static void Menu_Load(HWND pg, Config* c){
         else { lv_set_text(lv,i,3,L""); }
         if(it->params[0]) ListView_SetItemText(lv,i,4,it->params);
     }
-    lv_autosize_cols(lv);
+    // Avoid autosizing columns while user is actively dragging to prevent flicker
+    st = (SettingsState*)GetWindowLongPtrW(GetParent(pg),GWLP_USERDATA);
+    if (!(st && st->dragging)) {
+        lv_autosize_cols(lv);
+    }
 }
 // Map internal enum to legacy textual token used in original INI format
 static const WCHAR* item_type_token(ConfigItemType t){
@@ -1217,6 +1232,8 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
         case WM_INITDIALOG:
             st = (SettingsState*)calloc(1, sizeof(SettingsState));
             st->cfg = (Config*)lParam;
+            st->dragging = FALSE;
+            st->dragSource = -1;
             // Store original power option states
             st->origExcludeSleep = st->cfg->excludeSleep;
             st->origExcludeHibernate = st->cfg->excludeHibernate;
@@ -1306,6 +1323,31 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     menu_update_buttons(st, st->pages[PAGE_MENU]);
                 }
             }
+            // Begin drag from listview (start drag-and-drop reordering)
+            if (nh->idFrom == IDC_MENU_LIST && nh->code == LVN_BEGINDRAG) {
+                LPNMLISTVIEW lvn = (LPNMLISTVIEW)nh;
+                HWND lv = GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST);
+                POINT pt = lvn->ptAction; // client coords relative to listview
+                LVHITTESTINFO ht; ZeroMemory(&ht, sizeof(ht)); ht.pt = pt;
+                int row = (int)SendMessageW(lv, LVM_HITTEST, 0, (LPARAM)&ht);
+                if (row >= 0) {
+                    LVITEMW li; ZeroMemory(&li, sizeof(li)); li.iItem = row; li.mask = LVIF_PARAM;
+                    if (SendMessageW(lv, LVM_GETITEM, 0, (LPARAM)&li)) {
+                        st->dragging = TRUE;
+                        st->dragSource = (int)li.lParam;
+                        st->insertTarget = row;
+                        // visually mark source item as being dragged (drop highlight)
+                        ListView_SetItemState(lv, row, LVIS_DROPHILITED, LVIS_DROPHILITED);
+                        // show insert mark
+                        // show insert mark
+                        // Show drop line after the hovered item so drops place below
+                        LVINSERTMARK im; ZeroMemory(&im, sizeof(im)); im.iItem = row; im.dwFlags = LVIM_AFTER;
+                        ListView_SetInsertMark(lv, &im);
+                        SetCapture(dlg);
+                    }
+                }
+                return TRUE;
+            }
             break;
         }
         case WM_COMMAND:
@@ -1371,6 +1413,71 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 }
             }
             break;
+        case WM_MOUSEMOVE: {
+            if (st && st->dragging) {
+                POINT p; GetCursorPos(&p); HWND lv = GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST);
+                if (!lv) break;
+                ScreenToClient(lv, &p);
+                // update insert mark target
+                LVHITTESTINFO ht; ZeroMemory(&ht, sizeof(ht)); ht.pt = p;
+                int row = (int)SendMessageW(lv, LVM_HITTEST, 0, (LPARAM)&ht);
+                if (row >= 0 && row != st->insertTarget) {
+                    // clear previous drop highlight for previous insertTarget visual row
+                    if (st->insertTarget >= 0) {
+                        ListView_SetItemState(lv, st->insertTarget, 0, LVIS_DROPHILITED);
+                    }
+                    st->insertTarget = row;
+                    // Show drop line after hovered item
+                    LVINSERTMARK im; ZeroMemory(&im, sizeof(im)); im.iItem = row; im.dwFlags = LVIM_AFTER;
+                    ListView_SetInsertMark(lv, &im);
+                    // highlight current target row
+                    ListView_SetItemState(lv, row, LVIS_DROPHILITED, LVIS_DROPHILITED);
+                }
+            }
+            break;
+        }
+        case WM_LBUTTONUP: {
+            if (st && st->dragging) {
+                HWND lv = GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST);
+                // remove insert mark and any drop highlighting
+                ListView_SetInsertMark(lv, NULL);
+                // clear highlight from any row
+                for (int r = 0; r < st->workingCount; ++r) {
+                    ListView_SetItemState(lv, r, 0, LVIS_DROPHILITED);
+                }
+                // commit move once based on insertTarget
+                if (st->insertTarget >= 0 && st->insertTarget < st->workingCount && st->dragSource >= 0 && st->dragSource < st->workingCount && st->insertTarget != st->dragSource) {
+                    // determine target index in workingItems corresponding to insertTarget visual position
+                    LVITEMW li; ZeroMemory(&li, sizeof(li)); li.iItem = st->insertTarget; li.mask = LVIF_PARAM;
+                    if (SendMessageW(lv, LVM_GETITEM, 0, (LPARAM)&li)) {
+                        int visualIndex = (int)li.lParam;
+                        // We want dragged item to take the target's position, moving the target below.
+                        int targetIndex = visualIndex;
+                        if (st->dragSource < targetIndex) {
+                            // removing source shifts indices left by 1 for items after source,
+                            // so adjust insertion index accordingly to match original target position.
+                            targetIndex = targetIndex - 1;
+                        }
+                        if (targetIndex < 0) targetIndex = 0;
+                        if (targetIndex > st->workingCount) targetIndex = st->workingCount;
+                        // move element from dragSource to targetIndex
+                        ConfigItem temp = st->workingItems[st->dragSource];
+                        if (st->dragSource < targetIndex) {
+                            for (int i = st->dragSource; i < targetIndex; ++i) st->workingItems[i] = st->workingItems[i+1];
+                            st->workingItems[targetIndex] = temp;
+                        } else if (st->dragSource > targetIndex) {
+                            for (int i = st->dragSource; i > targetIndex; --i) st->workingItems[i] = st->workingItems[i-1];
+                            st->workingItems[targetIndex] = temp;
+                        }
+                        st->workingDirty = TRUE;
+                    }
+                }
+                st->dragging = FALSE; st->dragSource = -1; st->insertTarget = -1; ReleaseCapture();
+                refresh_lists(st);
+                return TRUE;
+            }
+            break;
+        }
     }
     return FALSE;
 }

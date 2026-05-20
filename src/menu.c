@@ -2377,7 +2377,8 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
     BOOL disabled = (dis->itemState & (ODS_DISABLED | ODS_GRAYED)) != 0;
     COLORREF highlightColor = GetSysColor(COLOR_HIGHLIGHT);
     COLORREF highlightTextColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
-    COLORREF textColor = RGB(0, 0, 0);
+    // Use system menu text color so dark/light themes are respected when keeping highlight text color
+    COLORREF textColor = GetSysColor(COLOR_MENUTEXT);
     int iconSize = get_root_icon_size();
     HICON icon = NULL;
     WCHAR text[512] = L"";
