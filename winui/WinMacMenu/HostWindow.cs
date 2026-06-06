@@ -19,6 +19,9 @@ namespace WinMacMenu;
 /// </summary>
 public sealed class HostWindow : Window
 {
+    // Parked well outside any monitor so the 1×1 window is invisible while staying "shown".
+    private const int OffScreen = -32000;
+
     private readonly Grid _root;
     private readonly nint _hwnd;
     private MenuFlyout? _flyout;
@@ -43,10 +46,12 @@ public sealed class HostWindow : Window
         presenter.IsAlwaysOnTop = true;
         AppWindow.SetPresenter(presenter);
         AppWindow.IsShownInSwitchers = false;
-        AppWindow.Resize(new SizeInt32(1, 1));
 
-        // Keep the window hidden until a menu is shown.
-        AppWindow.Hide();
+        // Keep a live (shown but off-screen, unfocused) window so the app stays alive in
+        // background mode without anything visible. WinUI tears the app down if no window
+        // is ever shown, so we never Hide(); we just park it off-screen between menus.
+        AppWindow.MoveAndResize(new RectInt32(OffScreen, OffScreen, 1, 1));
+        AppWindow.Show(activateWindow: false);
     }
 
     public void ShowMenu(Config cfg)
@@ -96,7 +101,8 @@ public sealed class HostWindow : Window
             _flyout.Closed -= OnFlyoutClosed;
         _flyout = null;
         IsMenuOpen = false;
-        AppWindow.Hide();
+        // Park off-screen again, but keep the window shown so the app stays alive.
+        AppWindow.MoveAndResize(new RectInt32(OffScreen, OffScreen, 1, 1));
         MenuClosed?.Invoke();
     }
 }

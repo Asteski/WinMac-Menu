@@ -27,6 +27,26 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        UnhandledException += (_, e) =>
+        {
+            Log("UnhandledException: " + e.Message + "\n" + e.Exception);
+            e.Handled = true; // keep the app alive rather than dying silently.
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Log("AppDomain.UnhandledException: " + e.ExceptionObject);
+
+        try
+        {
+            Setup();
+        }
+        catch (Exception ex)
+        {
+            Log("Setup failed: " + ex);
+        }
+    }
+
+    private void Setup()
+    {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _config = ConfigLoader.Load(_configPath);
 
@@ -107,5 +127,18 @@ public partial class App : Application
         _messageWindow?.Dispose();
         _host?.Close();
         Exit();
+    }
+
+    private static void Log(string message)
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, "winmacmenu-crash.log");
+            System.IO.File.AppendAllText(path, $"{DateTime.Now:O} {message}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging is best-effort.
+        }
     }
 }
