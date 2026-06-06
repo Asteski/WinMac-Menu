@@ -27,6 +27,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        Log("OnLaunched: entered");
         UnhandledException += (_, e) =>
         {
             Log("UnhandledException: " + e.Message + "\n" + e.Exception);
@@ -47,11 +48,15 @@ public partial class App : Application
 
     private void Setup()
     {
+        Log("Setup: entered");
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _config = ConfigLoader.Load(_configPath);
+        Log($"Setup: config '{_config.IniPath}' loaded — RunInBackground={_config.RunInBackground}, " +
+            $"ShowTrayIcon={_config.ShowTrayIcon}, ShowOnLaunch={_config.ShowOnLaunch}, Items={_config.Items.Count}");
 
         _host = new HostWindow();
         _host.MenuClosed += OnMenuClosed;
+        Log("Setup: host window created");
 
         // Reconcile StartOnLogin with the registry, as the C app does on startup.
         StartupRegistry.Sync(_config.StartOnLogin, _config.IniPath);
@@ -66,6 +71,7 @@ public partial class App : Application
 
             _single.StartToggleListener(_dispatcher, ToggleMenu);
 
+            Log("Setup: background mode ready" + (_config.ShowOnLaunch ? " — showing menu" : " — idle in tray"));
             if (_config.ShowOnLaunch)
                 ShowMenu();
         }
@@ -73,6 +79,7 @@ public partial class App : Application
         {
             // Single-run (legacy) mode: show once, then exit when the menu closes.
             _single.StartToggleListener(_dispatcher, ToggleMenu);
+            Log("Setup: single-run mode" + (_config.ShowOnLaunch ? " — showing menu" : " — exiting (ShowOnLaunch=false)"));
             if (_config.ShowOnLaunch)
                 ShowMenu();
             else
@@ -122,6 +129,7 @@ public partial class App : Application
 
     private void ExitApp()
     {
+        Log("ExitApp called");
         _keyboard?.Dispose();
         _tray?.Dispose();
         _messageWindow?.Dispose();

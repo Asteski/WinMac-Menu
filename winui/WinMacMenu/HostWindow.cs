@@ -47,11 +47,12 @@ public sealed class HostWindow : Window
         AppWindow.SetPresenter(presenter);
         AppWindow.IsShownInSwitchers = false;
 
-        // Keep a live (shown but off-screen, unfocused) window so the app stays alive in
-        // background mode without anything visible. WinUI tears the app down if no window
-        // is ever shown, so we never Hide(); we just park it off-screen between menus.
+        // Keep a live window so the app stays alive in background mode without anything
+        // visible. WinUI tears the app down if no window is ever activated, so we activate
+        // this 1×1 window once off-screen and never Hide() it — just park it off-screen
+        // between menus.
         AppWindow.MoveAndResize(new RectInt32(OffScreen, OffScreen, 1, 1));
-        AppWindow.Show(activateWindow: false);
+        Activate();
     }
 
     public void ShowMenu(Config cfg)
