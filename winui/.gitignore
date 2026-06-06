@@ -1,0 +1,19 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM64/
+[Aa][Rr][Mm]64/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+
+## Generated config at runtime
+WinMacMenu/config.ini
+WinMacMenu/*.log
