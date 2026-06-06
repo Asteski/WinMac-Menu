@@ -1,4 +1,6 @@
 using Microsoft.UI.Dispatching;
+using Microsoft.Windows.ApplicationModel.DynamicDependency;
+using Microsoft.Windows.ApplicationModel.WindowsAppRuntime;
 using WinMacMenu.Configuration;
 using WinMacMenu.Services;
 
@@ -24,15 +26,34 @@ public static class Program
             return;
         }
 
-        WinRT.ComWrappersSupport.InitializeComWrappers();
-        Microsoft.UI.Xaml.Application.Start(p =>
-        {
-            var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
-            System.Threading.SynchronizationContext.SetSynchronizationContext(context);
-            _ = new App(single, configPath);
-        });
+        Bootstrap.Initialize(
+            Microsoft.WindowsAppSDK.Release.MajorMinor,
+            Microsoft.WindowsAppSDK.Release.VersionTag,
+            new PackageVersion(Microsoft.WindowsAppSDK.Runtime.Version.UInt64),
+            Bootstrap.InitializeOptions.OnNoMatch_ShowUI);
 
-        single.Dispose();
+        var deploymentResult = DeploymentManager.Initialize();
+        if (deploymentResult.Status != DeploymentStatus.Ok)
+        {
+            single.Dispose();
+            throw new InvalidOperationException($"Windows App Runtime initialization failed with status {deploymentResult.Status} (HRESULT 0x{deploymentResult.ExtendedError.HResult:X8}).");
+        }
+
+        try
+        {
+            WinRT.ComWrappersSupport.InitializeComWrappers();
+            Microsoft.UI.Xaml.Application.Start(p =>
+            {
+                var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
+                System.Threading.SynchronizationContext.SetSynchronizationContext(context);
+                _ = new App(single, configPath);
+            });
+        }
+        finally
+        {
+            Bootstrap.Shutdown();
+            single.Dispose();
+        }
     }
 
     private static string? ParseConfigArg(string[] args)

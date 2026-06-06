@@ -19,6 +19,8 @@
     <!-- Unpackaged (single EXE, no MSIX installer) to mirror the Win32 app's deployment model.
          The Windows App SDK bootstrapper is auto-initialized for unpackaged apps. -->
     <WindowsPackageType>None</WindowsPackageType>
+    <EnableCoreMrtTooling>false</EnableCoreMrtTooling>
+    <EnablePriGenTooling>false</EnablePriGenTooling>
     <EnableMsixTooling>false</EnableMsixTooling>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
 
