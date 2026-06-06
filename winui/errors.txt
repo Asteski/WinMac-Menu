@@ -1,5 +1,11 @@
-Restore complete (0.5s)
-  WinMacMenu net8.0-windows10.0.19041.0 failed with 1 error(s) (7.4s)
-    C:\Users\Adams\.nuget\packages\microsoft.windowsappsdk\1.6.250205002\buildTransitive\MrtCore.PriGen.targets(914,5): error MSB4062: The "Microsoft.Build.Packaging.Pri.Tasks.ExpandPriContent" task could not be loaded from the assembly C:\Program Files\dotnet\sdk\10.0.300\\Microsoft\VisualStudio\v18.0\AppxPackage\\Microsoft.Build.Packaging.Pri.Tasks.dll. Could not load file or assembly 'C:\Program Files\dotnet\sdk\10.0.300\\Microsoft\VisualStudio\v18.0\AppxPackage\\Microsoft.Build.Packaging.Pri.Tasks.dll'. The system cannot find the file specified. Confirm that the <UsingTask> declaration is correct, that the assembly and all its dependencies are available, and that the task contains a public class that implements Microsoft.Build.Framework.ITask.
+C:\Users\Adams\.nuget\packages\microsoft.windowsappsdk\1.6.250205002\buildTransitive\MrtCore.PriGen.targets(914,5): error MSB4062: The "Microsoft.Build.Packaging.Pri.Tasks.ExpandPriContent" task could not be loaded from the assembly C:\Program Files\dotnet\sdk\8.0.421\\Microso
+ft\VisualStudio\v17.0\AppxPackage\\Microsoft.Build.Packaging.Pri.Tasks.dll. Could not load file or assembly 'C:\Program Files\dotnet\sdk\8.0.421\Microsoft\VisualStudio\v17.0\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll'. The system cannot find the path specified. Confir
+m that the <UsingTask> declaration is correct, that the assembly and all its dependencies are available, and that the task contains a public class that implements Microsoft.Build.Framework.ITask. [C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\WinMacMenu.csproj]
 
-Build failed with 1 error(s) in 8.2s
+Build FAILED.
+
+C:\Users\Adams\.nuget\packages\microsoft.windowsappsdk\1.6.250205002\buildTransitive\MrtCore.PriGen.targets(914,5): error MSB4062: The "Microsoft.Build.Packaging.Pri.Tasks.ExpandPriContent" task could not be loaded from the assembly C:\Program Files\dotnet\sdk\8.0.421\\Microso
+ft\VisualStudio\v17.0\AppxPackage\\Microsoft.Build.Packaging.Pri.Tasks.dll. Could not load file or assembly 'C:\Program Files\dotnet\sdk\8.0.421\Microsoft\VisualStudio\v17.0\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll'. The system cannot find the path specified. Confir
+m that the <UsingTask> declaration is correct, that the assembly and all its dependencies are available, and that the task contains a public class that implements Microsoft.Build.Framework.ITask. [C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\WinMacMenu.csproj]
+    0 Warning(s)
+    1 Error(s)
