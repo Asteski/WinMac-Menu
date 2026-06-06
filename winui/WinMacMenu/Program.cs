@@ -1,6 +1,9 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.IO;
 using Microsoft.UI.Dispatching;
 using Microsoft.Windows.ApplicationModel.DynamicDependency;
-using Microsoft.Windows.ApplicationModel.WindowsAppRuntime;
 using WinMacMenu.Configuration;
 using WinMacMenu.Services;
 
@@ -12,6 +15,19 @@ namespace WinMacMenu;
 /// </summary>
 public static class Program
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetCurrentPackageFullName(ref int packageFullNameLength, StringBuilder packageFullName);
+
+    private const int APPMODEL_ERROR_NO_PACKAGE = 15700;
+
+    private static bool IsPackagedProcess()
+    {
+        int length = 0;
+        var sb = new StringBuilder(0);
+        int rc = GetCurrentPackageFullName(ref length, sb);
+        return rc == 0;
+    }
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -32,11 +48,18 @@ public static class Program
             new PackageVersion(Microsoft.WindowsAppSDK.Runtime.Version.UInt64),
             Bootstrap.InitializeOptions.OnNoMatch_ShowUI);
 
-        var deploymentResult = DeploymentManager.Initialize();
-        if (deploymentResult.Status != DeploymentStatus.Ok)
+        if (IsPackagedProcess())
         {
-            single.Dispose();
-            throw new InvalidOperationException($"Windows App Runtime initialization failed with status {deploymentResult.Status} (HRESULT 0x{deploymentResult.ExtendedError.HResult:X8}).");
+            var deploymentResult = Microsoft.Windows.ApplicationModel.WindowsAppRuntime.DeploymentManager.Initialize();
+            if (deploymentResult.Status != Microsoft.Windows.ApplicationModel.WindowsAppRuntime.DeploymentStatus.Ok)
+            {
+                single.Dispose();
+                throw new InvalidOperationException($"Windows App Runtime initialization failed with status {deploymentResult.Status} (HRESULT 0x{deploymentResult.ExtendedError.HResult:X8}).");
+            }
+        }
+        else
+        {
+            // Running unpackaged: skip DeploymentManager.Initialize().
         }
 
         try
