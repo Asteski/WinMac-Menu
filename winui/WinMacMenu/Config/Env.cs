@@ -1,4 +1,4 @@
-namespace WinMacMenu.Config;
+namespace WinMacMenu.Configuration;
 
 /// <summary>Environment-variable expansion equivalent to the Win32 app's <c>expand_env</c>.</summary>
 public static class Env

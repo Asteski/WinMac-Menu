@@ -13,6 +13,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Required by the LibraryImport (source-generated P/Invoke) marshalling code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- Unpackaged (single EXE, no MSIX installer) to mirror the Win32 app's deployment model.
          The Windows App SDK bootstrapper is auto-initialized for unpackaged apps. -->
@@ -28,7 +30,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250108007" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
   </ItemGroup>

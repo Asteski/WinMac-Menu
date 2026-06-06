@@ -1,6 +1,6 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
-using WinMacMenu.Config;
+using WinMacMenu.Configuration;
 using WinMacMenu.Models;
 using WinMacMenu.Services;
 

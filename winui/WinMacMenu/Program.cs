@@ -1,5 +1,5 @@
 using Microsoft.UI.Dispatching;
-using WinMacMenu.Config;
+using WinMacMenu.Configuration;
 using WinMacMenu.Services;
 
 namespace WinMacMenu;

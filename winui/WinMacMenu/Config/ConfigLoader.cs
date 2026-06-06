@@ -1,6 +1,6 @@
 using WinMacMenu.Models;
 
-namespace WinMacMenu.Config;
+namespace WinMacMenu.Configuration;
 
 /// <summary>
 /// Loads <see cref="Models.Config"/> from an INI file, faithfully reproducing the parsing,

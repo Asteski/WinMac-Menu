@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace WinMacMenu.Config;
+namespace WinMacMenu.Configuration;
 
 /// <summary>
 /// Minimal INI reader matching the behaviour the Win32 app relies on via
