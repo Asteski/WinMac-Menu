@@ -1,49 +1,5 @@
-Restore succeeded with 1 warning(s) in 0.3s
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\WinMacMenu.csproj : warning NU1603: WinMacMenu depends on Microsoft.WindowsAppSDK (>= 1.6.250108007) but Microsoft.WindowsAppSDK 1.6.250108007 was not found. Microsoft.WindowsAppSDK 1.6.250205002 was resolved instead.
-  WinMacMenu net8.0-windows10.0.19041.0 failed with 45 error(s) and 1 warning(s) (6.3s)
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\WinMacMenu.csproj : warning NU1603: WinMacMenu depends on Microsoft.WindowsAppSDK (>= 1.6.250108007) but Microsoft.WindowsAppSDK 1.6.250108007 was not found. Microsoft.WindowsAppSDK 1.6.250205002 was resolved instead.
-    CSC : error SYSLIB1062: LibraryImportAttribute requires unsafe code. Project must be updated with '<AllowUnsafeBlocks>true</AllowUnsafeBlocks>'. (https://learn.microsoft.com/dotnet/fundamentals/syslib-diagnostics/syslib1062)
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Interop\NativeMethods.cs(6,31): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Config\ConfigLoader.cs(15,19): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Config\ConfigLoader.cs(232,35): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Config\ConfigLoader.cs(294,36): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\HostWindow.cs(52,26): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Menu\MenuBuilder.cs(18,22): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Menu\MenuBuilder.cs(23,24): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\App.xaml.cs(15,13): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\FolderProvider.cs(8,70): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\FolderProvider.cs(77,55): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\FolderProvider.cs(97,58): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\PlacementCalculator.cs(13,43): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\RecentItemsProvider.cs(10,58): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\RecentItemsProvider.cs(58,54): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\SpecialFolderProvider.cs(8,54): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\SpecialFolderProvider.cs(35,52): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\TaskKillProvider.cs(17,58): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\SpecialFolderProvider.cs(53,68): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\SpecialFolderProvider.cs(59,68): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\SpecialFolderProvider.cs(65,76): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\TrayIcon.cs(16,22): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\TrayIcon.cs(26,43): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\KeyboardTrigger.cs(13,22): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Services\KeyboardTrigger.cs(22,28): error CS0118: 'Config' is a namespace but is used like a type
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(7,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(34,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(60,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(87,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(137,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(160,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(183,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(217,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(244,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(279,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(309,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(341,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(373,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(400,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(443,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(470,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(492,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(516,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(540,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
-    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\obj\x64\Debug\net8.0-windows10.0.19041.0\intermediatexaml\Microsoft.Interop.LibraryImportGenerator\Microsoft.Interop.LibraryImportGenerator\LibraryImports.g.cs(567,10): error CS0227: Unsafe code may only appear if compiling with /unsafe
+Restore complete (0.5s)
+  WinMacMenu net8.0-windows10.0.19041.0 failed with 1 error(s) (5.8s)
+    C:\Users\Adams\Code\WinMac-Menu-Repo\winui\WinMacMenu\Program.cs(32,17): error CS0029: Cannot implicitly convert type 'WinMacMenu.App' to 'Microsoft.UI.Xaml.ApplicationInitializationCallbackParams'
+
+Build failed with 1 error(s) in 6.7s
