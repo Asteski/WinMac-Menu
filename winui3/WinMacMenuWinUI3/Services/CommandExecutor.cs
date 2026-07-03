@@ -69,8 +69,20 @@ public static class CommandExecutor
     public static void OpenUri(string uri)
     {
         if (string.IsNullOrEmpty(uri)) return;
-        var psi = new ProcessStartInfo(uri) { UseShellExecute = true };
-        Process.Start(psi);
+
+        // .msc snap-ins live in System32 and must be launched via mmc.exe
+        if (uri.EndsWith(".msc", StringComparison.OrdinalIgnoreCase))
+        {
+            var mscPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System), uri);
+            Process.Start(new ProcessStartInfo("mmc.exe", $"\"{mscPath}\"")
+            {
+                UseShellExecute = true
+            });
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
     }
 
     public static void ShellOpen(string path, string? args = null)
