@@ -1,52 +1,41 @@
 <UserControl
     x:Class="WinMacMenuWinUI3.MenuItemControl"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:WinMacMenuWinUI3"
-    xmlns:models="using:WinMacMenuWinUI3.Models">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <UserControl.Resources>
-        <!-- Hover highlight style -->
-        <Style x:Key="MenuItemButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="CornerRadius" Value="4" />
+        <Style x:Key="MenuRowButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Grid x:Name="RootGrid"
-                              Background="{TemplateBinding Background}"
-                              CornerRadius="4">
+                        <Grid x:Name="Root" CornerRadius="4" Background="Transparent">
                             <VisualStateManager.VisualStateGroups>
                                 <VisualStateGroup x:Name="CommonStates">
-                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="Normal"/>
                                     <VisualState x:Name="PointerOver">
-                                        <Storyboard>
-                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid"
-                                                                           Storyboard.TargetProperty="Background">
-                                                <DiscreteObjectKeyFrame KeyTime="0"
-                                                    Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-                                            </ObjectAnimationUsingKeyFrames>
-                                        </Storyboard>
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background"
+                                                    Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                        </VisualState.Setters>
                                     </VisualState>
                                     <VisualState x:Name="Pressed">
-                                        <Storyboard>
-                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid"
-                                                                           Storyboard.TargetProperty="Background">
-                                                <DiscreteObjectKeyFrame KeyTime="0"
-                                                    Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
-                                            </ObjectAnimationUsingKeyFrames>
-                                        </Storyboard>
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background"
+                                                    Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                        </VisualState.Setters>
                                     </VisualState>
                                 </VisualStateGroup>
                             </VisualStateManager.VisualStateGroups>
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            <ContentPresenter HorizontalAlignment="Stretch"
                                               VerticalAlignment="Center"
-                                              Content="{TemplateBinding Content}"
-                                              Padding="{TemplateBinding Padding}" />
+                                              Content="{TemplateBinding Content}"/>
                         </Grid>
                     </ControlTemplate>
                 </Setter.Value>
@@ -55,60 +44,62 @@
     </UserControl.Resources>
 
     <Grid>
-        <!-- Separator -->
-        <Rectangle x:Name="SeparatorLine"
-                   Height="1"
-                   Margin="12,4,12,4"
-                   Fill="{ThemeResource DividerStrokeColorDefaultBrush}"
-                   Visibility="Collapsed" />
+        <!-- SEPARATOR: thin 1px line, 9px total slot height -->
+        <Grid x:Name="SeparatorRoot" Height="9" Visibility="Collapsed">
+            <Rectangle Height="1"
+                       Margin="12,0"
+                       VerticalAlignment="Center"
+                       Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+        </Grid>
 
-        <!-- Category header -->
-        <TextBlock x:Name="CategoryLabel"
-                   Margin="12,6,12,2"
+        <!-- CATEGORY HEADER: small semibold label, no interaction -->
+        <TextBlock x:Name="CategoryRoot"
+                   Margin="12,8,12,2"
                    FontSize="11"
+                   FontFamily="Segoe UI Variable Small"
                    FontWeight="SemiBold"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                   Text="Category"
-                   Visibility="Collapsed"
-                   TextTrimming="CharacterEllipsis" />
+                   TextTrimming="CharacterEllipsis"
+                   Visibility="Collapsed"/>
 
-        <!-- Normal / submenu item -->
-        <Button x:Name="ItemButton"
-                Style="{StaticResource MenuItemButtonStyle}"
-                Click="ItemButton_Click"
+        <!-- NORMAL ITEM: 34px tall, 4px horizontal margin for hover rounding -->
+        <Button x:Name="ItemRoot"
+                Style="{StaticResource MenuRowButton}"
+                Height="34"
+                Margin="4,0"
+                Click="ItemRoot_Click"
                 Visibility="Collapsed">
-            <Grid Height="34" Padding="8,0">
+            <Grid Margin="8,0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="24" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="20"/>  <!-- icon -->
+                    <ColumnDefinition Width="8"/>   <!-- gap -->
+                    <ColumnDefinition Width="*"/>   <!-- label -->
+                    <ColumnDefinition Width="Auto"/><!-- chevron -->
                 </Grid.ColumnDefinitions>
 
-                <!-- Icon -->
                 <Image x:Name="ItemIcon"
                        Grid.Column="0"
                        Width="16" Height="16"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
-                       Visibility="Collapsed" />
+                       Stretch="Uniform"
+                       Visibility="Collapsed"/>
 
-                <!-- Label -->
                 <TextBlock x:Name="ItemLabel"
-                           Grid.Column="1"
-                           VerticalAlignment="Center"
-                           Margin="4,0,0,0"
+                           Grid.Column="2"
                            FontSize="12"
-                           TextTrimming="CharacterEllipsis"
-                           Text="Item" />
+                           FontFamily="Segoe UI Variable Text"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
 
-                <!-- Submenu arrow -->
                 <FontIcon x:Name="SubArrow"
-                          Grid.Column="2"
+                          Grid.Column="3"
                           Glyph="&#xE76C;"
                           FontSize="10"
                           VerticalAlignment="Center"
+                          Margin="4,0,0,0"
                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                          Visibility="Collapsed" />
+                          Visibility="Collapsed"/>
             </Grid>
         </Button>
     </Grid>

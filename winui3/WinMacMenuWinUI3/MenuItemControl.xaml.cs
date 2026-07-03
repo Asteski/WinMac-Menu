@@ -16,66 +16,59 @@ public sealed partial class MenuItemControl : UserControl
         set => SetValue(ItemProperty, value);
     }
 
+    public event EventHandler<ConfigItem>? ItemClicked;
+
     public MenuItemControl()
     {
         InitializeComponent();
+        // Refresh after layout is ready — guards against the property being set
+        // before InitializeComponent has wired up the named elements.
+        Loaded += (_, _) => Refresh();
     }
 
     private static void OnItemChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        ((MenuItemControl)d).Refresh();
-    }
+        => ((MenuItemControl)d).Refresh();
 
     private void Refresh()
     {
         var item = Item;
         if (item == null) return;
 
-        // Hide all variants first
-        SeparatorLine.Visibility  = Visibility.Collapsed;
-        CategoryLabel.Visibility  = Visibility.Collapsed;
-        ItemButton.Visibility     = Visibility.Collapsed;
+        SeparatorRoot.Visibility = Visibility.Collapsed;
+        CategoryRoot.Visibility  = Visibility.Collapsed;
+        ItemRoot.Visibility      = Visibility.Collapsed;
 
         if (item.IsSeparator)
         {
-            SeparatorLine.Visibility = Visibility.Visible;
+            SeparatorRoot.Visibility = Visibility.Visible;
             return;
         }
 
         if (item.IsCategory)
         {
-            CategoryLabel.Text       = item.Label;
-            CategoryLabel.Visibility = Visibility.Visible;
+            CategoryRoot.Text       = item.Label;
+            CategoryRoot.Visibility = Visibility.Visible;
             return;
         }
 
-        // Regular item
-        ItemLabel.Text       = item.Label;
-        ItemButton.Visibility = Visibility.Visible;
+        ItemLabel.Text      = item.Label;
+        ItemRoot.Visibility = Visibility.Visible;
 
-        // Show submenu arrow for items that expand
-        var hasSubmenu = item.Type is ConfigItemType.Folder or ConfigItemType.FolderSubmenu
-                      or ConfigItemType.PowerMenu or ConfigItemType.TaskKill
-                      or ConfigItemType.RecentSubmenu or ConfigItemType.Recent;
+        bool hasSubmenu = item.Type is
+            ConfigItemType.Folder or ConfigItemType.FolderSubmenu or
+            ConfigItemType.PowerMenu or ConfigItemType.TaskKill or
+            ConfigItemType.Recent or ConfigItemType.RecentSubmenu;
         SubArrow.Visibility = hasSubmenu ? Visibility.Visible : Visibility.Collapsed;
 
-        // Load icon if path provided
         LoadIcon(item);
     }
 
     private void LoadIcon(ConfigItem item)
     {
-        var iconPath = item.IconPath;
-        if (string.IsNullOrEmpty(iconPath))
-        {
-            // Use built-in Segoe Fluent Icons for well-known types
-            ItemIcon.Visibility = Visibility.Collapsed;
-            return;
-        }
+        var path = item.IconPath;
 
-        // For DLL resource icons (e.g. "shell32.dll,-271") we skip loading on this pass
-        // and rely on the shell icon service (not yet implemented)
-        if (iconPath.Contains(".dll,") || iconPath.Contains(".exe,"))
+        // DLL/EXE resource icons (e.g. "shell32.dll,-271") — not yet supported
+        if (string.IsNullOrEmpty(path) || path.Contains(".dll,") || path.Contains(".exe,"))
         {
             ItemIcon.Visibility = Visibility.Collapsed;
             return;
@@ -83,8 +76,7 @@ public sealed partial class MenuItemControl : UserControl
 
         try
         {
-            var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(iconPath));
-            ItemIcon.Source  = bmp;
+            ItemIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(path));
             ItemIcon.Visibility = Visibility.Visible;
         }
         catch
@@ -93,10 +85,7 @@ public sealed partial class MenuItemControl : UserControl
         }
     }
 
-    // Raised when the user clicks this item; MenuWindow subscribes via ItemsRepeater
-    public event EventHandler<ConfigItem>? ItemClicked;
-
-    private void ItemButton_Click(object sender, RoutedEventArgs e)
+    private void ItemRoot_Click(object sender, RoutedEventArgs e)
     {
         if (Item != null)
             ItemClicked?.Invoke(this, Item);

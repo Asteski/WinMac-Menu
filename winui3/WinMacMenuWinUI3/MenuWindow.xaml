@@ -5,36 +5,44 @@
     xmlns:local="using:WinMacMenuWinUI3"
     xmlns:models="using:WinMacMenuWinUI3.Models">
 
-    <Grid x:Name="RootGrid" Background="Transparent">
-        <Border x:Name="MenuPanel"
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="4,4,4,4"
+    <!--
+        The window itself is transparent (no system chrome).
+        The menu card is a solid-white rounded panel with elevation shadow,
+        matching the Windows 11 context menu appearance.
+    -->
+    <Grid Background="Transparent">
+
+        <Border x:Name="MenuCard"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
                 MinWidth="220"
                 MaxWidth="320"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top">
+                Padding="4"
+                CornerRadius="8"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                Background="{ThemeResource AcrylicBackgroundFillColorBaseBrush}">
             <Border.Shadow>
-                <ThemeShadow />
+                <ThemeShadow/>
             </Border.Shadow>
+
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          MaxHeight="600">
+                          MaxHeight="580">
                 <ItemsRepeater x:Name="MenuItemsRepeater"
                                ItemsSource="{x:Bind MenuItems}"
                                ElementPrepared="MenuItemsRepeater_ElementPrepared">
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="models:ConfigItem">
-                            <local:MenuItemControl Item="{x:Bind}" />
+                            <local:MenuItemControl Item="{x:Bind}"/>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
                     <ItemsRepeater.Layout>
-                        <StackLayout Spacing="0" Orientation="Vertical" />
+                        <StackLayout Spacing="0" Orientation="Vertical"/>
                     </ItemsRepeater.Layout>
                 </ItemsRepeater>
             </ScrollViewer>
         </Border>
+
     </Grid>
 </Window>

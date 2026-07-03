@@ -4,7 +4,6 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
@@ -98,8 +97,10 @@ public sealed partial class MenuWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        try { SystemBackdrop = new MicaBackdrop(); }
-        catch { SystemBackdrop = new DesktopAcrylicBackdrop(); }
+        // Keep the window background fully transparent so the card's rounded
+        // corners are visible and nothing bleeds outside the Border.
+        appWindow.TitleBar.BackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+        appWindow.TitleBar.InactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
     }
 
     private void PositionAtCursor()
