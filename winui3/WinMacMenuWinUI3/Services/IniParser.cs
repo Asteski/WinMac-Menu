@@ -57,6 +57,17 @@ public static class IniParser
 
         cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
 
+        cfg.WindowsKey      = GetBool("Controls", "WindowsKey",      false, iniPath);
+        cfg.ShiftWindowsKey = GetBool("Controls", "ShiftWindowsKey", false, iniPath);
+        cfg.LeftClick       = GetBool("Controls", "LeftClick",       false, iniPath);
+        cfg.RightClick      = GetBool("Controls", "RightClick",      false, iniPath);
+        cfg.MiddleClick     = GetBool("Controls", "MiddleClick",     true,  iniPath);
+        cfg.ShiftLeftClick  = GetBool("Controls", "ShiftLeftClick",  false, iniPath);
+        cfg.ShiftRightClick = GetBool("Controls", "ShiftRightClick", false, iniPath);
+        cfg.ShiftMiddleClick= GetBool("Controls", "ShiftMiddleClick",false, iniPath);
+        cfg.IgnoreTriggersWhenFullscreen = GetBool("Controls", "IgnoreTriggersWhenFullscreen", false, iniPath);
+        cfg.FullscreenExclusionList      = GetString("Controls", "FullscreenExclusionList", "", iniPath);
+
         cfg.SortBy = GetString("Sorting", "SortBy", "name", iniPath);
         cfg.SortDirection = GetString("Sorting", "SortDirection", "ascending", iniPath);
         cfg.FoldersFirst = GetBool("Sorting", "FoldersFirst", true, iniPath);

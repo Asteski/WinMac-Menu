@@ -69,6 +69,18 @@ public class AppConfig
 
     public string Corners { get; set; } = "rounded";
 
+    // [Controls]
+    public bool WindowsKey     { get; set; } = false;
+    public bool ShiftWindowsKey { get; set; } = false;
+    public bool LeftClick      { get; set; } = false;
+    public bool RightClick     { get; set; } = false;
+    public bool MiddleClick    { get; set; } = true;
+    public bool ShiftLeftClick  { get; set; } = false;
+    public bool ShiftRightClick { get; set; } = false;
+    public bool ShiftMiddleClick{ get; set; } = false;
+    public bool IgnoreTriggersWhenFullscreen { get; set; } = false;
+    public string FullscreenExclusionList { get; set; } = "";
+
     // [Sorting]
     public string SortBy { get; set; } = "name";
     public string SortDirection { get; set; } = "ascending";

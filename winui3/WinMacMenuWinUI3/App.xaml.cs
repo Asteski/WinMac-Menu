@@ -8,6 +8,7 @@ public partial class App : Application
 {
     private HostWindow?  _host;
     private TrayService? _tray;
+    private HookService? _hooks;
     private string       _iniPath = "";
 
     public App() => InitializeComponent();
@@ -28,6 +29,9 @@ public partial class App : Application
             _tray = new TrayService(_host.Hwnd, config);
             _tray.ShowMenuRequested += ShowMenu;
             _tray.ExitRequested     += Exit;
+
+            _hooks = new HookService(config);
+            _hooks.MenuRequested += ShowMenu;
         }
 
         // Always show the menu on first launch (matches original app behaviour)
@@ -44,6 +48,7 @@ public partial class App : Application
 
     private void Exit()
     {
+        _hooks?.Dispose();
         _tray?.Dispose();
         _host?.Close();
     }
