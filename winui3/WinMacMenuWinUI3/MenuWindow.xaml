@@ -3,7 +3,6 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:WinMacMenuWinUI3"
-    xmlns:vm="using:WinMacMenuWinUI3.ViewModels"
     xmlns:models="using:WinMacMenuWinUI3.Models">
 
     <Grid Background="Transparent">
@@ -48,7 +47,7 @@
         </Style>
 
         <!-- ── Separator: 9px slot, 1px line ── -->
-        <DataTemplate x:Key="SeparatorTemplate" x:DataType="vm:MenuItemViewModel">
+        <DataTemplate x:Key="SeparatorTemplate" x:DataType="local:MenuItemViewModel">
             <Grid Height="9">
                 <Rectangle Height="1"
                             Margin="12,0"
@@ -58,7 +57,7 @@
         </DataTemplate>
 
         <!-- ── Category header ── -->
-        <DataTemplate x:Key="CategoryTemplate" x:DataType="vm:MenuItemViewModel">
+        <DataTemplate x:Key="CategoryTemplate" x:DataType="local:MenuItemViewModel">
             <TextBlock Text="{x:Bind Label}"
                        Margin="12,8,12,2"
                        FontSize="11"
@@ -69,7 +68,7 @@
         </DataTemplate>
 
         <!-- ── Normal item ── -->
-        <DataTemplate x:Key="NormalTemplate" x:DataType="vm:MenuItemViewModel">
+        <DataTemplate x:Key="NormalTemplate" x:DataType="local:MenuItemViewModel">
             <Button Style="{StaticResource MenuRowButton}"
                     Height="34"
                     Margin="4,0"

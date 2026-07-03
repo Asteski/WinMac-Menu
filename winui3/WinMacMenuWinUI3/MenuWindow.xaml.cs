@@ -7,7 +7,6 @@ using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
-using WinMacMenuWinUI3.ViewModels;
 
 namespace WinMacMenuWinUI3;
 
