@@ -389,11 +389,24 @@ public sealed partial class MenuWindow : Window
         SetForegroundWindow(hwnd);
     }
 
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    // Converts physical screen pixels → logical pixels WinUI3 uses for window placement.
+    // At 100% scaling these are identical; at 150% a physical 1500px becomes 1000 logical px.
+    private PointInt32 ToLogical(int physX, int physY)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var dpi  = (int)GetDpiForWindow(hwnd);
+        if (dpi <= 0) dpi = 96;
+        return new PointInt32(physX * 96 / dpi, physY * 96 / dpi);
+    }
+
     // Anchor = cursor position (pointer-relative mode)
     private PointInt32 GetCursorAnchor()
     {
         GetCursorPos(out var pt);
-        return new PointInt32(pt.x, pt.y);
+        // Snap to nearest integer logical pixel to avoid sub-pixel layout jitter
+        return ToLogical(pt.x, pt.y);
     }
 
     // Anchor = fixed point derived from Horizontal/Vertical alignment + offsets
