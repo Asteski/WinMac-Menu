@@ -5,7 +5,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Windows.Foundation;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
@@ -14,25 +13,21 @@ namespace WinMacMenuWinUI3;
 
 public sealed partial class MenuWindow : Window
 {
-    // Win32 window styles for a popup that doesn't appear in the taskbar or alt-tab
-    private const int GWL_STYLE   = -16;
-    private const int GWL_EXSTYLE = -20;
-    private const int WS_POPUP           = unchecked((int)0x80000000);
-    private const int WS_EX_TOOLWINDOW   = 0x00000080;
-    private const int WS_EX_TOPMOST      = 0x00000008;
-    private const int WS_EX_NOACTIVATE   = 0x08000000;
+    private const int GWL_EXSTYLE     = -20;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_TOPMOST    = 0x00000008;
 
     [DllImport("user32.dll")] private static extern int  GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] private static extern int  SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
-        int X, int Y, int cx, int cy, uint uFlags);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int x; public int y; }
-
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT lpPoint);
 
     private readonly AppConfig _config;
     private readonly string _iniPath;
+    private bool _closeOnDeactivate = false;
+
     public ObservableCollection<ConfigItem> MenuItems { get; } = new();
 
     public MenuWindow(AppConfig config, string iniPath)
@@ -48,12 +43,26 @@ public sealed partial class MenuWindow : Window
         ConfigureWindowChrome();
         PositionAtCursor();
 
-        // Close when focus is lost
-        this.Activated += (_, e) =>
+        // Wait until the window has fully appeared before allowing deactivation to close it.
+        // Without the delay, the Deactivated event fires before the window is even visible.
+        this.Activated += OnActivated;
+    }
+
+    private async void OnActivated(object sender, WindowActivatedEventArgs e)
+    {
+        if (e.WindowActivationState != WindowActivationState.Deactivated)
         {
-            if (e.WindowActivationState == WindowActivationState.Deactivated)
-                this.Close();
-        };
+            // Window just became active — arm the close-on-deactivate after a short delay
+            if (!_closeOnDeactivate)
+            {
+                await Task.Delay(300);
+                _closeOnDeactivate = true;
+            }
+        }
+        else if (_closeOnDeactivate)
+        {
+            this.Close();
+        }
     }
 
     private void MenuItemsRepeater_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
@@ -70,7 +79,6 @@ public sealed partial class MenuWindow : Window
 
     private void ConfigureWindowChrome()
     {
-        // Remove title bar, make it a floating tool window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(null);
 
@@ -78,12 +86,11 @@ public sealed partial class MenuWindow : Window
         var appWindow = GetAppWindowForCurrentWindow();
         appWindow.IsShownInSwitchers = false;
 
-        // Apply popup + toolwindow + topmost + noactivate styles
+        // Tool window (no taskbar/alt-tab entry) + always on top
         var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
+        exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
-        // Use overlapped presenter without decorations
         var presenter = OverlappedPresenter.CreateForToolWindow();
         presenter.IsResizable = false;
         presenter.IsMaximizable = false;
@@ -91,30 +98,26 @@ public sealed partial class MenuWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        // Apply Mica backdrop for Windows 11 look; falls back to acrylic on older builds
         try { SystemBackdrop = new MicaBackdrop(); }
         catch { SystemBackdrop = new DesktopAcrylicBackdrop(); }
     }
 
     private void PositionAtCursor()
     {
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var appWindow = GetAppWindowForCurrentWindow();
 
-        // Measure desired size (approximation: 220px wide, 40px per item + 8px padding)
         int itemCount = _config.Items.Count(i => !i.IsSeparator);
         int sepCount  = _config.Items.Count(i => i.IsSeparator);
-        int height = itemCount * 36 + sepCount * 9 + 8;
+        int height = Math.Max(itemCount * 36 + sepCount * 9 + 8, 50);
         int width  = 240;
 
         PointInt32 pos;
-        if (_config.PointerRelative)
+        if (_config.PointerRelative || true) // always use cursor position for now
         {
             GetCursorPos(out var cursor);
             int x = cursor.x + _config.HOffset;
             int y = cursor.y + _config.VOffset;
 
-            // Keep on screen
             var display = DisplayArea.GetFromPoint(new PointInt32(cursor.x, cursor.y), DisplayAreaFallback.Nearest);
             var work = display.WorkArea;
 
@@ -156,7 +159,6 @@ public sealed partial class MenuWindow : Window
         return AppWindow.GetFromWindowId(wndId);
     }
 
-    // Called by MenuItemControl when an item is clicked
     internal void OnItemClicked(ConfigItem item)
     {
         if (item.Type == ConfigItemType.TaskKill)
@@ -177,19 +179,11 @@ public sealed partial class MenuWindow : Window
     private void ShowTaskKillSubmenu()
     {
         var processes = CommandExecutor.GetRunningProcesses(_config);
-        var submenuItems = processes.Select(p => new ConfigItem
-        {
-            Label = $"{p.Name} (PID {p.Pid})",
-            Type  = ConfigItemType.Cmd,
-            Path  = p.Pid.ToString(),
-        }).ToList();
-
-        // Replace menu contents with process list + back button
         MenuItems.Clear();
         MenuItems.Add(new ConfigItem { Label = "← Back", Type = ConfigItemType.Category });
         MenuItems.Add(new ConfigItem { Type = ConfigItemType.Separator });
-        foreach (var pi in submenuItems)
-            MenuItems.Add(pi);
+        foreach (var p in processes)
+            MenuItems.Add(new ConfigItem { Label = $"{p.Name} (PID {p.Pid})", Type = ConfigItemType.Cmd, Path = p.Pid.ToString() });
     }
 
     private void ShowPowerMenuSubmenu()
