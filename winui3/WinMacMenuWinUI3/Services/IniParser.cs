@@ -54,8 +54,7 @@ public static class IniParser
         cfg.Vertical = GetString("Placement", "Vertical", "top", iniPath);
         cfg.VOffset = GetInt("Placement", "VOffset", 0, iniPath);
 
-        cfg.LargeMenuIcons = GetBool("Appearance", "LargeMenuIcons", false, iniPath);
-        cfg.Corners        = GetString("Appearance", "Corners", "rounded", iniPath);
+        cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
 
         cfg.SortBy = GetString("Sorting", "SortBy", "name", iniPath);
         cfg.SortDirection = GetString("Sorting", "SortDirection", "ascending", iniPath);

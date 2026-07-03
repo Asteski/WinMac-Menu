@@ -53,7 +53,6 @@ public class AppConfig
     public bool ShowIcons { get; set; } = true;        // icons on root menu items
     public bool ShowFolderIcons { get; set; } = true;  // icons inside folder submenus
     public bool ShowFileIcons { get; set; } = true;    // file icons inside folder submenus
-    public bool LargeMenuIcons { get; set; } = false;  // 32×32 on root (vs 16×16)
     public bool ShowFileExtensions { get; set; } = true;
     public bool ShowHidden { get; set; } = false;
     public int MaxItems { get; set; } = 40;
@@ -67,8 +66,6 @@ public class AppConfig
     public string Vertical { get; set; } = "top";
     public int VOffset { get; set; } = 0;
 
-    // [Appearance]
-    public bool LargeMenuIcons { get; set; } = false;
     public string Corners { get; set; } = "rounded";
 
     // [Sorting]
