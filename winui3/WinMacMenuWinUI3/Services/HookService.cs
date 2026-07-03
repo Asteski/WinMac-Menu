@@ -5,12 +5,6 @@ using WinMacMenuWinUI3.Models;
 
 namespace WinMacMenuWinUI3.Services;
 
-/// <summary>
-/// Installs WH_KEYBOARD_LL and WH_MOUSE_LL hooks on a dedicated background
-/// thread that runs its own Win32 message loop. This guarantees hook callbacks
-/// are serviced well within Windows' ~300 ms hook timeout, regardless of what
-/// the WinUI3 UI thread is doing.
-/// </summary>
 public sealed class HookService : IDisposable
 {
     // ── Win32 ─────────────────────────────────────────────────────────────
@@ -31,57 +25,55 @@ public sealed class HookService : IDisposable
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
     [DllImport("user32.dll")] private static extern uint   GetCurrentThreadId();
     [DllImport("user32.dll")] private static extern bool   PostThreadMessage(uint tid, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern int    GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool   TranslateMessage(ref MSG msg);
+    [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG msg);
 
-    [StructLayout(LayoutKind.Sequential)] private struct MSG   { public IntPtr hWnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; }
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT  { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MSG   { public IntPtr hWnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; }
     [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public uint cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
     [StructLayout(LayoutKind.Sequential)] private struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] private struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public UIntPtr extra; }
 
-    [DllImport("user32.dll")] private static extern int  GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
-    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG msg);
-    [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG msg);
-
-    private const int WH_KEYBOARD_LL = 13;
-    private const int WH_MOUSE_LL    = 14;
-    private const int WM_KEYDOWN     = 0x0100;
-    private const int WM_KEYUP       = 0x0101;
-    private const uint WM_QUIT       = 0x0012;
-    private const int WM_LBUTTONDOWN = 0x0201;
-    private const int WM_RBUTTONDOWN = 0x0204;
-    private const int WM_MBUTTONDOWN = 0x0207;
-    private const int VK_LWIN  = 0x5B;
-    private const int VK_RWIN  = 0x5C;
-    private const int VK_SHIFT = 0x10;
+    private const int  WH_KEYBOARD_LL = 13;
+    private const int  WH_MOUSE_LL    = 14;
+    private const int  WM_KEYDOWN     = 0x0100;
+    private const int  WM_KEYUP       = 0x0101;
+    private const uint WM_QUIT        = 0x0012;
+    private const int  WM_LBUTTONDOWN = 0x0201;
+    private const int  WM_RBUTTONDOWN = 0x0204;
+    private const int  WM_MBUTTONDOWN = 0x0207;
+    private const int  VK_LWIN        = 0x5B;
+    private const int  VK_RWIN        = 0x5C;
+    private const int  VK_SHIFT       = 0x10;
     private const uint MONITOR_DEFAULTTONEAREST = 2;
 
     // ── Fields ────────────────────────────────────────────────────────────
 
     private readonly AppConfig       _config;
     private readonly HashSet<string> _exclusions;
-    private readonly DispatcherQueue _uiDispatcher; // UI thread dispatcher for safe callbacks
-    private readonly HookProc        _kbProc, _mouseProc; // must stay rooted — no GC
+    private readonly DispatcherQueue _ui;
+    private readonly HookProc        _kbProc, _mouseProc; // must not be GC'd
     private IntPtr _kbHook, _mouseHook;
     private uint   _hookThreadId;
     private bool   _winKeyConsumed;
-    private RECT   _startBtnRect;
-    private int    _startBtnRefreshTick;
+    private RECT   _startRect;
+    private int    _startRectAge;
 
     public event Action? MenuRequested;
 
-    // ── Constructor / Dispose ─────────────────────────────────────────────
+    // ── Constructor ───────────────────────────────────────────────────────
 
-    public HookService(AppConfig config, DispatcherQueue uiDispatcher)
+    public HookService(AppConfig config, DispatcherQueue ui)
     {
-        _config        = config;
-        _uiDispatcher  = uiDispatcher;
-        _exclusions    = config.FullscreenExclusionList
+        _config = config;
+        _ui     = ui;
+        _exclusions = config.FullscreenExclusionList
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Delegate instances pinned as fields so the GC never collects them
-        _kbProc    = KeyboardProc;
+        _kbProc    = KeyboardProc;  // stored as fields — prevents GC from collecting the delegates
         _mouseProc = MouseProc;
 
         bool needsKb    = config.WindowsKey || config.ShiftWindowsKey;
@@ -90,43 +82,41 @@ public sealed class HookService : IDisposable
 
         if (!needsKb && !needsMouse) return;
 
-        RefreshStartButtonRect();
-
-        // Run hooks on a dedicated STA thread with its own Win32 message loop.
-        // This is the only reliable way to guarantee hook callbacks are serviced
-        // within the ~300 ms timeout imposed by Windows for LL hooks.
-        var ready = new ManualResetEventSlim(false);
+        // Spin up a dedicated STA thread with its own Win32 message pump.
+        // LL hooks require a message pump on the installing thread and must
+        // return within ~300 ms — a tight dedicated loop guarantees this
+        // regardless of UI thread load.
         var thread = new Thread(() =>
         {
-            _hookThreadId = GetCurrentThreadId();
-
-            // For LL hooks hMod must be NULL (they run in the installing thread's context)
-            if (needsKb)    _kbHook    = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc,    IntPtr.Zero, 0);
-            if (needsMouse) _mouseHook = SetWindowsHookEx(WH_MOUSE_LL,    _mouseProc, IntPtr.Zero, 0);
-
-            ready.Set(); // signal that hooks are installed
-
-            // Tight Win32 message loop — keeps the thread alive and services hooks
-            while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+            try
             {
-                TranslateMessage(ref msg);
-                DispatchMessage(ref msg);
-            }
+                _hookThreadId = GetCurrentThreadId();
+                _startRect    = ResolveStartButtonRect();
 
-            // WM_QUIT received — clean up
-            if (_kbHook    != IntPtr.Zero) UnhookWindowsHookEx(_kbHook);
-            if (_mouseHook != IntPtr.Zero) UnhookWindowsHookEx(_mouseHook);
+                // hMod = IntPtr.Zero is correct for in-process LL hooks
+                if (needsKb)    _kbHook    = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc,    IntPtr.Zero, 0);
+                if (needsMouse) _mouseHook = SetWindowsHookEx(WH_MOUSE_LL,    _mouseProc, IntPtr.Zero, 0);
+
+                // Run a bare Win32 message loop — exits only on WM_QUIT
+                while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+                {
+                    TranslateMessage(ref msg);
+                    DispatchMessage(ref msg);
+                }
+            }
+            finally
+            {
+                if (_kbHook    != IntPtr.Zero) UnhookWindowsHookEx(_kbHook);
+                if (_mouseHook != IntPtr.Zero) UnhookWindowsHookEx(_mouseHook);
+            }
         });
         thread.IsBackground = true;
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-
-        ready.Wait(); // don't return until hooks are actually installed
     }
 
     public void Dispose()
     {
-        // Send WM_QUIT to the hook thread's message loop to trigger cleanup
         if (_hookThreadId != 0)
             PostThreadMessage(_hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
     }
@@ -149,9 +139,8 @@ public sealed class HookService : IDisposable
                 if (trigger && !ShouldIgnore())
                 {
                     _winKeyConsumed = true;
-                    // Return immediately — dispatch the heavy work to the UI thread
-                    _uiDispatcher.TryEnqueue(() => MenuRequested?.Invoke());
-                    return (IntPtr)1;
+                    _ui.TryEnqueue(() => MenuRequested?.Invoke());
+                    return (IntPtr)1; // block — prevents system Start menu
                 }
             }
 
@@ -175,10 +164,14 @@ public sealed class HookService : IDisposable
             {
                 var ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
 
-                if (Environment.TickCount - _startBtnRefreshTick > 5000)
-                    RefreshStartButtonRect();
+                // Refresh start button rect every 5 s (handles taskbar restarts)
+                if (unchecked(Environment.TickCount - _startRectAge) > 5000)
+                {
+                    _startRect    = ResolveStartButtonRect();
+                    _startRectAge = Environment.TickCount;
+                }
 
-                if (PointInRect(ms.pt, _startBtnRect))
+                if (PointInRect(ms.pt, _startRect))
                 {
                     bool shift   = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
                     bool trigger = msg switch
@@ -191,7 +184,7 @@ public sealed class HookService : IDisposable
 
                     if (trigger && !ShouldIgnore())
                     {
-                        _uiDispatcher.TryEnqueue(() => MenuRequested?.Invoke());
+                        _ui.TryEnqueue(() => MenuRequested?.Invoke());
                         return (IntPtr)1;
                     }
                 }
@@ -202,18 +195,12 @@ public sealed class HookService : IDisposable
 
     // ── Start button rect ─────────────────────────────────────────────────
 
-    private void RefreshStartButtonRect()
-    {
-        _startBtnRefreshTick = Environment.TickCount;
-        _startBtnRect = ResolveStartButtonRect();
-    }
-
     private static RECT ResolveStartButtonRect()
     {
         var tray = FindWindow("Shell_TrayWnd", null);
         if (tray == IntPtr.Zero) return default;
 
-        // Windows 10 / ExplorerPatcher / StartAllBack: dedicated Start HWND
+        // Windows 10 / ExplorerPatcher / StartAllBack
         var startHwnd = FindWindowEx(tray, IntPtr.Zero, "Start", null);
         if (startHwnd != IntPtr.Zero)
         {
@@ -221,28 +208,26 @@ public sealed class HookService : IDisposable
             if (r.right - r.left > 4) return r;
         }
 
-        GetWindowRect(tray, out var tray_r);
-        int h = tray_r.bottom - tray_r.top;
-        int w = tray_r.right  - tray_r.left;
+        GetWindowRect(tray, out var tr);
+        int h = tr.bottom - tr.top;
+        int w = tr.right  - tr.left;
 
-        // Probe left-edge (Win10 layout)
-        var hwndL = WindowFromPoint(new POINT { x = tray_r.left + h / 2, y = tray_r.top + h / 2 });
-        if (hwndL != tray && hwndL != IntPtr.Zero)
+        // Windows 11 — probe left edge first, then centre
+        foreach (var probe in new[] {
+            new POINT { x = tr.left + h / 2,     y = tr.top + h / 2 },
+            new POINT { x = tr.left + w / 2,     y = tr.top + h / 2 },
+        })
         {
-            GetWindowRect(hwndL, out var lr);
-            if (lr.right - lr.left > 4) return lr;
-        }
-
-        // Probe centre (Win11 centred taskbar)
-        var hwndC = WindowFromPoint(new POINT { x = tray_r.left + w / 2, y = tray_r.top + h / 2 });
-        if (hwndC != tray && hwndC != IntPtr.Zero)
-        {
-            GetWindowRect(hwndC, out var cr);
-            if (cr.right - cr.left > 4) return cr;
+            var hw = WindowFromPoint(probe);
+            if (hw != IntPtr.Zero && hw != tray)
+            {
+                GetWindowRect(hw, out var r);
+                if (r.right - r.left > 4) return r;
+            }
         }
 
         // Fallback: leftmost square of taskbar
-        return new RECT { left = tray_r.left, top = tray_r.top, right = tray_r.left + h, bottom = tray_r.bottom };
+        return new RECT { left = tr.left, top = tr.top, right = tr.left + h, bottom = tr.bottom };
     }
 
     private static bool PointInRect(POINT pt, RECT r)
@@ -271,7 +256,7 @@ public sealed class HookService : IDisposable
         GetMonitorInfo(hMon, ref mi);
         GetWindowRect(fg, out var wr);
 
-        return wr.left  <= mi.rcMonitor.left && wr.top    <= mi.rcMonitor.top &&
+        return wr.left <= mi.rcMonitor.left && wr.top    <= mi.rcMonitor.top &&
                wr.right >= mi.rcMonitor.right && wr.bottom >= mi.rcMonitor.bottom;
     }
 }

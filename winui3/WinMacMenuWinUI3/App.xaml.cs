@@ -27,12 +27,24 @@ public partial class App : Application
             _host = new HostWindow();
             _host.Activate();
 
-            _tray = new TrayService(_host.Hwnd, config);
-            _tray.ShowMenuRequested += ToggleMenu;
-            _tray.ExitRequested     += Exit;
+            try
+            {
+                _tray = new TrayService(_host.Hwnd, config);
+                _tray.ShowMenuRequested += ToggleMenu;
+                _tray.ExitRequested     += Exit;
+            }
+            catch { /* tray icon unavailable — app still runs */ }
 
-            _hooks = new HookService(config, DispatcherQueue.GetForCurrentThread());
-            _hooks.MenuRequested += ToggleMenu;
+            try
+            {
+                var dq = DispatcherQueue.GetForCurrentThread();
+                if (dq != null)
+                {
+                    _hooks = new HookService(config, dq);
+                    _hooks.MenuRequested += ToggleMenu;
+                }
+            }
+            catch { /* hooks unavailable — use tray icon to open menu */ }
         }
 
         ShowMenu(); // always show on first launch
