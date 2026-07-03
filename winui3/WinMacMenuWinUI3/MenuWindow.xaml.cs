@@ -98,7 +98,7 @@ public sealed partial class MenuWindow : Window
                     var pi  = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
                     var pid = p.Pid;
                     pi.Click += (_, _) => CommandExecutor.KillProcess(pid);
-                    if (_config.ShowFileIcons)
+                    if (_config.TaskKillShowIcons)
                     {
                         try
                         {

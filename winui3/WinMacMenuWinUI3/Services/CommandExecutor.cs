@@ -150,38 +150,127 @@ public static class CommandExecutor
         return result;
     }
 
+    // ── Win32 for window enumeration ──────────────────────────────────────
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    private const uint GA_ROOT = 2;
+    private const int DWMWA_CLOAKED = 14;
+
+    // Background/hidden Windows system process names — excluded when TaskKillIgnoreSystem=true
+    private static readonly HashSet<string> SystemProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "system", "registry", "smss", "csrss", "wininit", "services", "lsass", "lsaiso",
+        "svchost", "dwm", "conhost", "winlogon", "fontdrvhost", "sihost", "taskhostw",
+        "searchindexer", "searchhost", "spoolsv", "audiodg", "ctfmon", "dllhost",
+        "securityhealthservice", "msmpeng", "nisSrv", "sgrmbroker", "wudfhost",
+        "wmiprvse", "runtimebroker", "backgroundtaskhost", "applicationframehost",
+        "shellexperiencehost", "startmenuexperiencehost", "textinputhost",
+        "systemsettings", "lockapp", "logonui", "userinit",
+    };
+
     public static List<ProcessEntry> GetRunningProcesses(AppConfig cfg)
     {
-        var result = new List<ProcessEntry>();
         var excludes = cfg.TaskKillExcludes
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(e => e.ToLowerInvariant())
+            .Select(e => e.Trim().ToLowerInvariant())
             .ToHashSet();
 
-        var systemProcesses = new HashSet<string> { "system", "registry", "smss", "csrss", "wininit",
-            "services", "lsass", "svchost", "dwm", "conhost", "winlogon", "fontdrvhost", "sihost" };
+        return cfg.TaskKillListWindows
+            ? EnumerateWindows(cfg, excludes)
+            : EnumerateProcessesWithWindows(cfg, excludes);
+    }
 
-        try
+    // TaskKillListWindows=false (default): one entry per process that owns a visible window
+    private static List<ProcessEntry> EnumerateProcessesWithWindows(AppConfig cfg, HashSet<string> excludes)
+    {
+        var seen    = new HashSet<int>();   // deduplicate by PID
+        var result  = new List<ProcessEntry>();
+
+        EnumWindows((hWnd, _) =>
         {
-            var processes = Process.GetProcesses()
-                .Where(p =>
-                {
-                    var name = p.ProcessName.ToLowerInvariant();
-                    if (excludes.Contains(name)) return false;
-                    if (cfg.TaskKillIgnoreSystem && systemProcesses.Contains(name)) return false;
-                    if (p.Id == Environment.ProcessId) return false;
-                    return true;
-                })
-                .OrderBy(p => p.ProcessName, StringComparer.OrdinalIgnoreCase)
-                .Take(cfg.TaskKillMax);
+            if (result.Count >= cfg.TaskKillMax) return false;
+            if (!IsRealUserWindow(hWnd)) return true;
 
-            foreach (var p in processes)
+            GetWindowThreadProcessId(hWnd, out var pid);
+            if ((int)pid == Environment.ProcessId) return true;
+            if (seen.Contains((int)pid)) return true;
+            seen.Add((int)pid);
+
+            try
             {
-                result.Add(new ProcessEntry { Name = p.ProcessName, Pid = p.Id });
+                using var proc = Process.GetProcessById((int)pid);
+                var name = proc.ProcessName;
+                if (cfg.TaskKillIgnoreSystem && SystemProcessNames.Contains(name)) return true;
+                if (excludes.Contains(name.ToLowerInvariant())) return true;
+
+                result.Add(new ProcessEntry { Name = name, Pid = (int)pid });
             }
-        }
-        catch { }
+            catch { }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return result.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // TaskKillListWindows=true: one entry per visible window (by title), may repeat same process
+    private static List<ProcessEntry> EnumerateWindows(AppConfig cfg, HashSet<string> excludes)
+    {
+        var result = new List<ProcessEntry>();
+
+        EnumWindows((hWnd, _) =>
+        {
+            if (result.Count >= cfg.TaskKillMax) return false;
+            if (!IsRealUserWindow(hWnd)) return true;
+
+            var len = GetWindowTextLength(hWnd);
+            if (len == 0) return true;
+            var sb = new System.Text.StringBuilder(len + 1);
+            GetWindowText(hWnd, sb, sb.Capacity);
+            var title = sb.ToString();
+
+            GetWindowThreadProcessId(hWnd, out var pid);
+            if ((int)pid == Environment.ProcessId) return true;
+
+            try
+            {
+                using var proc = Process.GetProcessById((int)pid);
+                var name = proc.ProcessName;
+                if (cfg.TaskKillIgnoreSystem && SystemProcessNames.Contains(name)) return true;
+                if (excludes.Contains(name.ToLowerInvariant())) return true;
+
+                result.Add(new ProcessEntry { Name = title, Pid = (int)pid });
+            }
+            catch { }
+
+            return true;
+        }, IntPtr.Zero);
+
         return result;
+    }
+
+    // A "real" user window: visible, top-level, not cloaked, not a tool/message window
+    private static bool IsRealUserWindow(IntPtr hWnd)
+    {
+        if (!IsWindowVisible(hWnd)) return false;
+
+        // Must be a root window (no owner that is also a root)
+        if (GetAncestor(hWnd, GA_ROOT) != hWnd) return false;
+
+        // Skip cloaked windows (e.g. UWP apps on other virtual desktops)
+        DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out var cloaked, sizeof(int));
+        if (cloaked != 0) return false;
+
+        return true;
     }
 
     public static void KillProcess(int pid)
