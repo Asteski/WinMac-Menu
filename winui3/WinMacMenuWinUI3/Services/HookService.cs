@@ -42,8 +42,11 @@ public sealed class HookService : IDisposable
     private const int  WM_KEYUP       = 0x0101;
     private const uint WM_QUIT        = 0x0012;
     private const int  WM_LBUTTONDOWN = 0x0201;
+    private const int  WM_LBUTTONUP   = 0x0202;
     private const int  WM_RBUTTONDOWN = 0x0204;
+    private const int  WM_RBUTTONUP   = 0x0205;
     private const int  WM_MBUTTONDOWN = 0x0207;
+    private const int  WM_MBUTTONUP   = 0x0208;
     private const int  VK_LWIN        = 0x5B;
     private const int  VK_RWIN        = 0x5C;
     private const int  VK_SHIFT       = 0x10;
@@ -58,6 +61,7 @@ public sealed class HookService : IDisposable
     private IntPtr _kbHook, _mouseHook;
     private uint   _hookThreadId;
     private bool   _winKeyConsumed;
+    private bool   _leftBlocked, _rightBlocked, _middleBlocked;
     private RECT   _startRect;
     private int    _startRectAge;
 
@@ -160,11 +164,18 @@ public sealed class HookService : IDisposable
         if (nCode >= 0)
         {
             int msg = (int)wParam;
+
+            // Block the UP event that matches a DOWN we already intercepted,
+            // so the Start button never receives the full click and can't open
+            // the Start menu or steal focus from our flyout.
+            if (msg == WM_LBUTTONUP   && _leftBlocked)   { _leftBlocked   = false; return (IntPtr)1; }
+            if (msg == WM_RBUTTONUP   && _rightBlocked)  { _rightBlocked  = false; return (IntPtr)1; }
+            if (msg == WM_MBUTTONUP   && _middleBlocked) { _middleBlocked = false; return (IntPtr)1; }
+
             if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN)
             {
                 var ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
 
-                // Refresh start button rect every 5 s (handles taskbar restarts)
                 if (unchecked(Environment.TickCount - _startRectAge) > 5000)
                 {
                     _startRect    = ResolveStartButtonRect();
@@ -184,6 +195,11 @@ public sealed class HookService : IDisposable
 
                     if (trigger && !ShouldIgnore())
                     {
+                        // Track which button was blocked so we can suppress its UP too
+                        if (msg == WM_LBUTTONDOWN) _leftBlocked   = true;
+                        if (msg == WM_RBUTTONDOWN) _rightBlocked  = true;
+                        if (msg == WM_MBUTTONDOWN) _middleBlocked = true;
+
                         _ui.TryEnqueue(() => MenuRequested?.Invoke());
                         return (IntPtr)1;
                     }
