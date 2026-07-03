@@ -378,12 +378,52 @@ public sealed partial class MenuWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        // 1×1 px window at the cursor — effectively invisible, just an anchor for the flyout
-        GetCursorPos(out var cursor);
-        appWindow.MoveAndResize(new RectInt32(cursor.x, cursor.y, 1, 1));
+        // Position the 1×1 anchor window — at cursor or at configured fixed position
+        var anchorPt = _config.PointerRelative
+            ? GetCursorAnchor()
+            : GetFixedAnchor();
+
+        appWindow.MoveAndResize(new RectInt32(anchorPt.X, anchorPt.Y, 1, 1));
 
         // Bring to front so the flyout receives input
         SetForegroundWindow(hwnd);
+    }
+
+    // Anchor = cursor position (pointer-relative mode)
+    private PointInt32 GetCursorAnchor()
+    {
+        GetCursorPos(out var pt);
+        return new PointInt32(pt.x, pt.y);
+    }
+
+    // Anchor = fixed point derived from Horizontal/Vertical alignment + offsets
+    private PointInt32 GetFixedAnchor()
+    {
+        // Use the display that contains the primary taskbar
+        var display = DisplayArea.Primary;
+        var work    = display.WorkArea;
+
+        // Horizontal: left/center/right edge of work area + HOffset
+        int x = _config.Horizontal.ToLowerInvariant() switch
+        {
+            "right"  => work.X + work.Width  + _config.HOffset,
+            "center" => work.X + work.Width  / 2 + _config.HOffset,
+            _        => work.X + _config.HOffset,           // "left" (default)
+        };
+
+        // Vertical: top/center/bottom edge of work area + VOffset
+        int y = _config.Vertical.ToLowerInvariant() switch
+        {
+            "bottom" => work.Y + work.Height + _config.VOffset,
+            "center" => work.Y + work.Height / 2 + _config.VOffset,
+            _        => work.Y + _config.VOffset,           // "top" (default)
+        };
+
+        // Clamp to work area so the anchor is always on-screen
+        x = Math.Clamp(x, work.X, work.X + work.Width  - 1);
+        y = Math.Clamp(y, work.Y, work.Y + work.Height - 1);
+
+        return new PointInt32(x, y);
     }
 
     private AppWindow GetAppWindowForCurrentWindow()
