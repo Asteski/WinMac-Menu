@@ -63,7 +63,10 @@ public sealed partial class MenuWindow : Window
                             bool inSubmenu = false)
     {
         foreach (var item in items)
-            target.Add(CreateFlyoutItem(item, inSubmenu));
+        {
+            try { target.Add(CreateFlyoutItem(item, inSubmenu)); }
+            catch { /* skip broken items so the rest of the menu still shows */ }
+        }
     }
 
     private MenuFlyoutItemBase CreateFlyoutItem(ConfigItem item, bool inSubmenu = false)
@@ -72,69 +75,164 @@ public sealed partial class MenuWindow : Window
             return new MenuFlyoutSeparator();
 
         if (item.IsCategory)
-        {
             return new MenuFlyoutItem { Text = item.Label, IsEnabled = false };
-        }
 
-        // ── Submenus ──────────────────────────────────────────────────────
-
-        if (item.Type is ConfigItemType.PowerMenu)
+        switch (item.Type)
         {
-            var sub = new MenuFlyoutSubItem { Text = item.Label };
-            ApplyIcon(sub, item, inSubmenu);
-            foreach (var pi in BuildPowerItems()) sub.Items.Add(pi);
-            return sub;
-        }
-
-        if (item.Type is ConfigItemType.TaskKill)
-        {
-            var sub = new MenuFlyoutSubItem { Text = item.Label };
-            ApplyIcon(sub, item, inSubmenu);
-            foreach (var p in CommandExecutor.GetRunningProcesses(_config))
+            // ── Power menu ───────────────────────────────────────────────
+            case ConfigItemType.PowerMenu:
             {
-                var pi  = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
-                var pid = p.Pid;
-                pi.Click += (_, _) => CommandExecutor.KillProcess(pid);
-                // icons for processes: respect ShowFileIcons
-                if (_config.ShowFileIcons)
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                foreach (var pi in BuildPowerItems()) sub.Items.Add(pi);
+                return sub;
+            }
+
+            // ── Task kill ────────────────────────────────────────────────
+            case ConfigItemType.TaskKill:
+            {
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                foreach (var p in CommandExecutor.GetRunningProcesses(_config))
                 {
-                    try
+                    var pi  = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
+                    var pid = p.Pid;
+                    pi.Click += (_, _) => CommandExecutor.KillProcess(pid);
+                    if (_config.ShowFileIcons)
                     {
-                        var exePath = System.Diagnostics.Process.GetProcessById(pid).MainModule?.FileName;
-                        if (exePath != null)
-                            pi.Icon = IconLoader.Load(exePath);
+                        try
+                        {
+                            // MainModule throws for system/elevated processes — catch per-item
+                            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                            var exePath = proc.MainModule?.FileName;
+                            if (exePath != null) pi.Icon = IconLoader.Load(exePath);
+                        }
+                        catch { }
                     }
-                    catch { }
+                    sub.Items.Add(pi);
                 }
-                sub.Items.Add(pi);
+                return sub;
             }
-            return sub;
-        }
 
-        if (item.Type is ConfigItemType.FolderSubmenu ||
-            (item.Type is ConfigItemType.Folder && item.Submenu))
-        {
-            var sub = new MenuFlyoutSubItem { Text = item.Label };
-            ApplyIcon(sub, item, inSubmenu);
-            foreach (var entry in CommandExecutor.GetFolderContents(item.Path, _config))
+            // ── Folder submenu ───────────────────────────────────────────
+            case ConfigItemType.FolderSubmenu:
+            case ConfigItemType.Folder when item.Submenu:
             {
-                var e  = entry;
-                var fi = new MenuFlyoutItem { Text = e.Name };
-                fi.Click += (_, _) => CommandExecutor.ShellOpen(e.FullPath);
-                if (e.IsDirectory ? _config.ShowFolderIcons : _config.ShowFileIcons)
-                    fi.Icon = IconLoader.Load(e.FullPath);
-                sub.Items.Add(fi);
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                AddFolderEntries(sub.Items, item.Path);
+                return sub;
             }
-            return sub;
+
+            // ── Recent items ─────────────────────────────────────────────
+            case ConfigItemType.Recent:
+            case ConfigItemType.RecentSubmenu:
+            {
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                AddRecentItems(sub.Items);
+                return sub;
+            }
+
+            // ── This PC (drives + shell locations) ───────────────────────
+            case ConfigItemType.ThisPC:
+            {
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                AddThisPCItems(sub.Items);
+                return sub;
+            }
+
+            // ── Home folder ──────────────────────────────────────────────
+            case ConfigItemType.Home:
+            {
+                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                ApplyIcon(sub, item, inSubmenu);
+                var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                AddFolderEntries(sub.Items, homePath);
+                return sub;
+            }
+
+            // ── Regular item ─────────────────────────────────────────────
+            default:
+            {
+                var fi = new MenuFlyoutItem { Text = item.Label };
+                ApplyIcon(fi, item, inSubmenu);
+                var captured = item;
+                fi.Click += (_, _) => { this.Close(); CommandExecutor.Execute(captured); };
+                return fi;
+            }
         }
+    }
 
-        // ── Regular item ─────────────────────────────────────────────────
+    private void AddFolderEntries(IList<MenuFlyoutItemBase> target, string folderPath)
+    {
+        foreach (var entry in CommandExecutor.GetFolderContents(folderPath, _config))
+        {
+            var e  = entry;
+            var fi = new MenuFlyoutItem { Text = e.Name };
+            fi.Click += (_, _) => CommandExecutor.ShellOpen(e.FullPath);
+            if (e.IsDirectory ? _config.ShowFolderIcons : _config.ShowFileIcons)
+                fi.Icon = IconLoader.Load(e.FullPath);
+            target.Add(fi);
+        }
+    }
 
-        var flyoutItem = new MenuFlyoutItem { Text = item.Label };
-        ApplyIcon(flyoutItem, item, inSubmenu);
-        var captured = item;
-        flyoutItem.Click += (_, _) => { this.Close(); CommandExecutor.Execute(captured); };
-        return flyoutItem;
+    private void AddRecentItems(IList<MenuFlyoutItemBase> target)
+    {
+        try
+        {
+            var recentDir = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
+            var files = Directory.GetFiles(recentDir, "*.lnk")
+                .OrderByDescending(File.GetLastWriteTime)
+                .Take(_config.RecentMax);
+
+            foreach (var lnk in files)
+            {
+                // Display name: strip .lnk extension
+                var name = _config.RecentShowExtensions
+                    ? Path.GetFileNameWithoutExtension(lnk)
+                    : Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(lnk));
+
+                var fi = new MenuFlyoutItem { Text = name };
+                var path = lnk;
+                fi.Click += (_, _) => CommandExecutor.ShellOpen(path);
+
+                if (_config.RecentShowIcons)
+                    fi.Icon = IconLoader.Load(lnk);
+
+                target.Add(fi);
+            }
+
+            if (_config.RecentShowCleanItems && target.Count > 0)
+            {
+                target.Add(new MenuFlyoutSeparator());
+                var clear = new MenuFlyoutItem { Text = "Clear recent items" };
+                clear.Click += (_, _) =>
+                {
+                    foreach (var f in Directory.GetFiles(recentDir))
+                        try { File.Delete(f); } catch { }
+                };
+                target.Add(clear);
+            }
+        }
+        catch { }
+    }
+
+    private void AddThisPCItems(IList<MenuFlyoutItemBase> target)
+    {
+        foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
+        {
+            var label = string.IsNullOrEmpty(drive.VolumeLabel)
+                ? drive.Name
+                : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
+
+            var fi = new MenuFlyoutItem { Text = label };
+            var root = drive.RootDirectory.FullName;
+            fi.Click += (_, _) => CommandExecutor.ShellOpen(root);
+            if (_config.ShowFolderIcons) fi.Icon = IconLoader.Load(root);
+            target.Add(fi);
+        }
     }
 
     /// <summary>
