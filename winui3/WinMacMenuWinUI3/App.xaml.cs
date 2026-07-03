@@ -10,6 +10,7 @@ public partial class App : Application
     private HostWindow?  _host;
     private TrayService? _tray;
     private HookService? _hooks;
+    private MenuWindow?  _activeMenu;   // non-null while the flyout is visible
     private string       _iniPath = "";
 
     public App() => InitializeComponent();
@@ -23,27 +24,42 @@ public partial class App : Application
 
         if (config.RunInBackground)
         {
-            // Keep a hidden window alive so WinUI3 doesn't auto-exit
             _host = new HostWindow();
             _host.Activate();
 
             _tray = new TrayService(_host.Hwnd, config);
-            _tray.ShowMenuRequested += ShowMenu;
+            _tray.ShowMenuRequested += ToggleMenu;
             _tray.ExitRequested     += Exit;
 
             _hooks = new HookService(config, DispatcherQueue.GetForCurrentThread());
-            _hooks.MenuRequested += ShowMenu;
+            _hooks.MenuRequested += ToggleMenu;
         }
 
-        // Always show the menu on first launch (matches original app behaviour)
+        ShowMenu(); // always show on first launch
+    }
+
+    // Shows the menu, or closes it if already open (toggle behaviour)
+    private void ToggleMenu()
+    {
+        if (_activeMenu != null)
+        {
+            _activeMenu.Close();
+            // _activeMenu is cleared by the Closed handler below
+            return;
+        }
         ShowMenu();
     }
 
     private void ShowMenu()
     {
-        // Reload config on every open so INI changes are picked up live
-        var config = IniParser.Load(_iniPath);
-        var window = new MenuWindow(config, _iniPath);
+        if (_activeMenu != null) return; // already open
+
+        var config  = IniParser.Load(_iniPath); // reload INI each time
+        var window  = new MenuWindow(config, _iniPath);
+
+        window.Closed += (_, _) => _activeMenu = null;
+
+        _activeMenu = window;
         window.Activate();
     }
 
@@ -51,6 +67,8 @@ public partial class App : Application
     {
         _hooks?.Dispose();
         _tray?.Dispose();
+        _activeMenu?.Close();
         _host?.Close();
+        Environment.Exit(0); // ensure process actually terminates
     }
 }
