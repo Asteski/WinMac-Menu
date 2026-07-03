@@ -57,47 +57,55 @@ public sealed partial class MenuWindow : Window
         flyout.ShowAt(RootGrid, new Point(0, 0));
     }
 
-    private void BuildItems(IList<MenuFlyoutItemBase> target, IEnumerable<ConfigItem> items)
+    // inSubmenu = true  →  respect ShowFolderIcons / ShowFileIcons
+    // inSubmenu = false →  respect ShowIcons (root menu)
+    private void BuildItems(IList<MenuFlyoutItemBase> target, IEnumerable<ConfigItem> items,
+                            bool inSubmenu = false)
     {
         foreach (var item in items)
-        {
-            target.Add(CreateFlyoutItem(item));
-        }
+            target.Add(CreateFlyoutItem(item, inSubmenu));
     }
 
-    private MenuFlyoutItemBase CreateFlyoutItem(ConfigItem item)
+    private MenuFlyoutItemBase CreateFlyoutItem(ConfigItem item, bool inSubmenu = false)
     {
         if (item.IsSeparator)
             return new MenuFlyoutSeparator();
 
         if (item.IsCategory)
         {
-            // WinUI3 doesn't have a native flyout group header, so use a
-            // disabled item styled as a label
-            return new MenuFlyoutItem
-            {
-                Text      = item.Label,
-                IsEnabled = false,
-            };
+            return new MenuFlyoutItem { Text = item.Label, IsEnabled = false };
         }
 
-        // Items that expand into a submenu
+        // ── Submenus ──────────────────────────────────────────────────────
+
         if (item.Type is ConfigItemType.PowerMenu)
         {
             var sub = new MenuFlyoutSubItem { Text = item.Label };
-            var powerItems = BuildPowerItems();
-            foreach (var pi in powerItems) sub.Items.Add(pi);
+            ApplyIcon(sub, item, inSubmenu);
+            foreach (var pi in BuildPowerItems()) sub.Items.Add(pi);
             return sub;
         }
 
         if (item.Type is ConfigItemType.TaskKill)
         {
             var sub = new MenuFlyoutSubItem { Text = item.Label };
+            ApplyIcon(sub, item, inSubmenu);
             foreach (var p in CommandExecutor.GetRunningProcesses(_config))
             {
-                var pi = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
+                var pi  = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
                 var pid = p.Pid;
                 pi.Click += (_, _) => CommandExecutor.KillProcess(pid);
+                // icons for processes: respect ShowFileIcons
+                if (_config.ShowFileIcons)
+                {
+                    try
+                    {
+                        var exePath = System.Diagnostics.Process.GetProcessById(pid).MainModule?.FileName;
+                        if (exePath != null)
+                            pi.Icon = IconLoader.Load(exePath);
+                    }
+                    catch { }
+                }
                 sub.Items.Add(pi);
             }
             return sub;
@@ -107,43 +115,73 @@ public sealed partial class MenuWindow : Window
             (item.Type is ConfigItemType.Folder && item.Submenu))
         {
             var sub = new MenuFlyoutSubItem { Text = item.Label };
+            ApplyIcon(sub, item, inSubmenu);
             foreach (var entry in CommandExecutor.GetFolderContents(item.Path, _config))
             {
-                var e = entry;
+                var e  = entry;
                 var fi = new MenuFlyoutItem { Text = e.Name };
                 fi.Click += (_, _) => CommandExecutor.ShellOpen(e.FullPath);
+                if (e.IsDirectory ? _config.ShowFolderIcons : _config.ShowFileIcons)
+                    fi.Icon = IconLoader.Load(e.FullPath);
                 sub.Items.Add(fi);
             }
             return sub;
         }
 
-        // Regular clickable item
+        // ── Regular item ─────────────────────────────────────────────────
+
         var flyoutItem = new MenuFlyoutItem { Text = item.Label };
-        var captured   = item;
-        flyoutItem.Click += (_, _) =>
-        {
-            this.Close();
-            CommandExecutor.Execute(captured);
-        };
+        ApplyIcon(flyoutItem, item, inSubmenu);
+        var captured = item;
+        flyoutItem.Click += (_, _) => { this.Close(); CommandExecutor.Execute(captured); };
         return flyoutItem;
+    }
+
+    /// <summary>
+    /// Resolves the best icon for this item and applies it, honouring the
+    /// ShowIcons (root) / ShowFolderIcons+ShowFileIcons (submenu) settings.
+    /// Priority: per-item path (theme-aware) → item generic → config default.
+    /// </summary>
+    private void ApplyIcon(MenuFlyoutItemBase target, ConfigItem item, bool inSubmenu)
+    {
+        bool showIcons = inSubmenu
+            ? (_config.ShowFolderIcons || _config.ShowFileIcons)
+            : _config.ShowIcons;
+
+        if (!showIcons) return;
+
+        // Pick theme-aware path if available, fall back to generic then default
+        var isDark   = Application.Current.RequestedTheme == ApplicationTheme.Dark;
+        var iconPath = isDark && !string.IsNullOrEmpty(item.IconPathDark)  ? item.IconPathDark
+                     : !isDark && !string.IsNullOrEmpty(item.IconPathLight) ? item.IconPathLight
+                     : !string.IsNullOrEmpty(item.IconPath)                 ? item.IconPath
+                     : _config.DefaultIconPath;
+
+        if (string.IsNullOrEmpty(iconPath)) return;
+
+        var icon = IconLoader.Load(iconPath);
+        if (icon == null) return;
+
+        if (target is MenuFlyoutItem fi)        fi.Icon  = icon;
+        else if (target is MenuFlyoutSubItem si) si.Icon  = icon;
     }
 
     private List<MenuFlyoutItemBase> BuildPowerItems()
     {
         var list = new List<MenuFlyoutItemBase>();
-        void Add(string label, ConfigItem item)
+        void Add(string label, ConfigItemType type)
         {
+            var ci = new ConfigItem { Label = label, Type = type };
             var fi = new MenuFlyoutItem { Text = label };
-            fi.Click += (_, _) => { this.Close(); CommandExecutor.Execute(item); };
+            fi.Click += (_, _) => { this.Close(); CommandExecutor.Execute(ci); };
             list.Add(fi);
         }
-
-        if (_config.PowerSleep)     Add("Sleep",     new ConfigItem { Type = ConfigItemType.PowerSleep });
-        if (_config.PowerHibernate) Add("Hibernate", new ConfigItem { Type = ConfigItemType.PowerHibernate });
-        if (_config.PowerShutdown)  Add("Shut Down", new ConfigItem { Type = ConfigItemType.PowerShutdown });
-        if (_config.PowerRestart)   Add("Restart",   new ConfigItem { Type = ConfigItemType.PowerRestart });
-        if (_config.PowerLock)      Add("Lock",      new ConfigItem { Type = ConfigItemType.PowerLock });
-        if (_config.PowerLogoff)    Add("Sign Out",  new ConfigItem { Type = ConfigItemType.PowerLogoff });
+        if (_config.PowerSleep)     Add("Sleep",     ConfigItemType.PowerSleep);
+        if (_config.PowerHibernate) Add("Hibernate", ConfigItemType.PowerHibernate);
+        if (_config.PowerShutdown)  Add("Shut Down", ConfigItemType.PowerShutdown);
+        if (_config.PowerRestart)   Add("Restart",   ConfigItemType.PowerRestart);
+        if (_config.PowerLock)      Add("Lock",      ConfigItemType.PowerLock);
+        if (_config.PowerLogoff)    Add("Sign Out",  ConfigItemType.PowerLogoff);
         return list;
     }
 

@@ -50,7 +50,10 @@ public class AppConfig
     public bool RunInBackground { get; set; } = true;
     public bool ShowOnLaunch { get; set; } = false;
     public bool ShowTrayIcon { get; set; } = true;
-    public bool ShowIcons { get; set; } = true;
+    public bool ShowIcons { get; set; } = true;        // icons on root menu items
+    public bool ShowFolderIcons { get; set; } = true;  // icons inside folder submenus
+    public bool ShowFileIcons { get; set; } = true;    // file icons inside folder submenus
+    public bool LargeMenuIcons { get; set; } = false;  // 32×32 on root (vs 16×16)
     public bool ShowFileExtensions { get; set; } = true;
     public bool ShowHidden { get; set; } = false;
     public int MaxItems { get; set; } = 40;

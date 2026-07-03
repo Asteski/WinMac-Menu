@@ -40,6 +40,8 @@ public static class IniParser
         cfg.ShowOnLaunch = GetBool("General", "ShowOnLaunch", false, iniPath);
         cfg.ShowTrayIcon = GetBool("General", "ShowTrayIcon", true, iniPath);
         cfg.ShowIcons = GetBool("General", "ShowIcons", true, iniPath);
+        cfg.ShowFolderIcons = GetBool("General", "ShowFolderIcons", true, iniPath);
+        cfg.ShowFileIcons = GetBool("General", "ShowFileIcons", true, iniPath);
         cfg.ShowFileExtensions = GetBool("General", "ShowFileExtensions", true, iniPath);
         cfg.ShowHidden = GetBool("General", "ShowHidden", false, iniPath);
         cfg.MaxItems = GetInt("General", "MaxItems", 40, iniPath);
@@ -53,7 +55,7 @@ public static class IniParser
         cfg.VOffset = GetInt("Placement", "VOffset", 0, iniPath);
 
         cfg.LargeMenuIcons = GetBool("Appearance", "LargeMenuIcons", false, iniPath);
-        cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
+        cfg.Corners        = GetString("Appearance", "Corners", "rounded", iniPath);
 
         cfg.SortBy = GetString("Sorting", "SortBy", "name", iniPath);
         cfg.SortDirection = GetString("Sorting", "SortDirection", "ascending", iniPath);
