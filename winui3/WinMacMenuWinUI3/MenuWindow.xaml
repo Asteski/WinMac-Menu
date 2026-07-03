@@ -6,7 +6,8 @@
     xmlns:vm="using:WinMacMenuWinUI3.ViewModels"
     xmlns:models="using:WinMacMenuWinUI3.Models">
 
-    <Window.Resources>
+    <Grid Background="Transparent">
+    <Grid.Resources>
 
         <!-- ── Button style: no chrome, rounded hover highlight ── -->
         <Style x:Key="MenuRowButton" TargetType="Button">
@@ -106,9 +107,8 @@
             CategoryTemplate="{StaticResource CategoryTemplate}"
             NormalTemplate="{StaticResource NormalTemplate}"/>
 
-    </Window.Resources>
+    </Grid.Resources>
 
-    <Grid Background="Transparent">
         <Border x:Name="MenuCard"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"
