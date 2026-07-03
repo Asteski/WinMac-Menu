@@ -193,6 +193,20 @@ public sealed partial class MenuWindow : Window
         }
     }
 
+    private static string? ResolveLnkTarget(string lnkPath)
+    {
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return null;
+            dynamic shell    = Activator.CreateInstance(shellType)!;
+            dynamic shortcut = shell.CreateShortcut(lnkPath);
+            string  target   = shortcut.TargetPath;
+            return string.IsNullOrEmpty(target) ? null : target;
+        }
+        catch { return null; }
+    }
+
     private void AddRecentItems(IList<MenuFlyoutItemBase> target)
     {
         try
@@ -204,25 +218,30 @@ public sealed partial class MenuWindow : Window
 
             foreach (var lnk in lnkFiles)
             {
+                var targetPath = ResolveLnkTarget(lnk);
+
                 string displayName;
                 if (_config.RecentLabel == "fullpath")
                 {
-                    // Show full path — strip .lnk, keep rest as-is
-                    displayName = Path.GetFileNameWithoutExtension(lnk);
+                    // Show resolved target path; fall back to .lnk name if unresolvable
+                    displayName = targetPath ?? Path.GetFileNameWithoutExtension(lnk);
                 }
                 else
                 {
-                    // filename only — strip .lnk then strip remaining extension if needed
-                    var nameNoLnk = Path.GetFileNameWithoutExtension(lnk);
+                    // filename only from resolved target, or from .lnk name as fallback
+                    var baseName = targetPath != null
+                        ? Path.GetFileName(targetPath)
+                        : Path.GetFileNameWithoutExtension(lnk);
+
                     displayName = _config.RecentShowExtensions
-                        ? nameNoLnk
-                        : Path.GetFileNameWithoutExtension(nameNoLnk);
+                        ? baseName
+                        : Path.GetFileNameWithoutExtension(baseName);
                 }
 
                 var fi   = new MenuFlyoutItem { Text = displayName };
-                var path = lnk;
+                var path = targetPath ?? lnk;  // open the real file if resolved
                 fi.Click += (_, _) => CommandExecutor.ShellOpen(path);
-                if (_config.RecentShowIcons) fi.Icon = IconLoader.Load(lnk);
+                if (_config.RecentShowIcons) fi.Icon = IconLoader.Load(targetPath ?? lnk);
                 target.Add(fi);
             }
 
