@@ -3,20 +3,117 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:WinMacMenuWinUI3"
+    xmlns:vm="using:WinMacMenuWinUI3.ViewModels"
     xmlns:models="using:WinMacMenuWinUI3.Models">
 
-    <!--
-        The window itself is transparent (no system chrome).
-        The menu card is a solid-white rounded panel with elevation shadow,
-        matching the Windows 11 context menu appearance.
-    -->
-    <Grid Background="Transparent">
+    <Window.Resources>
 
+        <!-- ── Button style: no chrome, rounded hover highlight ── -->
+        <Style x:Key="MenuRowButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Root" CornerRadius="4" Background="Transparent">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background"
+                                                    Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background"
+                                                    Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Center"
+                                              Content="{TemplateBinding Content}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── Separator: 9px slot, 1px line ── -->
+        <DataTemplate x:Key="SeparatorTemplate" x:DataType="vm:MenuItemViewModel">
+            <Grid Height="9">
+                <Rectangle Height="1"
+                            Margin="12,0"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- ── Category header ── -->
+        <DataTemplate x:Key="CategoryTemplate" x:DataType="vm:MenuItemViewModel">
+            <TextBlock Text="{x:Bind Label}"
+                       Margin="12,8,12,2"
+                       FontSize="11"
+                       FontFamily="Segoe UI Variable Small"
+                       FontWeight="SemiBold"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis"/>
+        </DataTemplate>
+
+        <!-- ── Normal item ── -->
+        <DataTemplate x:Key="NormalTemplate" x:DataType="vm:MenuItemViewModel">
+            <Button Style="{StaticResource MenuRowButton}"
+                    Height="34"
+                    Margin="4,0"
+                    Command="{x:Null}"
+                    Click="{x:Bind Click}">
+                <Grid Margin="8,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="20"/> <!-- icon placeholder -->
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/> <!-- label -->
+                        <ColumnDefinition Width="Auto"/> <!-- chevron -->
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="2"
+                               Text="{x:Bind Label}"
+                               FontSize="12"
+                               FontFamily="Segoe UI Variable Text"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <FontIcon Grid.Column="3"
+                              Glyph="&#xE76C;"
+                              FontSize="10"
+                              VerticalAlignment="Center"
+                              Margin="4,0,0,0"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              Visibility="{x:Bind ChevronVisibility}"/>
+                </Grid>
+            </Button>
+        </DataTemplate>
+
+        <!-- ── Template selector ── -->
+        <local:MenuItemTemplateSelector x:Key="Selector"
+            SeparatorTemplate="{StaticResource SeparatorTemplate}"
+            CategoryTemplate="{StaticResource CategoryTemplate}"
+            NormalTemplate="{StaticResource NormalTemplate}"/>
+
+    </Window.Resources>
+
+    <Grid Background="Transparent">
         <Border x:Name="MenuCard"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"
                 MinWidth="220"
-                MaxWidth="320"
+                MaxWidth="340"
                 Padding="4"
                 CornerRadius="8"
                 BorderThickness="1"
@@ -25,24 +122,17 @@
             <Border.Shadow>
                 <ThemeShadow/>
             </Border.Shadow>
-
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           MaxHeight="580">
                 <ItemsRepeater x:Name="MenuItemsRepeater"
                                ItemsSource="{x:Bind MenuItems}"
-                               ElementPrepared="MenuItemsRepeater_ElementPrepared">
-                    <ItemsRepeater.ItemTemplate>
-                        <DataTemplate x:DataType="models:ConfigItem">
-                            <local:MenuItemControl Item="{x:Bind}"/>
-                        </DataTemplate>
-                    </ItemsRepeater.ItemTemplate>
+                               ItemTemplate="{StaticResource Selector}">
                     <ItemsRepeater.Layout>
                         <StackLayout Spacing="0" Orientation="Vertical"/>
                     </ItemsRepeater.Layout>
                 </ItemsRepeater>
             </ScrollViewer>
         </Border>
-
     </Grid>
 </Window>

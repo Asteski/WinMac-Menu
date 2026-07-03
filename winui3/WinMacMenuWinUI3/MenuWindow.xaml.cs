@@ -7,12 +7,13 @@ using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
+using WinMacMenuWinUI3.ViewModels;
 
 namespace WinMacMenuWinUI3;
 
 public sealed partial class MenuWindow : Window
 {
-    private const int GWL_EXSTYLE     = -20;
+    private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_TOPMOST    = 0x00000008;
 
@@ -27,7 +28,7 @@ public sealed partial class MenuWindow : Window
     private readonly string _iniPath;
     private bool _closeOnDeactivate = false;
 
-    public ObservableCollection<ConfigItem> MenuItems { get; } = new();
+    public ObservableCollection<MenuItemViewModel> MenuItems { get; } = new();
 
     public MenuWindow(AppConfig config, string iniPath)
     {
@@ -36,22 +37,25 @@ public sealed partial class MenuWindow : Window
 
         InitializeComponent();
 
-        foreach (var item in config.Items)
-            MenuItems.Add(item);
+        PopulateItems(config.Items);
 
         ConfigureWindowChrome();
         PositionAtCursor();
 
-        // Wait until the window has fully appeared before allowing deactivation to close it.
-        // Without the delay, the Deactivated event fires before the window is even visible.
-        this.Activated += OnActivated;
+        Activated += OnActivated;
+    }
+
+    private void PopulateItems(IEnumerable<ConfigItem> items)
+    {
+        MenuItems.Clear();
+        foreach (var item in items)
+            MenuItems.Add(new MenuItemViewModel(item, OnItemClicked));
     }
 
     private async void OnActivated(object sender, WindowActivatedEventArgs e)
     {
         if (e.WindowActivationState != WindowActivationState.Deactivated)
         {
-            // Window just became active — arm the close-on-deactivate after a short delay
             if (!_closeOnDeactivate)
             {
                 await Task.Delay(300);
@@ -64,18 +68,6 @@ public sealed partial class MenuWindow : Window
         }
     }
 
-    private void MenuItemsRepeater_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        if (args.Element is MenuItemControl ctrl)
-        {
-            ctrl.ItemClicked -= OnMenuItemClicked;
-            ctrl.ItemClicked += OnMenuItemClicked;
-        }
-    }
-
-    private void OnMenuItemClicked(object? sender, ConfigItem item)
-        => OnItemClicked(item);
-
     private void ConfigureWindowChrome()
     {
         ExtendsContentIntoTitleBar = true;
@@ -85,7 +77,6 @@ public sealed partial class MenuWindow : Window
         var appWindow = GetAppWindowForCurrentWindow();
         appWindow.IsShownInSwitchers = false;
 
-        // Tool window (no taskbar/alt-tab entry) + always on top
         var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
         exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
@@ -97,8 +88,6 @@ public sealed partial class MenuWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        // Keep the window background fully transparent so the card's rounded
-        // corners are visible and nothing bleeds outside the Border.
         appWindow.TitleBar.BackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
         appWindow.TitleBar.InactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
     }
@@ -107,70 +96,44 @@ public sealed partial class MenuWindow : Window
     {
         var appWindow = GetAppWindowForCurrentWindow();
 
-        int itemCount = _config.Items.Count(i => !i.IsSeparator);
+        int itemCount = _config.Items.Count(i => !i.IsSeparator && !i.IsCategory);
         int sepCount  = _config.Items.Count(i => i.IsSeparator);
-        int height = Math.Max(itemCount * 36 + sepCount * 9 + 8, 50);
-        int width  = 240;
+        int catCount  = _config.Items.Count(i => i.IsCategory);
+        int height    = Math.Max(itemCount * 34 + sepCount * 9 + catCount * 26 + 8, 50);
+        int width     = 240;
 
-        PointInt32 pos;
-        if (_config.PointerRelative || true) // always use cursor position for now
-        {
-            GetCursorPos(out var cursor);
-            int x = cursor.x + _config.HOffset;
-            int y = cursor.y + _config.VOffset;
+        GetCursorPos(out var cursor);
+        int x = cursor.x;
+        int y = cursor.y;
 
-            var display = DisplayArea.GetFromPoint(new PointInt32(cursor.x, cursor.y), DisplayAreaFallback.Nearest);
-            var work = display.WorkArea;
+        var display = DisplayArea.GetFromPoint(new PointInt32(cursor.x, cursor.y), DisplayAreaFallback.Nearest);
+        var work    = display.WorkArea;
 
-            if (x + width  > work.X + work.Width)  x = cursor.x - width;
-            if (y + height > work.Y + work.Height)  y = cursor.y - height;
-            if (x < work.X) x = work.X;
-            if (y < work.Y) y = work.Y;
+        if (x + width  > work.X + work.Width)  x = cursor.x - width;
+        if (y + height > work.Y + work.Height)  y = cursor.y - height;
+        if (x < work.X) x = work.X;
+        if (y < work.Y) y = work.Y;
 
-            pos = new PointInt32(x, y);
-        }
-        else
-        {
-            var display = DisplayArea.Primary;
-            var work = display.WorkArea;
-
-            int x = _config.Horizontal switch
-            {
-                "center" => work.X + (work.Width  - width)  / 2,
-                "right"  => work.X +  work.Width  - width  + _config.HOffset,
-                _        => work.X + _config.HOffset,
-            };
-            int y = _config.Vertical switch
-            {
-                "center" => work.Y + (work.Height - height) / 2,
-                "bottom" => work.Y +  work.Height - height + _config.VOffset,
-                _        => work.Y + _config.VOffset,
-            };
-
-            pos = new PointInt32(x, y);
-        }
-
-        appWindow.MoveAndResize(new RectInt32(pos.X, pos.Y, width, height));
+        appWindow.MoveAndResize(new RectInt32(x, y, width, height));
     }
 
     private AppWindow GetAppWindowForCurrentWindow()
     {
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var hwnd  = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var wndId = Win32Interop.GetWindowIdFromWindow(hwnd);
         return AppWindow.GetFromWindowId(wndId);
     }
 
-    internal void OnItemClicked(ConfigItem item)
+    private void OnItemClicked(ConfigItem item)
     {
-        if (item.Type == ConfigItemType.TaskKill)
+        switch (item.Type)
         {
-            ShowTaskKillSubmenu();
-            return;
-        }
-        if (item.Type == ConfigItemType.PowerMenu)
-        {
-            ShowPowerMenuSubmenu();
-            return;
+            case ConfigItemType.TaskKill:
+                ShowTaskKillSubmenu();
+                return;
+            case ConfigItemType.PowerMenu:
+                ShowPowerMenuSubmenu();
+                return;
         }
 
         this.Close();
@@ -180,23 +143,24 @@ public sealed partial class MenuWindow : Window
     private void ShowTaskKillSubmenu()
     {
         var processes = CommandExecutor.GetRunningProcesses(_config);
-        MenuItems.Clear();
-        MenuItems.Add(new ConfigItem { Label = "← Back", Type = ConfigItemType.Category });
-        MenuItems.Add(new ConfigItem { Type = ConfigItemType.Separator });
-        foreach (var p in processes)
-            MenuItems.Add(new ConfigItem { Label = $"{p.Name} (PID {p.Pid})", Type = ConfigItemType.Cmd, Path = p.Pid.ToString() });
+        var items = processes.Select(p => new ConfigItem
+        {
+            Label = $"{p.Name}  (PID {p.Pid})",
+            Type  = ConfigItemType.Cmd,
+            Path  = p.Pid.ToString(),
+        });
+        PopulateItems(items);
     }
 
     private void ShowPowerMenuSubmenu()
     {
-        MenuItems.Clear();
-        MenuItems.Add(new ConfigItem { Label = "← Back", Type = ConfigItemType.Category });
-        MenuItems.Add(new ConfigItem { Type = ConfigItemType.Separator });
-        if (_config.PowerSleep)     MenuItems.Add(new ConfigItem { Label = "Sleep",     Type = ConfigItemType.PowerSleep });
-        if (_config.PowerHibernate) MenuItems.Add(new ConfigItem { Label = "Hibernate", Type = ConfigItemType.PowerHibernate });
-        if (_config.PowerShutdown)  MenuItems.Add(new ConfigItem { Label = "Shut Down", Type = ConfigItemType.PowerShutdown });
-        if (_config.PowerRestart)   MenuItems.Add(new ConfigItem { Label = "Restart",   Type = ConfigItemType.PowerRestart });
-        if (_config.PowerLock)      MenuItems.Add(new ConfigItem { Label = "Lock",      Type = ConfigItemType.PowerLock });
-        if (_config.PowerLogoff)    MenuItems.Add(new ConfigItem { Label = "Sign Out",  Type = ConfigItemType.PowerLogoff });
+        var items = new List<ConfigItem>();
+        if (_config.PowerSleep)     items.Add(new ConfigItem { Label = "Sleep",     Type = ConfigItemType.PowerSleep });
+        if (_config.PowerHibernate) items.Add(new ConfigItem { Label = "Hibernate", Type = ConfigItemType.PowerHibernate });
+        if (_config.PowerShutdown)  items.Add(new ConfigItem { Label = "Shut Down", Type = ConfigItemType.PowerShutdown });
+        if (_config.PowerRestart)   items.Add(new ConfigItem { Label = "Restart",   Type = ConfigItemType.PowerRestart });
+        if (_config.PowerLock)      items.Add(new ConfigItem { Label = "Lock",      Type = ConfigItemType.PowerLock });
+        if (_config.PowerLogoff)    items.Add(new ConfigItem { Label = "Sign Out",  Type = ConfigItemType.PowerLogoff });
+        PopulateItems(items);
     }
 }
