@@ -47,7 +47,10 @@ public partial class App : Application
             catch { /* hooks unavailable — use tray icon to open menu */ }
         }
 
-        ShowMenu(); // always show on first launch
+        // Respect ShowOnLaunch — when running in background the tray icon
+        // is enough; only show the menu immediately if explicitly configured.
+        if (!config.RunInBackground || config.ShowOnLaunch)
+            ShowMenu();
     }
 
     // Shows the menu, or closes it if already open (toggle behaviour)
