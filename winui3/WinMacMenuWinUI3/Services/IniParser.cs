@@ -115,11 +115,12 @@ public static class IniParser
 
     private static ConfigItem? ParseMenuLine(string line)
     {
-        if (line.Trim() == "---")
-            return new ConfigItem { Type = ConfigItemType.Separator };
-
         var parts = line.Split('|');
         if (parts.Length == 0) return null;
+
+        // Separator: bare "---" or "---|anything"
+        if (parts[0].Trim() == "---")
+            return new ConfigItem { Type = ConfigItemType.Separator };
 
         var item = new ConfigItem();
         item.Label = Environment.ExpandEnvironmentVariables(parts[0].Trim());
@@ -127,9 +128,10 @@ public static class IniParser
         if (parts.Length == 1)
             return item;
 
-        var typeStr = parts.Length > 1 ? parts[1].Trim().ToUpperInvariant() : "";
+        var typeStr = parts[1].Trim().ToUpperInvariant();
         item.Type = typeStr switch
         {
+            "SEPARATOR"      => ConfigItemType.Separator,
             "CATEGORY"       => ConfigItemType.Category,
             "URI"            => ConfigItemType.Uri,
             "FILE"           => ConfigItemType.File,
