@@ -134,9 +134,17 @@ public sealed partial class MenuWindow : Window
                 return sub;
             }
 
-            // ── This PC (drives + shell locations) ───────────────────────
+            // ── This PC (drives) ─────────────────────────────────────────
             case ConfigItemType.ThisPC:
             {
+                if (!_config.ThisPCAsSubmenu)
+                {
+                    // Plain clickable item — opens File Explorer at This PC
+                    var fi = new MenuFlyoutItem { Text = item.Label };
+                    ApplyIcon(fi, item, inSubmenu);
+                    fi.Click += (_, _) => { this.Close(); CommandExecutor.ShellOpen("shell:MyComputerFolder"); };
+                    return fi;
+                }
                 var sub = new MenuFlyoutSubItem { Text = item.Label };
                 ApplyIcon(sub, item, inSubmenu);
                 AddThisPCItems(sub.Items);
@@ -146,10 +154,17 @@ public sealed partial class MenuWindow : Window
             // ── Home folder ──────────────────────────────────────────────
             case ConfigItemType.Home:
             {
+                var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (!_config.HomeAsSubmenu)
+                {
+                    var fi = new MenuFlyoutItem { Text = item.Label };
+                    ApplyIcon(fi, item, inSubmenu);
+                    fi.Click += (_, _) => { this.Close(); CommandExecutor.ShellOpen(homePath); };
+                    return fi;
+                }
                 var sub = new MenuFlyoutSubItem { Text = item.Label };
                 ApplyIcon(sub, item, inSubmenu);
-                var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                AddFolderEntries(sub.Items, homePath);
+                AddHomeFolderItems(sub.Items, homePath);
                 return sub;
             }
 
@@ -183,24 +198,31 @@ public sealed partial class MenuWindow : Window
         try
         {
             var recentDir = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
-            var files = Directory.GetFiles(recentDir, "*.lnk")
-                .OrderByDescending(File.GetLastWriteTime)
-                .Take(_config.RecentMax);
+            var lnkFiles  = Directory.GetFiles(recentDir, "*.lnk")
+                                     .OrderByDescending(File.GetLastWriteTime)
+                                     .Take(_config.RecentMax);
 
-            foreach (var lnk in files)
+            foreach (var lnk in lnkFiles)
             {
-                // Display name: strip .lnk extension
-                var name = _config.RecentShowExtensions
-                    ? Path.GetFileNameWithoutExtension(lnk)
-                    : Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(lnk));
+                string displayName;
+                if (_config.RecentLabel == "fullpath")
+                {
+                    // Show full path — strip .lnk, keep rest as-is
+                    displayName = Path.GetFileNameWithoutExtension(lnk);
+                }
+                else
+                {
+                    // filename only — strip .lnk then strip remaining extension if needed
+                    var nameNoLnk = Path.GetFileNameWithoutExtension(lnk);
+                    displayName = _config.RecentShowExtensions
+                        ? nameNoLnk
+                        : Path.GetFileNameWithoutExtension(nameNoLnk);
+                }
 
-                var fi = new MenuFlyoutItem { Text = name };
+                var fi   = new MenuFlyoutItem { Text = displayName };
                 var path = lnk;
                 fi.Click += (_, _) => CommandExecutor.ShellOpen(path);
-
-                if (_config.RecentShowIcons)
-                    fi.Icon = IconLoader.Load(lnk);
-
+                if (_config.RecentShowIcons) fi.Icon = IconLoader.Load(lnk);
                 target.Add(fi);
             }
 
@@ -227,11 +249,45 @@ public sealed partial class MenuWindow : Window
                 ? drive.Name
                 : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
 
-            var fi = new MenuFlyoutItem { Text = label };
             var root = drive.RootDirectory.FullName;
-            fi.Click += (_, _) => CommandExecutor.ShellOpen(root);
-            if (_config.ShowFolderIcons) fi.Icon = IconLoader.Load(root);
-            target.Add(fi);
+
+            if (_config.ThisPCItemsAsSubmenus)
+            {
+                var sub = new MenuFlyoutSubItem { Text = label };
+                if (_config.ThisPCShowIcons) sub.Icon = IconLoader.Load(root);
+                AddFolderEntries(sub.Items, root);
+                target.Add(sub);
+            }
+            else
+            {
+                var fi = new MenuFlyoutItem { Text = label };
+                if (_config.ThisPCShowIcons) fi.Icon = IconLoader.Load(root);
+                fi.Click += (_, _) => CommandExecutor.ShellOpen(root);
+                target.Add(fi);
+            }
+        }
+    }
+
+    private void AddHomeFolderItems(IList<MenuFlyoutItemBase> target, string homePath)
+    {
+        foreach (var entry in CommandExecutor.GetFolderContents(homePath, _config))
+        {
+            var e = entry;
+
+            if (_config.HomeItemsAsSubmenus && e.IsDirectory)
+            {
+                var sub = new MenuFlyoutSubItem { Text = e.Name };
+                if (_config.HomeShowIcons) sub.Icon = IconLoader.Load(e.FullPath);
+                AddFolderEntries(sub.Items, e.FullPath);
+                target.Add(sub);
+            }
+            else
+            {
+                var fi = new MenuFlyoutItem { Text = e.Name };
+                if (_config.HomeShowIcons) fi.Icon = IconLoader.Load(e.FullPath);
+                fi.Click += (_, _) => CommandExecutor.ShellOpen(e.FullPath);
+                target.Add(fi);
+            }
         }
     }
 

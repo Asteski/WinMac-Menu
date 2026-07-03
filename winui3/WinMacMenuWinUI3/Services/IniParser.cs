@@ -73,6 +73,14 @@ public static class IniParser
         cfg.TaskKillAllDesktops = GetBool("TaskKill", "TaskKillAllDesktops", true, iniPath);
         cfg.TaskKillExcludes = GetString("TaskKill", "TaskKillExcludes", "", iniPath);
 
+        cfg.ThisPCAsSubmenu      = GetBool("ThisPC", "ThisPCAsSubmenu",      true,  iniPath);
+        cfg.ThisPCItemsAsSubmenus = GetBool("ThisPC", "ThisPCItemsAsSubmenus", false, iniPath);
+        cfg.ThisPCShowIcons       = GetBool("ThisPC", "ThisPCShowIcons",       true,  iniPath);
+
+        cfg.HomeAsSubmenu      = GetBool("Home", "HomeAsSubmenu",      true,  iniPath);
+        cfg.HomeItemsAsSubmenus = GetBool("Home", "HomeItemsAsSubmenus", false, iniPath);
+        cfg.HomeShowIcons       = GetBool("Home", "HomeShowIcons",       true,  iniPath);
+
         cfg.PowerSleep = GetInt("Power", "Sleep", 1, iniPath) != 0;
         cfg.PowerHibernate = GetInt("Power", "Hibernate", 1, iniPath) != 0;
         cfg.PowerShutdown = GetInt("Power", "Shutdown", 1, iniPath) != 0;

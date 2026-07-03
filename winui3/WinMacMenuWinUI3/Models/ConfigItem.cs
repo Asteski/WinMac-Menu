@@ -88,6 +88,16 @@ public class AppConfig
     public bool TaskKillAllDesktops { get; set; } = true;
     public string TaskKillExcludes { get; set; } = "";
 
+    // [ThisPC]
+    public bool ThisPCAsSubmenu { get; set; } = true;
+    public bool ThisPCItemsAsSubmenus { get; set; } = false;
+    public bool ThisPCShowIcons { get; set; } = true;
+
+    // [Home]
+    public bool HomeAsSubmenu { get; set; } = true;
+    public bool HomeItemsAsSubmenus { get; set; } = false;
+    public bool HomeShowIcons { get; set; } = true;
+
     // [Power]
     public bool PowerSleep { get; set; } = true;
     public bool PowerHibernate { get; set; } = true;
