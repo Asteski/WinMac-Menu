@@ -135,7 +135,7 @@ public static class CommandExecutor
                     continue;
 
                 var name = entry.Name;
-                if (entry is FileInfo fi && !cfg.ShowFileExtensions)
+                if (entry is FileInfo && !cfg.ShowFileExtensions)
                     name = Path.GetFileNameWithoutExtension(name);
 
                 result.Add(new FolderEntry
