@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
@@ -30,7 +31,7 @@ public partial class App : Application
             _tray.ShowMenuRequested += ShowMenu;
             _tray.ExitRequested     += Exit;
 
-            _hooks = new HookService(config);
+            _hooks = new HookService(config, DispatcherQueue.GetForCurrentThread());
             _hooks.MenuRequested += ShowMenu;
         }
 

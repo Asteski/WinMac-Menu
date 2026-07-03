@@ -1,60 +1,39 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Dispatching;
 using WinMacMenuWinUI3.Models;
 
 namespace WinMacMenuWinUI3.Services;
 
-/// <summary>
-/// Installs low-level keyboard and mouse hooks to trigger the menu
-/// from Windows key presses and Start button clicks, per [Controls] config.
-/// </summary>
 public sealed class HookService : IDisposable
 {
     // ── Win32 ─────────────────────────────────────────────────────────────
 
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
     [DllImport("user32.dll")] private static extern bool   UnhookWindowsHookEx(IntPtr hhk);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string? lpModuleName);
     [DllImport("user32.dll")] private static extern short  GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern bool   GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
-    [DllImport("user32.dll")] private static extern bool   GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-    [DllImport("user32.dll")] private static extern uint   GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll")] private static extern bool   GetWindowRect(IntPtr hWnd, out RECT r);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+    [DllImport("user32.dll")] private static extern bool   GetMonitorInfo(IntPtr hMon, ref MONITORINFO mi);
+    [DllImport("user32.dll")] private static extern uint   GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string? cls, string? wnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? cls, string? wnd);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
-    [StructLayout(LayoutKind.Sequential)] private struct POINT  { public int x, y; }
-    [StructLayout(LayoutKind.Sequential)] private struct RECT   { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] private struct RECT  { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO { public uint cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MONITORINFO
-    {
-        public uint cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public uint dwFlags;
-    }
+    private struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public UIntPtr extra; }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct KBDLLHOOKSTRUCT
-    {
-        public uint vkCode, scanCode, flags, time;
-        public UIntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSLLHOOKSTRUCT
-    {
-        public POINT pt;
-        public uint  mouseData, flags, time;
-        public UIntPtr dwExtraInfo;
-    }
+    private struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public UIntPtr extra; }
 
     private const int WH_KEYBOARD_LL = 13;
     private const int WH_MOUSE_LL    = 14;
@@ -66,25 +45,27 @@ public sealed class HookService : IDisposable
     private const int VK_LWIN = 0x5B;
     private const int VK_RWIN = 0x5C;
     private const int VK_SHIFT= 0x10;
-    private const uint GA_ROOT = 2;
     private const uint MONITOR_DEFAULTTONEAREST = 2;
 
     // ── Fields ────────────────────────────────────────────────────────────
 
-    private readonly AppConfig _config;
-    private readonly HashSet<string> _exclusions;
+    private readonly AppConfig        _config;
+    private readonly HashSet<string>  _exclusions;
+    private readonly DispatcherQueue  _dispatcher;
+    private readonly HookProc         _kbProc, _mouseProc; // pinned delegates
     private IntPtr _kbHook, _mouseHook;
-    private readonly HookProc _kbProc, _mouseProc; // keep delegates alive
-    private IntPtr _startButtonHwnd;
-    private bool _winKeyDown; // tracks if we already consumed the WinKey press
+    private bool   _winKeyConsumed;
+    private RECT   _startBtnRect;
+    private int    _startBtnRefreshTick;
 
     public event Action? MenuRequested;
 
-    // ── Constructor / Dispose ─────────────────────────────────────────────
+    // ── Init / Dispose ────────────────────────────────────────────────────
 
-    public HookService(AppConfig config)
+    public HookService(AppConfig config, DispatcherQueue dispatcher)
     {
-        _config = config;
+        _config     = config;
+        _dispatcher = dispatcher;
         _exclusions = config.FullscreenExclusionList
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -92,19 +73,17 @@ public sealed class HookService : IDisposable
         _kbProc    = KeyboardProc;
         _mouseProc = MouseProc;
 
-        _startButtonHwnd = FindStartButton();
+        RefreshStartButtonRect();
 
-        var hMod = GetModuleHandle(null);
+        // For LL hooks, hMod must be the module handle of the calling exe
+        var hMod = Marshal.GetHINSTANCE(typeof(HookService).Module);
 
-        bool needsKeyboard = config.WindowsKey || config.ShiftWindowsKey;
-        bool needsMouse    = config.LeftClick || config.RightClick || config.MiddleClick ||
-                             config.ShiftLeftClick || config.ShiftRightClick || config.ShiftMiddleClick;
+        bool needsKb    = config.WindowsKey || config.ShiftWindowsKey;
+        bool needsMouse = config.LeftClick || config.RightClick || config.MiddleClick ||
+                          config.ShiftLeftClick || config.ShiftRightClick || config.ShiftMiddleClick;
 
-        if (needsKeyboard)
-            _kbHook = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc, hMod, 0);
-
-        if (needsMouse)
-            _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, hMod, 0);
+        if (needsKb)    _kbHook    = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc,    hMod, 0);
+        if (needsMouse) _mouseHook = SetWindowsHookEx(WH_MOUSE_LL,    _mouseProc, hMod, 0);
     }
 
     public void Dispose()
@@ -120,34 +99,32 @@ public sealed class HookService : IDisposable
         if (nCode >= 0)
         {
             var kb  = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-            var msg = (int)wParam;
-            var isWin = kb.vkCode == VK_LWIN || kb.vkCode == VK_RWIN;
+            bool isWin = kb.vkCode == VK_LWIN || kb.vkCode == VK_RWIN;
 
-            if (isWin && msg == WM_KEYDOWN && !_winKeyDown)
+            if (isWin)
             {
-                bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-
-                bool trigger = (!shift && _config.WindowsKey) ||
-                               ( shift && _config.ShiftWindowsKey);
-
-                if (trigger && !ShouldIgnore())
+                if ((int)wParam == WM_KEYDOWN && !_winKeyConsumed)
                 {
-                    _winKeyDown = true;
-                    MenuRequested?.Invoke();
-                    return (IntPtr)1; // block key — prevents Start menu opening
+                    bool shift   = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                    bool trigger = (!shift && _config.WindowsKey) ||
+                                   ( shift && _config.ShiftWindowsKey);
+
+                    if (trigger && !ShouldIgnore())
+                    {
+                        _winKeyConsumed = true;
+                        // Dispatch to UI thread and return immediately — do NOT do any
+                        // heavy work here or Windows will bypass the hook after ~300 ms.
+                        _dispatcher.TryEnqueue(() => MenuRequested?.Invoke());
+                        return (IntPtr)1; // block key → prevents Start menu
+                    }
                 }
-            }
-
-            if (isWin && msg == WM_KEYUP)
-            {
-                if (_winKeyDown)
+                else if ((int)wParam == WM_KEYUP && _winKeyConsumed)
                 {
-                    _winKeyDown = false;
-                    return (IntPtr)1; // block keyup too
+                    _winKeyConsumed = false;
+                    return (IntPtr)1; // block matching keyup too
                 }
             }
         }
-
         return CallNextHookEx(_kbHook, nCode, wParam, lParam);
     }
 
@@ -157,73 +134,97 @@ public sealed class HookService : IDisposable
     {
         if (nCode >= 0)
         {
-            var msg = (int)wParam;
+            int msg = (int)wParam;
             if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN)
             {
-                var ms    = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                var hwnd  = WindowFromPoint(ms.pt);
-                var root  = GetAncestor(hwnd, GA_ROOT);
+                var ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
 
-                // Refresh Start button handle periodically (taskbar can restart)
-                if (_startButtonHwnd == IntPtr.Zero)
-                    _startButtonHwnd = FindStartButton();
+                // Refresh the start button rect periodically (taskbar can restart/move)
+                if (Environment.TickCount - _startBtnRefreshTick > 5000)
+                    RefreshStartButtonRect();
 
-                if (root == _startButtonHwnd || IsChildOfStartButton(hwnd))
+                if (PointInRect(ms.pt, _startBtnRect))
                 {
-                    bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-
+                    bool shift   = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
                     bool trigger = msg switch
                     {
                         WM_LBUTTONDOWN => shift ? _config.ShiftLeftClick  : _config.LeftClick,
                         WM_RBUTTONDOWN => shift ? _config.ShiftRightClick : _config.RightClick,
-                        WM_MBUTTONDOWN => shift ? _config.ShiftMiddleClick: _config.MiddleClick,
+                        WM_MBUTTONDOWN => shift ? _config.ShiftMiddleClick : _config.MiddleClick,
                         _              => false,
                     };
 
                     if (trigger && !ShouldIgnore())
                     {
-                        MenuRequested?.Invoke();
-                        return (IntPtr)1; // block click — prevents Start menu opening
+                        _dispatcher.TryEnqueue(() => MenuRequested?.Invoke());
+                        return (IntPtr)1; // block click → prevents Start menu
                     }
                 }
             }
         }
-
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Start button rect resolution ──────────────────────────────────────
 
-    // Finds the Start button HWND across Windows 10 and 11 taskbar structures
-    private static IntPtr FindStartButton()
+    private void RefreshStartButtonRect()
+    {
+        _startBtnRefreshTick = Environment.TickCount;
+        _startBtnRect = ResolveStartButtonRect();
+    }
+
+    private static RECT ResolveStartButtonRect()
     {
         var tray = FindWindow("Shell_TrayWnd", null);
-        if (tray == IntPtr.Zero) return IntPtr.Zero;
+        if (tray == IntPtr.Zero) return default;
 
-        // Windows 10 / 11 — class name "Start"
-        var btn = FindWindowEx(tray, IntPtr.Zero, "Start", null);
-        if (btn != IntPtr.Zero) return btn;
-
-        // Windows 11 22H2+ secondary taskbar
-        btn = FindWindowEx(tray, IntPtr.Zero, "Windows.UI.Input.InputSite.WindowClass", null);
-        if (btn != IntPtr.Zero) return tray; // treat whole tray as anchor
-
-        return tray; // fallback: trigger on any taskbar click in the start area
-    }
-
-    private bool IsChildOfStartButton(IntPtr hWnd)
-    {
-        var current = hWnd;
-        for (int i = 0; i < 8 && current != IntPtr.Zero; i++)
+        // Windows 10 / ExplorerPatcher / StartAllBack: Start has its own HWND
+        var startHwnd = FindWindowEx(tray, IntPtr.Zero, "Start", null);
+        if (startHwnd != IntPtr.Zero)
         {
-            if (current == _startButtonHwnd) return true;
-            current = GetAncestor(current, GA_ROOT);
-            if (current == hWnd) break;
+            GetWindowRect(startHwnd, out var r);
+            if (r.right - r.left > 4) return r;
         }
-        return false;
+
+        // Windows 11: Start button is inside a compositor bridge and has no
+        // independent HWND. Probe the taskbar at the expected position instead.
+        GetWindowRect(tray, out var trayRect);
+        int taskbarH = trayRect.bottom - trayRect.top;
+        int taskbarW = trayRect.right  - trayRect.left;
+
+        // Try probing at left-aligned position (Win10 style / ExplorerPatcher)
+        var probeLeft = new POINT { x = trayRect.left + taskbarH / 2, y = (trayRect.top + trayRect.bottom) / 2 };
+        var hwndLeft  = WindowFromPoint(probeLeft);
+        if (hwndLeft != tray && hwndLeft != IntPtr.Zero)
+        {
+            GetWindowRect(hwndLeft, out var lr);
+            if (lr.right - lr.left > 4 && lr.bottom - lr.top > 4) return lr;
+        }
+
+        // Windows 11 center-aligned taskbar: probe at horizontal center
+        var probeCenter = new POINT { x = trayRect.left + taskbarW / 2, y = (trayRect.top + trayRect.bottom) / 2 };
+        var hwndCenter  = WindowFromPoint(probeCenter);
+        if (hwndCenter != tray && hwndCenter != IntPtr.Zero)
+        {
+            GetWindowRect(hwndCenter, out var cr);
+            if (cr.right - cr.left > 4 && cr.bottom - cr.top > 4) return cr;
+        }
+
+        // Last resort: treat the leftmost taskbarH × taskbarH square as the start zone
+        return new RECT
+        {
+            left   = trayRect.left,
+            top    = trayRect.top,
+            right  = trayRect.left + taskbarH,
+            bottom = trayRect.bottom,
+        };
     }
 
-    // Returns true when triggers should be suppressed (fullscreen app is focused)
+    private static bool PointInRect(POINT pt, RECT r)
+        => pt.x >= r.left && pt.x <= r.right && pt.y >= r.top && pt.y <= r.bottom;
+
+    // ── Fullscreen suppression ────────────────────────────────────────────
+
     private bool ShouldIgnore()
     {
         if (!_config.IgnoreTriggersWhenFullscreen) return false;
@@ -231,25 +232,21 @@ public sealed class HookService : IDisposable
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero) return false;
 
-        // Check exclusion list
         try
         {
             GetWindowThreadProcessId(fg, out var pid);
             using var proc = Process.GetProcessById((int)pid);
             var exe = Path.GetFileName(proc.MainModule?.FileName ?? "");
-            if (_exclusions.Contains(exe)) return false; // excluded — don't suppress
+            if (_exclusions.Contains(exe)) return false; // whitelisted app
         }
         catch { }
 
-        // Check if the foreground window fills the monitor
-        var hMon  = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-        var info  = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
-        GetMonitorInfo(hMon, ref info);
+        var hMon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+        var mi   = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+        GetMonitorInfo(hMon, ref mi);
         GetWindowRect(fg, out var wr);
 
-        return wr.left   <= info.rcMonitor.left  &&
-               wr.top    <= info.rcMonitor.top    &&
-               wr.right  >= info.rcMonitor.right  &&
-               wr.bottom >= info.rcMonitor.bottom;
+        return wr.left  <= mi.rcMonitor.left  && wr.top    <= mi.rcMonitor.top &&
+               wr.right >= mi.rcMonitor.right && wr.bottom >= mi.rcMonitor.bottom;
     }
 }
