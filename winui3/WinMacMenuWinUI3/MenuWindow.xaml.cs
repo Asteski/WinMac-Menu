@@ -43,21 +43,18 @@ public sealed partial class MenuWindow : Window
 
     private void ShowFlyout()
     {
-        GetCursorPos(out var screen);
-
         var flyout = new MenuFlyout
         {
-            Placement = FlyoutPlacementMode.Auto
+            Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
         };
 
         BuildItems(flyout.Items, _config.Items);
 
         flyout.Closed += (_, _) => this.Close();
 
-        // Position the flyout at the cursor. ShowAt accepts coords relative to
-        // the anchor element; since our window fills the screen at (0,0) the
-        // screen coords are the same as element-relative coords.
-        flyout.ShowAt(RootGrid, new Point(screen.x, screen.y));
+        // Window is 1×1 px sitting at the cursor — flyout opens from (0,0)
+        // which is exactly the cursor position on screen.
+        flyout.ShowAt(RootGrid, new Point(0, 0));
     }
 
     private void BuildItems(IList<MenuFlyoutItemBase> target, IEnumerable<ConfigItem> items)
@@ -163,10 +160,6 @@ public sealed partial class MenuWindow : Window
         exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
-        // Fullscreen transparent window so ShowAt coords match screen coords
-        var display = DisplayArea.Primary;
-        var work    = display.WorkArea;
-
         var presenter = OverlappedPresenter.CreateForToolWindow();
         presenter.IsResizable    = false;
         presenter.IsMaximizable  = false;
@@ -174,7 +167,9 @@ public sealed partial class MenuWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        appWindow.MoveAndResize(new RectInt32(work.X, work.Y, work.Width, work.Height));
+        // 1×1 px window at the cursor — effectively invisible, just an anchor for the flyout
+        GetCursorPos(out var cursor);
+        appWindow.MoveAndResize(new RectInt32(cursor.x, cursor.y, 1, 1));
 
         // Bring to front so the flyout receives input
         SetForegroundWindow(hwnd);
