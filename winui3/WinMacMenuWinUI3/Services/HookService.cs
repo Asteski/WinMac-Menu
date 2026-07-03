@@ -23,8 +23,8 @@ public sealed class HookService : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string? cls, string? wnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? cls, string? wnd);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
-    [DllImport("user32.dll")] private static extern uint   GetCurrentThreadId();
-    [DllImport("user32.dll")] private static extern bool   PostThreadMessage(uint tid, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll")] private static extern uint  GetCurrentThreadId();
+    [DllImport("user32.dll")]  private static extern bool  PostThreadMessage(uint tid, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern int    GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
     [DllImport("user32.dll")] private static extern bool   TranslateMessage(ref MSG msg);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG msg);
