@@ -46,6 +46,7 @@ public static class IniParser
         cfg.ShowHidden = GetBool("General", "ShowHidden", false, iniPath);
         cfg.MaxItems = GetInt("General", "MaxItems", 40, iniPath);
         cfg.DefaultIconPath = GetString("General", "DefaultIcon", "", iniPath);
+        cfg.TrayIconPath    = GetString("General", "TrayIcon",   "", iniPath);
         cfg.MenuStyle = GetString("General", "MenuStyle", "modern", iniPath);
 
         cfg.PointerRelative = GetBool("Placement", "PointerRelative", true, iniPath);

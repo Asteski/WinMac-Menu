@@ -57,6 +57,7 @@ public class AppConfig
     public bool ShowHidden { get; set; } = false;
     public int MaxItems { get; set; } = 40;
     public string DefaultIconPath { get; set; } = "";
+    public string TrayIconPath { get; set; } = "";
     public string MenuStyle { get; set; } = "modern";
 
     // [Placement]

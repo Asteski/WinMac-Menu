@@ -1,28 +1,50 @@
 using Microsoft.UI.Xaml;
+using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
 
 namespace WinMacMenuWinUI3;
 
 public partial class App : Application
 {
-    private MenuWindow? _menuWindow;
+    private HostWindow?  _host;
+    private TrayService? _tray;
+    private string       _iniPath = "";
 
-    public App()
-    {
-        InitializeComponent();
-    }
+    public App() => InitializeComponent();
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        var iniPath = IniParser.FindConfigFile();
-        if (iniPath == null)
+        _iniPath = IniParser.FindConfigFile()
+                   ?? Path.Combine(AppContext.BaseDirectory, "config.ini");
+
+        var config = IniParser.Load(_iniPath);
+
+        if (config.RunInBackground)
         {
-            // No config found — create default and open
-            iniPath = Path.Combine(AppContext.BaseDirectory, "config.ini");
+            // Keep a hidden window alive so WinUI3 doesn't auto-exit
+            _host = new HostWindow();
+            _host.Activate();
+
+            _tray = new TrayService(_host.Hwnd, config);
+            _tray.ShowMenuRequested += ShowMenu;
+            _tray.ExitRequested     += Exit;
         }
 
-        var config = IniParser.Load(iniPath);
-        _menuWindow = new MenuWindow(config, iniPath);
-        _menuWindow.Activate();
+        // Always show the menu on first launch (matches original app behaviour)
+        ShowMenu();
+    }
+
+    private void ShowMenu()
+    {
+        // Reload config on every open so INI changes are picked up live
+        var config = IniParser.Load(_iniPath);
+        var window = new MenuWindow(config, _iniPath);
+        window.Activate();
+    }
+
+    private void Exit()
+    {
+        _tray?.Dispose();
+        _host?.Close();
     }
 }
