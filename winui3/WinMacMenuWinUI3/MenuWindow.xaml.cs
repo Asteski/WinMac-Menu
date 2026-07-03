@@ -1,9 +1,9 @@
-using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Foundation;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
@@ -22,12 +22,10 @@ public sealed partial class MenuWindow : Window
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int x; public int y; }
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private readonly AppConfig _config;
     private readonly string _iniPath;
-    private bool _closeOnDeactivate = false;
-
-    public ObservableCollection<MenuItemViewModel> MenuItems { get; } = new();
 
     public MenuWindow(AppConfig config, string iniPath)
     {
@@ -36,35 +34,119 @@ public sealed partial class MenuWindow : Window
 
         InitializeComponent();
 
-        PopulateItems(config.Items);
-
         ConfigureWindowChrome();
-        PositionAtCursor();
 
-        Activated += OnActivated;
+        // Build and show the flyout once the window content is loaded
+        RootGrid.Loaded += (_, _) => ShowFlyout();
     }
 
-    private void PopulateItems(IEnumerable<ConfigItem> items)
+    private void ShowFlyout()
     {
-        MenuItems.Clear();
-        foreach (var item in items)
-            MenuItems.Add(new MenuItemViewModel(item, OnItemClicked));
-    }
+        GetCursorPos(out var screen);
 
-    private async void OnActivated(object sender, WindowActivatedEventArgs e)
-    {
-        if (e.WindowActivationState != WindowActivationState.Deactivated)
+        var flyout = new MenuFlyout
         {
-            if (!_closeOnDeactivate)
-            {
-                await Task.Delay(300);
-                _closeOnDeactivate = true;
-            }
+            Placement = FlyoutPlacementMode.Auto
+        };
+
+        BuildItems(flyout.Items, _config.Items);
+
+        flyout.Closed += (_, _) => this.Close();
+
+        // Position the flyout at the cursor. ShowAt accepts coords relative to
+        // the anchor element; since our window fills the screen at (0,0) the
+        // screen coords are the same as element-relative coords.
+        flyout.ShowAt(RootGrid, new Point(screen.x, screen.y));
+    }
+
+    private void BuildItems(IList<MenuFlyoutItemBase> target, IEnumerable<ConfigItem> items)
+    {
+        foreach (var item in items)
+        {
+            target.Add(CreateFlyoutItem(item));
         }
-        else if (_closeOnDeactivate)
+    }
+
+    private MenuFlyoutItemBase CreateFlyoutItem(ConfigItem item)
+    {
+        if (item.IsSeparator)
+            return new MenuFlyoutSeparator();
+
+        if (item.IsCategory)
+        {
+            // WinUI3 doesn't have a native flyout group header, so use a
+            // disabled item styled as a label
+            return new MenuFlyoutItem
+            {
+                Text      = item.Label,
+                IsEnabled = false,
+            };
+        }
+
+        // Items that expand into a submenu
+        if (item.Type is ConfigItemType.PowerMenu)
+        {
+            var sub = new MenuFlyoutSubItem { Text = item.Label };
+            var powerItems = BuildPowerItems();
+            foreach (var pi in powerItems) sub.Items.Add(pi);
+            return sub;
+        }
+
+        if (item.Type is ConfigItemType.TaskKill)
+        {
+            var sub = new MenuFlyoutSubItem { Text = item.Label };
+            foreach (var p in CommandExecutor.GetRunningProcesses(_config))
+            {
+                var pi = new MenuFlyoutItem { Text = $"{p.Name}  (PID {p.Pid})" };
+                var pid = p.Pid;
+                pi.Click += (_, _) => CommandExecutor.KillProcess(pid);
+                sub.Items.Add(pi);
+            }
+            return sub;
+        }
+
+        if (item.Type is ConfigItemType.FolderSubmenu ||
+            (item.Type is ConfigItemType.Folder && item.Submenu))
+        {
+            var sub = new MenuFlyoutSubItem { Text = item.Label };
+            foreach (var entry in CommandExecutor.GetFolderContents(item.Path, _config))
+            {
+                var e = entry;
+                var fi = new MenuFlyoutItem { Text = e.Name };
+                fi.Click += (_, _) => CommandExecutor.ShellOpen(e.FullPath);
+                sub.Items.Add(fi);
+            }
+            return sub;
+        }
+
+        // Regular clickable item
+        var flyoutItem = new MenuFlyoutItem { Text = item.Label };
+        var captured   = item;
+        flyoutItem.Click += (_, _) =>
         {
             this.Close();
+            CommandExecutor.Execute(captured);
+        };
+        return flyoutItem;
+    }
+
+    private List<MenuFlyoutItemBase> BuildPowerItems()
+    {
+        var list = new List<MenuFlyoutItemBase>();
+        void Add(string label, ConfigItem item)
+        {
+            var fi = new MenuFlyoutItem { Text = label };
+            fi.Click += (_, _) => { this.Close(); CommandExecutor.Execute(item); };
+            list.Add(fi);
         }
+
+        if (_config.PowerSleep)     Add("Sleep",     new ConfigItem { Type = ConfigItemType.PowerSleep });
+        if (_config.PowerHibernate) Add("Hibernate", new ConfigItem { Type = ConfigItemType.PowerHibernate });
+        if (_config.PowerShutdown)  Add("Shut Down", new ConfigItem { Type = ConfigItemType.PowerShutdown });
+        if (_config.PowerRestart)   Add("Restart",   new ConfigItem { Type = ConfigItemType.PowerRestart });
+        if (_config.PowerLock)      Add("Lock",      new ConfigItem { Type = ConfigItemType.PowerLock });
+        if (_config.PowerLogoff)    Add("Sign Out",  new ConfigItem { Type = ConfigItemType.PowerLogoff });
+        return list;
     }
 
     private void ConfigureWindowChrome()
@@ -72,7 +154,7 @@ public sealed partial class MenuWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(null);
 
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var hwnd      = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var appWindow = GetAppWindowForCurrentWindow();
         appWindow.IsShownInSwitchers = false;
 
@@ -80,40 +162,21 @@ public sealed partial class MenuWindow : Window
         exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
+        // Fullscreen transparent window so ShowAt coords match screen coords
+        var display = DisplayArea.Primary;
+        var work    = display.WorkArea;
+
         var presenter = OverlappedPresenter.CreateForToolWindow();
-        presenter.IsResizable = false;
-        presenter.IsMaximizable = false;
-        presenter.IsMinimizable = false;
+        presenter.IsResizable    = false;
+        presenter.IsMaximizable  = false;
+        presenter.IsMinimizable  = false;
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
-        appWindow.TitleBar.BackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
-        appWindow.TitleBar.InactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
-    }
+        appWindow.MoveAndResize(new RectInt32(work.X, work.Y, work.Width, work.Height));
 
-    private void PositionAtCursor()
-    {
-        var appWindow = GetAppWindowForCurrentWindow();
-
-        int itemCount = _config.Items.Count(i => !i.IsSeparator && !i.IsCategory);
-        int sepCount  = _config.Items.Count(i => i.IsSeparator);
-        int catCount  = _config.Items.Count(i => i.IsCategory);
-        int height    = Math.Max(itemCount * 34 + sepCount * 9 + catCount * 26 + 8, 50);
-        int width     = 240;
-
-        GetCursorPos(out var cursor);
-        int x = cursor.x;
-        int y = cursor.y;
-
-        var display = DisplayArea.GetFromPoint(new PointInt32(cursor.x, cursor.y), DisplayAreaFallback.Nearest);
-        var work    = display.WorkArea;
-
-        if (x + width  > work.X + work.Width)  x = cursor.x - width;
-        if (y + height > work.Y + work.Height)  y = cursor.y - height;
-        if (x < work.X) x = work.X;
-        if (y < work.Y) y = work.Y;
-
-        appWindow.MoveAndResize(new RectInt32(x, y, width, height));
+        // Bring to front so the flyout receives input
+        SetForegroundWindow(hwnd);
     }
 
     private AppWindow GetAppWindowForCurrentWindow()
@@ -121,45 +184,5 @@ public sealed partial class MenuWindow : Window
         var hwnd  = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var wndId = Win32Interop.GetWindowIdFromWindow(hwnd);
         return AppWindow.GetFromWindowId(wndId);
-    }
-
-    private void OnItemClicked(ConfigItem item)
-    {
-        switch (item.Type)
-        {
-            case ConfigItemType.TaskKill:
-                ShowTaskKillSubmenu();
-                return;
-            case ConfigItemType.PowerMenu:
-                ShowPowerMenuSubmenu();
-                return;
-        }
-
-        this.Close();
-        CommandExecutor.Execute(item);
-    }
-
-    private void ShowTaskKillSubmenu()
-    {
-        var processes = CommandExecutor.GetRunningProcesses(_config);
-        var items = processes.Select(p => new ConfigItem
-        {
-            Label = $"{p.Name}  (PID {p.Pid})",
-            Type  = ConfigItemType.Cmd,
-            Path  = p.Pid.ToString(),
-        });
-        PopulateItems(items);
-    }
-
-    private void ShowPowerMenuSubmenu()
-    {
-        var items = new List<ConfigItem>();
-        if (_config.PowerSleep)     items.Add(new ConfigItem { Label = "Sleep",     Type = ConfigItemType.PowerSleep });
-        if (_config.PowerHibernate) items.Add(new ConfigItem { Label = "Hibernate", Type = ConfigItemType.PowerHibernate });
-        if (_config.PowerShutdown)  items.Add(new ConfigItem { Label = "Shut Down", Type = ConfigItemType.PowerShutdown });
-        if (_config.PowerRestart)   items.Add(new ConfigItem { Label = "Restart",   Type = ConfigItemType.PowerRestart });
-        if (_config.PowerLock)      items.Add(new ConfigItem { Label = "Lock",      Type = ConfigItemType.PowerLock });
-        if (_config.PowerLogoff)    items.Add(new ConfigItem { Label = "Sign Out",  Type = ConfigItemType.PowerLogoff });
-        PopulateItems(items);
     }
 }
