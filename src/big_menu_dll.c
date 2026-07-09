@@ -293,6 +293,26 @@ static void big_menu_draw_fake_rounded_highlight(HDC hdc, const RECT* rc, int ra
     DeleteObject(brush);
 }
 
+static void big_menu_draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor) {
+    HPEN pen;
+    HPEN oldPen;
+    HBRUSH oldBrush;
+
+    if (!hdc || !rc) return;
+    pen = CreatePen(PS_SOLID, 1, borderColor);
+    if (!pen) return;
+    oldPen = (HPEN)SelectObject(hdc, pen);
+    oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    if (radius > 0) {
+        RoundRect(hdc, rc->left, rc->top, rc->right, rc->bottom, radius * 2, radius * 2);
+    } else {
+        Rectangle(hdc, rc->left, rc->top, rc->right, rc->bottom);
+    }
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(pen);
+}
+
 static COLORREF big_menu_get_system_menu_text_color(void) {
     return RGB(24, 24, 24);
 }
@@ -838,6 +858,8 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
 
         if (selected) {
             RECT sel = rc;
+            BOOL drawBackground = (state->params->highlightFrame != WMM_BIG_MENU_HIGHLIGHT_BORDER);
+            BOOL drawBorder = (state->params->highlightFrame != WMM_BIG_MENU_HIGHLIGHT_BACKGROUND);
             InflateRect(&sel, -1, 0);
             sel.top -= 1;
             sel.bottom += 1;
@@ -854,9 +876,15 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
                 wsprintfW(dbg, L"[big_menu] keep=%d dark=%d highlight=0x%06X selectedText=0x%06X\n", (int)state->params->keepLargeMenuHighlightTextColor, (int)state->params->darkMode, (unsigned)highlight, (unsigned)selectedTextColor);
                 OutputDebugStringW(dbg);
             }
-            big_menu_draw_fake_rounded_highlight(hdc, &sel, 0, highlight, backgroundColor);
-            SetBkColor(hdc, highlight);
-            if (state->params->keepLargeMenuHighlightTextColor) itemTextColor = textColor;
+            if (drawBackground) {
+                big_menu_draw_fake_rounded_highlight(hdc, &sel, 0, highlight, backgroundColor);
+                SetBkColor(hdc, highlight);
+            }
+            if (drawBorder) {
+                COLORREF stroke = drawBackground ? big_menu_blend_colors(highlight, selectedTextColor, 96) : highlight;
+                big_menu_draw_highlight_border(hdc, &sel, 0, stroke);
+            }
+            if (state->params->keepLargeMenuHighlightTextColor || !drawBackground) itemTextColor = textColor;
             else itemTextColor = selectedTextColor;
             SetTextColor(hdc, itemTextColor);
         } else {

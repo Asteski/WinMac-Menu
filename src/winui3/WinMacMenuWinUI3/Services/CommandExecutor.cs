@@ -129,11 +129,14 @@ public static class CommandExecutor
                 _               => entries.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase),
             };
 
-            foreach (var entry in entries.Take(cfg.MaxItems))
-            {
-                if (!cfg.ShowHidden && entry.Attributes.HasFlag(FileAttributes.Hidden))
-                    continue;
+            if (!cfg.ShowHidden)
+                entries = entries.Where(e => !e.Attributes.HasFlag(FileAttributes.Hidden));
 
+            if (cfg.MaxItems > 0)
+                entries = entries.Take(cfg.MaxItems);
+
+            foreach (var entry in entries)
+            {
                 var name = entry.Name;
                 if (entry is FileInfo && !cfg.ShowFileExtensions)
                     name = Path.GetFileNameWithoutExtension(name);

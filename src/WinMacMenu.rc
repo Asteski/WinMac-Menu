@@ -4,6 +4,7 @@
 // Application icon
 IDI_APPICON ICON "res/app.ico"
 // Themed tray icon variants
+IDI_TRAY_DEFAULT ICON "res/tray_default.ico"
 IDI_TRAY_LIGHT ICON "res/tray_light.ico"
 IDI_TRAY_DARK ICON "res/tray_dark.ico"
 // About dialog specific icon
@@ -12,8 +13,8 @@ IDI_ABOUT_ICON ICON "res/about.ico"
 // Version information block
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,14,1
- PRODUCTVERSION 0,14,1
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -30,11 +31,11 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName",      "Asteski"
 			VALUE "FileDescription", "WinMac Menu"
-			VALUE "FileVersion",     "0.14.1"
+			VALUE "FileVersion",     "1.0.0-beta"
 			VALUE "InternalName",    "WinMacMenu.exe"
 			VALUE "OriginalFilename", "WinMacMenu.exe"
 			VALUE "ProductName",     "WinMac Menu"
-			VALUE "ProductVersion",  "0.14.1"
+			VALUE "ProductVersion",  "1.0.0-beta"
 			VALUE "LegalCopyright",  "Copyright 2026 Asteski"
 		END // BLOCK "040904B0"
 	END // BLOCK "StringFileInfo"
@@ -154,7 +155,7 @@ BEGIN
 END
 
 // Controls Page
-IDD_PAGE_CONTROLS DIALOGEX 0,0,295,160
+IDD_PAGE_CONTROLS DIALOGEX 0,0,295,210
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
 FONT 9, "Segoe UI"
 BEGIN
@@ -170,9 +171,10 @@ BEGIN
 	CONTROL       "Shift + Right click", IDC_CTRL_SHIFT_RIGHT_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 68, 90, 10
 	CONTROL       "Shift + Middle click", IDC_CTRL_SHIFT_MIDDLE_CLICK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 68, 84, 10
 
-	GROUPBOX      "Windows Key", -1, 6, 88, 283, 26
-	CONTROL       "Windows Key", IDC_CTRL_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 100, 80, 10
-	CONTROL       "Shift + Windows Key", IDC_CTRL_SHIFT_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 100, 120, 10
+	GROUPBOX      "Windows key", -1, 6, 88, 283, 26
+	CONTROL       "Windows key", IDC_CTRL_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 100, 82, 10
+	CONTROL       "Shift + Win", IDC_CTRL_SHIFT_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 100, 84, 10
+	CONTROL       "Win + X", IDC_CTRL_WINDOWS_KEY_X, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 100, 70, 10
 
 	GROUPBOX      "Fullscreen applications", -1, 6, 120, 283, 56
 	CONTROL       "Ignore triggers when fullscreen app is focused", IDC_IGNORE_FULLSCREEN_CHECK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 132, 260, 10
@@ -188,7 +190,7 @@ IDD_PAGE_ADVANCED DIALOGEX 0,0,295,240
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
 FONT 9, "Segoe UI"
 BEGIN
-	GROUPBOX      "Recent Items", -1, 6, 8, 283, 48
+	GROUPBOX      "Recent Items", -1, 6, 8, 283, 62
 	// Row 1
 	CONTROL        "Show file extensions", IDC_RECENT_SHOW_EXT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 22, 120, 10
 	LTEXT          "Show items as", -1, 120, 22, 60, 8
@@ -198,43 +200,49 @@ BEGIN
 	LTEXT          "Number of jumplist items", -1, 120, 36, 110, 8
 	EDITTEXT       IDC_RECENTMAX_EDIT, 235, 34, 34, 12, ES_NUMBER | WS_TABSTOP
 	CONTROL        "", IDC_RECENTMAX_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 269, 34, 12, 12
-	GROUPBOX      "Task Kill", -1, 6, 60, 283, 74
+	CONTROL        "Separate files and folders", IDC_RECENT_SEPARATE_ITEMS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 50, 140, 10
+	GROUPBOX      "Task Kill", -1, 6, 74, 283, 74
 	// First row of checkboxes
-	CONTROL       "Show tasks from all desktops", 2000, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 74, 120, 10
-	CONTROL       "Ignore system processes", 2001, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 74, 120, 10
+	CONTROL       "Show tasks from all desktops", 2000, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 88, 120, 10
+	CONTROL       "Ignore system processes", 2001, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 88, 120, 10
 	// Second row of checkboxes
-	CONTROL       "List tasks as separate windows", 2002, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 88, 140, 10
-	CONTROL       "Show icons", 2004, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 88, 120, 10
+	CONTROL       "List tasks as separate windows", 2002, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 102, 140, 10
+	CONTROL       "Show icons", 2004, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 150, 102, 120, 10
 	// Exclude processes textbox below checkboxes
-	LTEXT         "Exclude processes", -1, 14, 102, 80, 8
-	EDITTEXT      2005, 100, 100, 170, 12, ES_AUTOHSCROLL | WS_TABSTOP
+	LTEXT         "Exclude processes", -1, 14, 116, 80, 8
+	EDITTEXT      2005, 100, 114, 170, 12, ES_AUTOHSCROLL | WS_TABSTOP
 	// Number of tasks to display below exclude processes, like jumplist style
-	LTEXT         "Number of tasks", -1, 14, 119, 110, 8
-	EDITTEXT      2003, 100, 117, 34, 12, ES_NUMBER | WS_TABSTOP
-	CONTROL       "", 2103, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 134, 117, 12, 12
+	LTEXT         "Number of tasks", -1, 14, 133, 110, 8
+	EDITTEXT      2003, 100, 131, 34, 12, ES_NUMBER | WS_TABSTOP
+	CONTROL       "", 2103, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 134, 131, 12, 12
 	// This PC section (bottom, moved up)
-	GROUPBOX      "This PC", -1, 6, 140, 283, 24
-	CONTROL       "Show as a submenu", IDC_THISPC_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 150, 90, 10
-	CONTROL       "Expand menu items as submenus", IDC_THISPC_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 150, 120, 10
-	CONTROL       "Show icons", IDC_THISPC_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 150, 50, 10
+	GROUPBOX      "This PC", -1, 6, 154, 283, 24
+	CONTROL       "Show as a submenu", IDC_THISPC_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 164, 90, 10
+	CONTROL       "Expand menu items as submenus", IDC_THISPC_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 164, 120, 10
+	CONTROL       "Show icons", IDC_THISPC_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 164, 50, 10
 
 	// Home section (same size as This PC)
-	GROUPBOX      "Home", -1, 6, 168, 283, 24
-	CONTROL       "Show as a submenu", IDC_HOME_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 178, 90, 10
-	CONTROL       "Expand menu items as submenus", IDC_HOME_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 178, 120, 10
-	CONTROL       "Show icons", IDC_HOME_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 178, 50, 10
+	GROUPBOX      "Home", -1, 6, 182, 283, 24
+	CONTROL       "Show as a submenu", IDC_HOME_AS_SUBMENU, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 192, 90, 10
+	CONTROL       "Expand menu items as submenus", IDC_HOME_ITEMS_AS_SUBMENUS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 110, 192, 120, 10
+	CONTROL       "Show icons", IDC_HOME_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 235, 192, 50, 10
 END
 
 // Appearance Page
-IDD_PAGE_APPEARANCE DIALOGEX 0,0,295,110
+IDD_PAGE_APPEARANCE DIALOGEX 0,0,295,150
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
 FONT 9, "Segoe UI"
 BEGIN
-	GROUPBOX      "Size and Animation", -1, 6, 8, 283, 34
-	CONTROL       "Enable large icons", IDC_ROOT_MENU_ICON_SIZE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 22, 104, 10
-	LTEXT         "Animation direction", IDC_ANIMATION_LABEL, 120, 22, 90, 8
-	COMBOBOX      IDC_ANIMATION_COMBO, 214, 20, 66, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-	CONTROL       "Keep large menu highlight text color", IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 48, 180, 10
+	LTEXT         "Menu style", IDC_RENDERER_LABEL, 12, 14, 60, 8
+	COMBOBOX      IDC_RENDERER_COMBO, 120, 12, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	GROUPBOX      "Large (custom-drawn)", -1, 6, 38, 283, 56
+	LTEXT         "Animation direction", IDC_ANIMATION_LABEL, 14, 54, 92, 8
+	COMBOBOX      IDC_ANIMATION_COMBO, 120, 52, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT         "Highlight style", IDC_HIGHLIGHT_FRAME_LABEL, 14, 72, 92, 8
+	COMBOBOX      IDC_HIGHLIGHT_FRAME_COMBO, 120, 70, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	GROUPBOX      "WinUI", -1, 6, 102, 283, 38
+	LTEXT         "Size", IDC_WINUI_SIZE_LABEL, 14, 118, 92, 8
+	COMBOBOX      IDC_WINUI_SIZE_COMBO, 120, 116, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
 // Item Edit Dialog

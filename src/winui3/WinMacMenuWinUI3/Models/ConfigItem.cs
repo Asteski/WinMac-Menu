@@ -55,7 +55,7 @@ public class AppConfig
     public bool ShowFileIcons { get; set; } = true;    // file icons inside folder submenus
     public bool ShowFileExtensions { get; set; } = true;
     public bool ShowHidden { get; set; } = false;
-    public int MaxItems { get; set; } = 40;
+    public int MaxItems { get; set; } = 0;
     public string DefaultIconPath { get; set; } = "";
     public string TrayIconPath { get; set; } = "";
     public string MenuStyle { get; set; } = "modern";
@@ -68,6 +68,9 @@ public class AppConfig
     public int VOffset { get; set; } = 0;
 
     public string Corners { get; set; } = "rounded";
+
+    // [Appearance] WinUISize, with old [WinUI3] Size fallback
+    public string WinUI3Size { get; set; } = "compact";
 
     // [Controls]
     public bool WindowsKey     { get; set; } = false;
@@ -92,6 +95,7 @@ public class AppConfig
     public bool RecentShowExtensions { get; set; } = true;
     public bool RecentShowIcons { get; set; } = true;
     public bool RecentShowCleanItems { get; set; } = true;
+    public bool RecentSeparateItems { get; set; } = false;
 
     // [TaskKill]
     public int TaskKillMax { get; set; } = 24;

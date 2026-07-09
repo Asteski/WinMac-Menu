@@ -69,13 +69,32 @@ public partial class App : Application
     {
         if (_activeMenu != null) return; // already open
 
-        var config  = IniParser.Load(_iniPath); // reload INI each time
-        var window  = new MenuWindow(config, _iniPath);
+        try
+        {
+            var config  = IniParser.Load(_iniPath); // reload INI each time
+            var window  = new MenuWindow(config, _iniPath);
 
-        window.Closed += (_, _) => _activeMenu = null;
+            window.Closed += (_, _) => _activeMenu = null;
 
-        _activeMenu = window;
-        window.Activate();
+            _activeMenu = window;
+            window.Activate();
+        }
+        catch (Exception ex)
+        {
+            _activeMenu = null;
+            LogException("ShowMenu", ex);
+        }
+    }
+
+    internal static void LogException(string context, Exception ex)
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "WinMacMenuWinUI3.log");
+            File.AppendAllText(path,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {context}{Environment.NewLine}{ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     private void Exit()

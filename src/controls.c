@@ -1,7 +1,10 @@
 #include "controls.h"
 #include "menu.h"
+#include "winui3_launcher.h"
 #include <shellapi.h>
 #include <shlwapi.h>
+
+extern Config g_cfg;
 
 void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND hWnd) {
     // Debug output
@@ -19,6 +22,9 @@ void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND h
         case CA_WINMAC_MENU:
             // Show WinMac Menu - same as the current behavior
             OutputDebugStringW(L"Action: CA_WINMAC_MENU\n");
+            if (g_cfg.useWinUI3Menu && LaunchWinUI3Menu(&g_cfg)) {
+                break;
+            }
             if (hWnd) {
                 PostMessageW(hWnd, WM_APP, 0, 0);
             }

@@ -83,6 +83,7 @@ static UINT WINAPI big_menu_show_native_submenu_callback(HWND owner, HMENU hMenu
 static void begin_menu_corner_hook(void);
 static void end_menu_corner_hook(void);
 static void draw_fake_rounded_highlight(HDC hdc, const RECT* rc, int radius, COLORREF fillColor, COLORREF backgroundColor);
+static void draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor);
 static COLORREF blend_colors(COLORREF base, COLORREF top, int alpha);
 static void draw_root_menu_submenu_arrow(HDC hdc, const RECT* rc, COLORREF color);
 static void add_item_icon(UINT id, HICON h) {
@@ -246,6 +247,26 @@ static void draw_fake_rounded_highlight(HDC hdc, const RECT* rc, int radius, COL
         }
     }
 
+}
+
+static void draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor) {
+    HPEN pen;
+    HPEN oldPen;
+    HBRUSH oldBrush;
+
+    if (!hdc || !rc) return;
+    pen = CreatePen(PS_SOLID, 1, borderColor);
+    if (!pen) return;
+    oldPen = (HPEN)SelectObject(hdc, pen);
+    oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    if (radius > 0) {
+        RoundRect(hdc, rc->left, rc->top, rc->right, rc->bottom, radius * 2, radius * 2);
+    } else {
+        Rectangle(hdc, rc->left, rc->top, rc->right, rc->bottom);
+    }
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(pen);
 }
 
 static void apply_menu_window_corners(HWND hWnd) {
@@ -423,6 +444,12 @@ static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
     // Expand any environment variables.
     if (ExpandEnvironmentStringsW(module, expanded, ARRAYSIZE(expanded)) && expanded[0]) {
         lstrcpynW(module, expanded, ARRAYSIZE(module));
+    }
+    if (size > get_small_icon_size()) {
+        UINT extractedPrivate = PrivateExtractIconsW(module, idx, size, size, &hLarge, NULL, 1, 0);
+        if (extractedPrivate > 0 && hLarge) {
+            return hLarge;
+        }
     }
     extracted = ExtractIconExW(module, idx, &hLarge, &hSmall, 1);
     if (extracted == 0) {
@@ -640,6 +667,41 @@ static HICON get_file_icon(const WCHAR* path) {
     return get_file_icon_sized(path, FALSE);
 }
 
+static BOOL recent_item_is_folder(const RecentItem* item) {
+    if (!item || !item->path[0]) return FALSE;
+    return item->isFolder;
+}
+
+static void append_recent_item_to_menu(HMENU sub, const RecentItem* items, int i) {
+    WCHAR text[MAX_PATH + 8];
+    if (!sub || !items || !items[i].path[0]) return;
+
+    if (g_cfg.recentLabelMode == 1) {
+        const WCHAR* p = wcsrchr(items[i].path, L'\\');
+        const WCHAR* name = p ? p + 1 : items[i].path;
+        lstrcpynW(text, name, ARRAYSIZE(text));
+        BOOL stripExt = FALSE;
+        if (!g_cfg.recentShowExtensions) stripExt = TRUE;
+        else if (!g_cfg.showExtensions) stripExt = TRUE;
+        if (stripExt && text[0] != L'.') {
+            WCHAR* dot = wcsrchr(text, L'.');
+            if (dot) *dot = 0;
+        }
+    } else {
+        lstrcpynW(text, items[i].path, ARRAYSIZE(text));
+    }
+    AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + i, text);
+    if (g_cfg.recentShowIcons) {
+        HICON hIcon = get_file_icon(items[i].path);
+        if (hIcon) {
+            add_item_icon(IDM_RECENT_BASE + i, hIcon);
+            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                assign_legacy_item_bitmap(sub, IDM_RECENT_BASE + i, hIcon);
+            }
+        }
+    }
+}
+
 static HMENU build_recent_submenu(void) {
     HMENU sub = CreatePopupMenu();
     RecentItem* items = NULL;
@@ -654,36 +716,27 @@ static HMENU build_recent_submenu(void) {
         }
         return sub;
     }
-    for (int i = 0; i < n; ++i) {
-        if (!items[i].path[0]) continue; // skip empty (defensive)
-        WCHAR text[MAX_PATH + 8];
-        if (g_cfg.recentLabelMode == 1) {
-            // filename only (optionally strip extension)
-            const WCHAR* p = wcsrchr(items[i].path, L'\\');
-            const WCHAR* name = p ? p + 1 : items[i].path;
-            lstrcpynW(text, name, ARRAYSIZE(text));
-            BOOL stripExt = FALSE;
-            // Inverted semantics: showExtensions/recentShowExtensions mean KEEP extensions
-            // We strip when the corresponding show flag is false.
-            if (!g_cfg.recentShowExtensions) stripExt = TRUE; // explicit recent override to hide
-            else if (!g_cfg.showExtensions) stripExt = TRUE;   // fallback to global hide when recent doesn't force show
-            if (stripExt && text[0] != L'.') {
-                WCHAR* dot = wcsrchr(text, L'.');
-                if (dot) *dot = 0;
-            }
-        } else {
-            // full path (unchanged)
-            lstrcpynW(text, items[i].path, ARRAYSIZE(text));
+    if (g_cfg.separateItems) {
+        BOOL addedFolders = FALSE;
+        BOOL addedFiles = FALSE;
+        for (int i = 0; i < n; ++i) {
+            if (!items[i].path[0] || recent_item_is_folder(&items[i])) continue;
+            if (!addedFiles) AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"Files");
+            append_recent_item_to_menu(sub, items, i);
+            addedFiles = TRUE;
         }
-        AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + i, text);
-        if (g_cfg.recentShowIcons) {
-            HICON hIcon = get_file_icon(items[i].path);
-            if (hIcon) {
-                add_item_icon(IDM_RECENT_BASE + i, hIcon);
-                if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
-                    assign_legacy_item_bitmap(sub, IDM_RECENT_BASE + i, hIcon);
-                }
+        for (int i = 0; i < n; ++i) {
+            if (!items[i].path[0] || !recent_item_is_folder(&items[i])) continue;
+            if (!addedFolders) {
+                if (addedFiles) AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"Folders");
             }
+            append_recent_item_to_menu(sub, items, i);
+            addedFolders = TRUE;
+        }
+    } else {
+        for (int i = 0; i < n; ++i) {
+            append_recent_item_to_menu(sub, items, i);
         }
     }
     if (items) LocalFree(items);
@@ -1520,7 +1573,7 @@ static HMENU build_menu(void) {
             else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
             else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                 if (ipath) {
-                    HICON hico = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                    HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                     // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
                     if (g_cfg.showIcons == 1) add_item_icon(id, hico);
                     if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1 && !use_legacy_root_large_icon_layout()) assign_legacy_item_bitmap(hMenu, id, hico);
@@ -1554,12 +1607,12 @@ static HMENU build_menu(void) {
                     else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
                     else if (it->iconPath[0]) ipath = it->iconPath;
                     if (!ipath) {
-                        if (g_cfg.showFolderIcons) hicoF = use_legacy_root_large_icon_layout() ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
+                        if (g_cfg.showFolderIcons) hicoF = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                         else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
                         else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                         else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                     }
-                    if (!hicoF && ipath) hicoF = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                    if (!hicoF && ipath) hicoF = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                     if (hicoF) {
                         add_item_icon(popupId, hicoF);
                         if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hicoF);
@@ -1593,7 +1646,7 @@ static HMENU build_menu(void) {
                 if (!ipath) {
                     if (g_cfg.showFolderIcons) {
                         // When showing folder icons and no per-item icon, use system folder icon
-                        hico = use_legacy_root_large_icon_layout() ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
+                        hico = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     } else {
                         // Fall back to defaults
                         if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
@@ -1602,7 +1655,7 @@ static HMENU build_menu(void) {
                     }
                 }
                 if (!hico && ipath) {
-                    hico = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                    hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 }
                 if (hico) {
                     // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
@@ -1637,7 +1690,7 @@ static HMENU build_menu(void) {
                     // Only load/assign popup-root icons when icons are enabled (legacy only).
                     // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
                     if (g_cfg.showIcons == 1) {
-                        HICON hico = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                        HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                         if (hico) {
                             add_item_icon(popupId, hico);
                             if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hico);
@@ -1681,7 +1734,7 @@ static HMENU build_menu(void) {
                     // Only load/assign popup-root icons when icons are enabled (legacy only).
                     // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
                     if (g_cfg.showIcons == 1) {
-                        HICON hico = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                        HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                         if (hico) {
                             add_item_icon(popupId, hico);
                             if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hico);
@@ -1718,14 +1771,14 @@ static HMENU build_menu(void) {
                 else if (it->iconPath[0]) ipath = it->iconPath;
                 if (!ipath) {
                     if (g_cfg.showFolderIcons) {
-                        hicoF = get_system_folder_icon();
+                        hicoF = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     } else {
                         if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
                         else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                         else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                     }
                 }
-                if (!hicoF && ipath) hicoF = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                if (!hicoF && ipath) hicoF = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 if (hicoF) {
                     if (g_cfg.showIcons == 1) add_item_icon(popupId, hicoF);
                     if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
@@ -1776,7 +1829,7 @@ static HMENU build_menu(void) {
                 else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
                 else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                 else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
-                if (ipath) hicoR = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                if (ipath) hicoR = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 if (hicoR) {
                     add_item_icon(popupId, hicoR);
                     if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hicoR);
@@ -1820,7 +1873,7 @@ static HMENU build_menu(void) {
                 else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
                 else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                 else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
-                if (ipath) hicoP = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                if (ipath) hicoP = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 if (hicoP) {
                     add_item_icon(popupId, hicoP);
                     if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hicoP);
@@ -1945,7 +1998,7 @@ static HMENU build_menu(void) {
                 if (dark && it->iconPathDark[0]) ipath = it->iconPathDark;
                 else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
                 else if (it->iconPath[0]) ipath = it->iconPath;
-                if (ipath) hico = use_legacy_root_large_icon_layout() ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
+                if (ipath) hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 if (hico) {
                     add_item_icon(popupId, hico);
                     if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hico);
@@ -2164,7 +2217,9 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
     for (int i = 0; i < g_cfg.count; ++i) {
         ConfigItem* it = &g_cfg.items[i];
         switch (it->type) {
-        case CI_SEPARATOR: break;
+        case CI_SEPARATOR:
+        case CI_CATEGORY:
+            break;
         case CI_URI:
             if (id == cmd) { open_uri(it->path); return; } id++; break;
         case CI_FILE:
@@ -2197,6 +2252,10 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
         case CI_POWER_HIBERNATE:
             if (id == cmd) { system_hibernate(); return; } id++; break;
         case CI_RECENT_SUBMENU:
+        case CI_POWER_MENU:
+        case CI_THISPC:
+        case CI_HOME:
+        case CI_TASKKILL:
             break;
         }
     }
@@ -2262,6 +2321,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt) {
             params.itemCount = build_big_menu_snapshot(hMenu, snapshot, ARRAYSIZE(snapshot));
             params.animationDirection = (UINT)g_cfg.animationDirection;
             params.keepLargeMenuHighlightTextColor = g_cfg.keepLargeMenuHighlightTextColor;
+            params.highlightFrame = (UINT)g_cfg.largeMenuHighlightFrame;
             result.cbSize = sizeof(result);
 
             handledByDll = BigMenuBridge_ShowIfAvailable(&params, &result);
@@ -2418,19 +2478,27 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
     FillRect(hdc, &rc, GetSysColorBrush(COLOR_MENU));
     if (selected) {
         RECT sel = rc;
+        BOOL drawBackground = (g_cfg.largeMenuHighlightFrame != HIGHLIGHT_BORDER);
+        BOOL drawBorder = (g_cfg.largeMenuHighlightFrame != HIGHLIGHT_BACKGROUND);
         InflateRect(&sel, -1, 0);
         if (sel.top > rc.top) sel.top -= 1;
         if (sel.bottom < rc.bottom) sel.bottom += 1;
-        if (selectionRadius > 0) {
-            draw_fake_rounded_highlight(hdc, &sel, selectionRadius, highlightColor, GetSysColor(COLOR_MENU));
-        } else {
-            HBRUSH hbrHighlight = CreateSolidBrush(highlightColor);
-            if (hbrHighlight) {
-                FillRect(hdc, &sel, hbrHighlight);
-                DeleteObject(hbrHighlight);
+        if (drawBackground) {
+            if (selectionRadius > 0) {
+                draw_fake_rounded_highlight(hdc, &sel, selectionRadius, highlightColor, GetSysColor(COLOR_MENU));
             } else {
-                FillRect(hdc, &sel, GetSysColorBrush(COLOR_HIGHLIGHT));
+                HBRUSH hbrHighlight = CreateSolidBrush(highlightColor);
+                if (hbrHighlight) {
+                    FillRect(hdc, &sel, hbrHighlight);
+                    DeleteObject(hbrHighlight);
+                } else {
+                    FillRect(hdc, &sel, GetSysColorBrush(COLOR_HIGHLIGHT));
+                }
             }
+        }
+        if (drawBorder) {
+            COLORREF stroke = drawBackground ? blend_colors(highlightColor, highlightTextColor, 96) : highlightColor;
+            draw_highlight_border(hdc, &sel, selectionRadius, stroke);
         }
     }
 
@@ -2439,7 +2507,7 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
     SetBkMode(hdc, TRANSPARENT);
     if (disabled) {
         textColor = GetSysColor(COLOR_GRAYTEXT);
-    } else if (selected && !g_cfg.keepLargeMenuHighlightTextColor) {
+    } else if (selected && g_cfg.largeMenuHighlightFrame != HIGHLIGHT_BORDER && !g_cfg.keepLargeMenuHighlightTextColor) {
         textColor = highlightTextColor;
     }
     SetTextColor(hdc, textColor);

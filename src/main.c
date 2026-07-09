@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "controls.h"
 #include "taskbar_hook.h"
+#include "winui3_launcher.h"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -76,8 +77,29 @@ static HWND g_hHookTargetWnd = NULL;
 static BOOL g_winKeyCaptureActive = FALSE;
 static DWORD g_winKeyCapturedVk = 0;
 static BOOL g_winKeyCaptureNeedsShift = FALSE;
+static BOOL g_winKeyXTriggered = FALSE;
+static DWORD g_winKeyXReleaseVk = 0;
 static DWORD g_skipNextOpenUntil = 0;
-// Retrieve FileVersion (e.g., "0.4.0") from the executable's VERSIONINFO
+
+static void release_suppressed_win_keys(void) {
+    INPUT inputs[2];
+    ZeroMemory(inputs, sizeof(inputs));
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_LWIN;
+    inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = VK_RWIN;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, inputs, sizeof(inputs[0]));
+
+    g_winKeyCaptureActive = FALSE;
+    g_winKeyCapturedVk = 0;
+    g_winKeyCaptureNeedsShift = FALSE;
+    g_winKeyXTriggered = FALSE;
+    g_winKeyXReleaseVk = 0;
+}
+
+// Retrieve FileVersion (e.g., "1.0.0-beta") from the executable's VERSIONINFO.
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
     out[0] = 0;
@@ -89,6 +111,16 @@ static void get_file_version_string(wchar_t* out, size_t cchOut) {
     void* data = LocalAlloc(LMEM_FIXED, size);
     if (!data) return;
     if (!GetFileVersionInfoW(path, 0, size, data)) { LocalFree(data); return; }
+
+    LPWSTR strVersion = NULL;
+    UINT strVersionLen = 0;
+    if (VerQueryValueW(data, L"\\StringFileInfo\\040904B0\\FileVersion", (LPVOID*)&strVersion, &strVersionLen) &&
+        strVersion && strVersionLen > 0) {
+        lstrcpynW(out, strVersion, (int)cchOut);
+        LocalFree(data);
+        return;
+    }
+
     VS_FIXEDFILEINFO* fixed = NULL; UINT fixedLen = 0;
     if (VerQueryValueW(data, L"\\", (LPVOID*)&fixed, &fixedLen) && fixed && fixedLen >= sizeof(VS_FIXEDFILEINFO)) {
         WORD major = HIWORD(fixed->dwFileVersionMS);
@@ -597,6 +629,7 @@ static HWND find_big_menu_window(void) {
 static BOOL try_close_big_menu(void) {
     HWND bigMenu = find_big_menu_window();
     if (!bigMenu) return FALSE;
+    release_suppressed_win_keys();
     PostMessageW(bigMenu, WM_CANCELMODE, 0, 0);
     g_skipNextOpenUntil = GetTickCount() + 250;
     return TRUE;
@@ -699,24 +732,56 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
 }
 
 static LRESULT CALLBACK lowlevel_win_key_proc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION && g_runInBackground && (g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger) && !g_menuShowingNow) {
+    if (nCode == HC_ACTION && g_runInBackground && (g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger || g_cfg.windowsKeyXTrigger) && !g_menuShowingNow) {
         const KBDLLHOOKSTRUCT* ks = (const KBDLLHOOKSTRUCT*)lParam;
+        BOOL isWinKey = (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN);
 
         if (should_block_triggers_for_fullscreen(g_cfg.ignoreTriggersWhenFullscreen, g_cfg.fullscreenExclusionList, g_hMainWnd)) {
             g_winKeyCaptureActive = FALSE;
             g_winKeyCapturedVk = 0;
             g_winKeyCaptureNeedsShift = FALSE;
+            g_winKeyXTriggered = FALSE;
+            g_winKeyXReleaseVk = 0;
             return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
+        }
+
+        if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) && g_winKeyXTriggered && isWinKey && ks->vkCode == g_winKeyXReleaseVk) {
+            INPUT release;
+            ZeroMemory(&release, sizeof(release));
+            release.type = INPUT_KEYBOARD;
+            release.ki.wVk = (WORD)ks->vkCode;
+            release.ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(1, &release, sizeof(release));
+
+            g_winKeyXTriggered = FALSE;
+            g_winKeyXReleaseVk = 0;
+            return 1;
         }
 
         if (ks->flags & LLKHF_INJECTED) {
             return CallNextHookEx(g_hWinKeyHook, nCode, wParam, lParam);
         }
 
-        BOOL isWinKey = (ks->vkCode == VK_LWIN || ks->vkCode == VK_RWIN);
         BOOL shiftPressed = ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) || (ks->vkCode == VK_SHIFT);
 
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            if (g_cfg.windowsKeyXTrigger && (ks->vkCode == 'X') &&
+                (((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0))) {
+                DWORD releaseVk = ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0) ? VK_RWIN : VK_LWIN;
+                g_winKeyCaptureActive = FALSE;
+                g_winKeyCapturedVk = 0;
+                g_winKeyCaptureNeedsShift = FALSE;
+                g_winKeyXTriggered = TRUE;
+                g_winKeyXReleaseVk = releaseVk;
+
+                if (g_cfg.windowsKeyAction == CA_WINMAC_MENU && g_hMainWnd) {
+                    PostMessageW(g_hMainWnd, WM_APP, 0, 0);
+                } else {
+                    ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, g_hMainWnd);
+                }
+                return 1;
+            }
+
             if (isWinKey) {
                 if (!g_winKeyCaptureActive) {
                     BOOL wantsShiftMode = shiftPressed && g_cfg.shiftWindowsKeyTrigger;
@@ -749,7 +814,19 @@ static LRESULT CALLBACK lowlevel_win_key_proc(int nCode, WPARAM wParam, LPARAM l
                     g_winKeyCapturedVk = 0;
                     g_winKeyCaptureNeedsShift = FALSE;
                     if (shiftMatch) {
-                        ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, g_hMainWnd);
+                        INPUT release;
+                        ZeroMemory(&release, sizeof(release));
+                        release.type = INPUT_KEYBOARD;
+                        release.ki.wVk = (WORD)ks->vkCode;
+                        release.ki.dwFlags = KEYEVENTF_KEYUP;
+                        SendInput(1, &release, sizeof(release));
+                        release_suppressed_win_keys();
+
+                        if (g_cfg.windowsKeyAction == CA_WINMAC_MENU && g_hMainWnd) {
+                            PostMessageW(g_hMainWnd, WM_APP, 0, 0);
+                        } else {
+                            ExecuteControlAction(g_cfg.windowsKeyAction, g_cfg.windowsKeyCommand, g_hMainWnd);
+                        }
                         return 1;
                     }
                 }
@@ -774,6 +851,8 @@ static void uninstall_windows_key_hook(void) {
     g_winKeyCaptureActive = FALSE;
     g_winKeyCapturedVk = 0;
     g_winKeyCaptureNeedsShift = FALSE;
+    g_winKeyXTriggered = FALSE;
+    g_winKeyXReleaseVk = 0;
 }
 
 static void install_menu_hooks(HWND hOwner) {
@@ -786,6 +865,22 @@ static void uninstall_menu_hooks(void) {
     if (g_hKbHook) { UnhookWindowsHookEx(g_hKbHook); g_hKbHook = NULL; }
     if (g_hMouseHook) { UnhookWindowsHookEx(g_hMouseHook); g_hMouseHook = NULL; }
     g_hHookTargetWnd = NULL;
+}
+
+static void show_configured_menu(HWND hWnd, POINT pt) {
+    if (g_cfg.useWinUI3Menu && LaunchWinUI3Menu(&g_cfg)) {
+        release_suppressed_win_keys();
+        return;
+    }
+
+    g_menuActive = TRUE;
+    g_menuShowingNow = TRUE;
+    install_menu_hooks(hWnd);
+    ShowWinXMenu(hWnd, pt);
+    uninstall_menu_hooks();
+    release_suppressed_win_keys();
+    g_menuShowingNow = FALSE;
+    g_menuActive = FALSE;
 }
 
 // Background mode: hooks and triggers managed by this process
@@ -824,7 +919,7 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"0.14.1")
+            (ver[0] ? ver : L"1.0.0-beta")
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 
@@ -909,6 +1004,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_ACTIVATEAPP:
         if (g_menuShowingNow && wParam == FALSE) {
             if (!try_close_big_menu()) {
+                release_suppressed_win_keys();
                 EndMenu();
             }
             return 0;
@@ -917,6 +1013,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_CANCELMODE:
         if (g_menuShowingNow) {
             if (!try_close_big_menu()) {
+                release_suppressed_win_keys();
                 EndMenu();
             }
             return 0;
@@ -943,13 +1040,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == g_trayMsg) {
         if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) {
             // Toggle: if menu visible, close; else open
-            if (g_menuShowingNow) { EndMenu(); }
+            if (g_menuShowingNow) { release_suppressed_win_keys(); EndMenu(); }
             else if (!g_menuActive) {
-                g_menuActive = TRUE; g_menuShowingNow = TRUE;
-                install_menu_hooks(hWnd);
-                POINT pt = {0,0}; ShowWinXMenu(hWnd, pt);
-                uninstall_menu_hooks();
-                g_menuShowingNow = FALSE; g_menuActive = FALSE;
+                POINT pt = {0,0};
+                show_configured_menu(hWnd, pt);
             }
             return 0;
         } else if (lParam == WM_RBUTTONUP) {
@@ -1089,33 +1183,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_MBUTTONUP:
     {
         if (g_menuActive) return 0;
-        g_menuActive = TRUE;
-        g_menuShowingNow = TRUE;
-        install_menu_hooks(hWnd);
         POINT pt = {0,0};
-        ShowWinXMenu(hWnd, pt);
-        uninstall_menu_hooks();
-        g_menuShowingNow = FALSE;
-        g_menuActive = FALSE;
+        show_configured_menu(hWnd, pt);
         return 0;
     }
     case WM_LBUTTONUP:
     {
         if (g_menuActive) return 0;
-        g_menuActive = TRUE;
-        g_menuShowingNow = TRUE;
-        install_menu_hooks(hWnd);
         POINT pt = {0,0};
-        ShowWinXMenu(hWnd, pt);
-        uninstall_menu_hooks();
-        g_menuShowingNow = FALSE;
-        g_menuActive = FALSE;
+        show_configured_menu(hWnd, pt);
         return 0;
     }
     case WM_KEYDOWN:
         if (wParam == VK_APPS || (wParam == 'X' && (GetKeyState(VK_LWIN) & 0x8000))) {
             POINT pt = {0,0};
-            ShowWinXMenu(hWnd, pt);
+            show_configured_menu(hWnd, pt);
             return 0;
         }
         break;
@@ -1148,6 +1230,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // Toggle behavior: if menu visible, close it; else open it.
         if (g_menuShowingNow) {
             if (!try_close_big_menu()) {
+                release_suppressed_win_keys();
                 EndMenu(); // dismiss current popup
             }
             g_skipNextOpenUntil = GetTickCount() + 250;
@@ -1158,12 +1241,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 return 0;
             }
             g_skipNextOpenUntil = 0;
-            g_menuActive = TRUE; g_menuShowingNow = TRUE;
-            install_menu_hooks(hWnd);
             POINT pt = {0,0};
-            ShowWinXMenu(hWnd, pt);
-            uninstall_menu_hooks();
-            g_menuShowingNow = FALSE; g_menuActive = FALSE;
+            show_configured_menu(hWnd, pt);
             return 0;
         }
         return 0;
@@ -1451,18 +1530,14 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
         }
         
         // Optional Windows key trigger: handles lone Win key only and preserves Win+ combos.
-        if ((g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger) && g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
+        if ((g_cfg.windowsKeyTrigger || g_cfg.shiftWindowsKeyTrigger || g_cfg.windowsKeyXTrigger) && g_cfg.windowsKeyAction != CA_WINDOWS_MENU) {
             install_windows_key_hook();
         }
         
         // Optionally show menu on first launch (skip when started with --reload)
         if (g_cfg.showOnLaunch && !g_reloadMode) {
             POINT pt = {0,0};
-            g_menuActive = TRUE; g_menuShowingNow = TRUE;
-            install_menu_hooks(hWnd);
-            ShowWinXMenu(hWnd, pt);
-            uninstall_menu_hooks();
-            g_menuShowingNow = FALSE; g_menuActive = FALSE;
+            show_configured_menu(hWnd, pt);
         }
         // Message loop
         MSG msg;
@@ -1478,7 +1553,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
     } else {
         // One-shot mode: show menu and exit as before
         POINT pt = {0,0};
-        ShowWinXMenu(hWnd, pt);
+        show_configured_menu(hWnd, pt);
         DestroyWindow(hWnd);
         if (g_hSingleInstance) { CloseHandle(g_hSingleInstance); g_hSingleInstance = NULL; }
         return 0;

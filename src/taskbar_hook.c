@@ -103,15 +103,22 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
                 }
                 
                 if (action != CA_NOTHING) {
-                    // Execute the configured action
                     HWND hTarget = g_hOwnerWnd ? g_hOwnerWnd : g_hTaskbar;
-                    ExecuteControlAction(action, command, hTarget);
+
+                    // Never launch the menu synchronously from a low-level hook.
+                    // WinUI bridge startup can take long enough for Windows to
+                    // punish the hook and leave mouse state feeling stuck.
+                    if (action == CA_WINMAC_MENU && hTarget) {
+                        PostMessageW(hTarget, WM_APP, 0, 0);
+                    } else {
+                        ExecuteControlAction(action, command, hTarget);
+                    }
                     
                     // Suppress the click if we're not showing Windows menu
                     if (action != CA_WINDOWS_MENU) {
-                        if (bLeftClick) g_suppressNextLeftUp = TRUE;
-                        if (bMiddleClick) g_suppressNextMiddleUp = TRUE;
-                        if (bRightClick) g_suppressNextRightUp = TRUE;
+                        g_suppressNextLeftUp = FALSE;
+                        g_suppressNextMiddleUp = FALSE;
+                        g_suppressNextRightUp = FALSE;
                         return 1; // Suppress the mouse event
                     }
                 }

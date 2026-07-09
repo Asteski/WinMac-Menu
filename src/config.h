@@ -89,6 +89,7 @@ typedef struct Config {
     enum { VP_TOP=0, VP_CENTER=1, VP_BOTTOM=2 } vPlacement;
     int vOffset; // pixels from top/bottom when not centered
     enum { ANIM_AUTO=0, ANIM_TOP=1, ANIM_BOTTOM=2, ANIM_LEFT=3, ANIM_RIGHT=4 } animationDirection; // [Appearance] LargeMenuAnimation=disabled|top|bottom|left|right
+    enum { HIGHLIGHT_BACKGROUND=0, HIGHLIGHT_BORDER=1, HIGHLIGHT_BACKGROUND_BORDER=2 } largeMenuHighlightFrame; // [Appearance] LargeMenuHighlightFrame=background|border|background-border
     // When placement is center on an axis, optionally ignore the corresponding offset
     BOOL ignoreHOffsetWhenCentered; // [Placement] IgnoreOffsetWhenCentered=true|hoffset|voffset|false
     BOOL ignoreVOffsetWhenCentered; // derived from the same key
@@ -104,11 +105,14 @@ typedef struct Config {
     BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
     BOOL showFileIcons; // [General] ShowFileIcons=true shows file icons for file entries inside folder-style submenus
     BOOL rootMenuLargeIcons; // [Appearance] LargeMenuIcons=true uses larger icons on root menu entries only
+    BOOL useWinUI3Menu; // [Appearance] UseWinUI3Menu=true renders the menu through the WinUI 3 helper
+    WCHAR winuiSize[16]; // [Appearance] WinUISize=compact|default
     BOOL keepLargeMenuHighlightTextColor; // [Appearance] KeepLargeMenuHighlightTextColor=true keeps normal font/arrow color on highlighted large-menu items
     BOOL keepMenuOpenAfterContextAction; // [General] KeepMenuOpenAfterContextAction=true keeps WinMac menu visible after running an item from shell context menu
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
     BOOL recentShowIcons;      // [General] RecentShowIcons=true shows file icons in recent submenu
+    BOOL separateItems; // [RecentItems] SeparateItems=true separates recent files and folders
     
     // TaskKill defaults
     int taskKillMax;
@@ -130,7 +134,7 @@ typedef struct Config {
     WCHAR trayIconPath[MAX_PATH];
     WCHAR trayIconPathLight[MAX_PATH];
     WCHAR trayIconPathDark[MAX_PATH];
-    BOOL monochromeTrayIcon; // [General] MonochromeTrayIcon=true|false (default true) - when true, use the monochrome theme icon paths, otherwise fall back to app.ico
+    BOOL monochromeTrayIcon; // [General] MonochromeTrayIcon=true|false (default false) - when true, use the monochrome theme icon paths, otherwise fall back to app.ico
     // Power menu exclusion flags (Advanced tab): when TRUE, corresponding action is hidden from POWER_MENU aggregate
     BOOL excludeSleep;
     BOOL excludeShutdown;
@@ -145,6 +149,7 @@ typedef struct Config {
     WCHAR windowsKeyCommand[MAX_PATH];     // Custom command for Windows key (when action = CA_CUSTOM_COMMAND)
     BOOL windowsKeyTrigger;                // [Controls] WindowsKey=true enables Windows key trigger
     BOOL shiftWindowsKeyTrigger;           // [Controls] ShiftWindowsKey=true enables Shift+Windows key trigger
+    BOOL windowsKeyXTrigger;               // [Controls] WindowsKeyX=true enables Windows+X trigger
     BOOL leftClickTrigger;                 // [Controls] LeftClick=true enables Start button left-click trigger
     BOOL rightClickTrigger;                // [Controls] RightClick=true enables Start button right-click trigger
     BOOL middleClickTrigger;               // [Controls] MiddleClick=true enables Start button middle-click trigger

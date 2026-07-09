@@ -19,9 +19,16 @@
 
 // Forward declaration for dialog procedure
 static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam);
+static HWND g_activeSettingsDlg = NULL;
 
 // Shows the settings dialog (modal). Returns TRUE if any values were changed and saved.
 BOOL ShowSettingsDialog(HWND owner, Config* cfg) {
+    if (g_activeSettingsDlg && IsWindow(g_activeSettingsDlg)) {
+        ShowWindow(g_activeSettingsDlg, SW_SHOWNORMAL);
+        SetForegroundWindow(g_activeSettingsDlg);
+        return FALSE;
+    }
+
     if (cfg) {
         WCHAR iniPath[MAX_PATH] = {0};
         if (cfg->iniPath[0]) {
@@ -39,6 +46,7 @@ BOOL ShowSettingsDialog(HWND owner, Config* cfg) {
         MainDlgProc,
         (LPARAM)cfg
     );
+    g_activeSettingsDlg = NULL;
     g_settingsOwnerHwnd = NULL;
     return (result == IDOK) ? TRUE : FALSE;
 }
@@ -436,6 +444,7 @@ static void Controls_Load(HWND pg, Config* c){
     set_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK, c->shiftMiddleClickTrigger);
     set_check(pg, IDC_CTRL_WINDOWS_KEY, c->windowsKeyTrigger);
     set_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY, c->shiftWindowsKeyTrigger);
+    set_check(pg, IDC_CTRL_WINDOWS_KEY_X, c->windowsKeyXTrigger);
     set_check(pg, IDC_IGNORE_FULLSCREEN_CHECK, c->ignoreTriggersWhenFullscreen);
     SetDlgItemTextW(pg, IDC_FULLSCREEN_EXCLUSION_EDIT, c->fullscreenExclusionList);
 }
@@ -452,6 +461,7 @@ static BOOL Controls_Save(HWND pg, Config* c){
     b = get_check(pg, IDC_CTRL_SHIFT_MIDDLE_CLICK); if(c->shiftMiddleClickTrigger != b){ c->shiftMiddleClickTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_WINDOWS_KEY); if(c->windowsKeyTrigger != b){ c->windowsKeyTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY); if(c->shiftWindowsKeyTrigger != b){ c->shiftWindowsKeyTrigger = b; ch = TRUE; }
+    b = get_check(pg, IDC_CTRL_WINDOWS_KEY_X); if(c->windowsKeyXTrigger != b){ c->windowsKeyXTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_IGNORE_FULLSCREEN_CHECK); if(c->ignoreTriggersWhenFullscreen != b){ c->ignoreTriggersWhenFullscreen = b; ch = TRUE; }
     
     WCHAR exclusionBuf[1024];
@@ -471,6 +481,7 @@ static BOOL Controls_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"Controls", L"ShiftMiddleClick", c->shiftMiddleClickTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"WindowsKey", c->windowsKeyTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"ShiftWindowsKey", c->shiftWindowsKeyTrigger?L"true":L"false", c->iniPath);
+        WritePrivateProfileStringW(L"Controls", L"WindowsKeyX", c->windowsKeyXTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", c->ignoreTriggersWhenFullscreen?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"FullscreenExclusionList", c->fullscreenExclusionList, c->iniPath);
     }
@@ -478,9 +489,42 @@ static BOOL Controls_Save(HWND pg, Config* c){
 }
 
 // -------- Appearance Page --------
+static void Appearance_UpdateEnabled(HWND pg) {
+    HWND hRenderer = GetDlgItem(pg, IDC_RENDERER_COMBO);
+    int renderer = hRenderer ? (int)SendMessageW(hRenderer, CB_GETCURSEL, 0, 0) : 0;
+    BOOL otherEnabled = (renderer == 1);
+    BOOL winuiEnabled = (renderer == 2);
+
+    EnableWindow(GetDlgItem(pg, IDC_ANIMATION_LABEL), otherEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_ANIMATION_COMBO), otherEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_LABEL), otherEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_COMBO), otherEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_WINUI_SIZE_LABEL), winuiEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_WINUI_SIZE_COMBO), winuiEnabled);
+}
+
 static void Appearance_Load(HWND pg, Config* c){
-    set_check(pg, IDC_ROOT_MENU_ICON_SIZE, c->rootMenuLargeIcons);
-    set_check(pg, IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR, c->keepLargeMenuHighlightTextColor);
+    {
+        HWND hRenderer = GetDlgItem(pg, IDC_RENDERER_COMBO);
+        if (hRenderer) {
+            SendMessageW(hRenderer, CB_RESETCONTENT, 0, 0);
+            SendMessageW(hRenderer, CB_ADDSTRING, 0, (LPARAM)L"Default");
+            SendMessageW(hRenderer, CB_ADDSTRING, 0, (LPARAM)L"Large (custom-drawn)");
+            SendMessageW(hRenderer, CB_ADDSTRING, 0, (LPARAM)L"WinUI");
+            int renderer = c->useWinUI3Menu ? 2 : (c->rootMenuLargeIcons ? 1 : 0);
+            SendMessageW(hRenderer, CB_SETCURSEL, renderer, 0);
+        }
+    }
+    {
+        HWND hFrame = GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_COMBO);
+        if (hFrame) {
+            SendMessageW(hFrame, CB_RESETCONTENT, 0, 0);
+            SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Background");
+            SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Border");
+            SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Background + border");
+            SendMessageW(hFrame, CB_SETCURSEL, c->largeMenuHighlightFrame, 0);
+        }
+    }
     {
         HWND hAnim = GetDlgItem(pg, IDC_ANIMATION_COMBO);
         if (hAnim) {
@@ -498,20 +542,42 @@ static void Appearance_Load(HWND pg, Config* c){
                 else if (c->animationDirection == ANIM_RIGHT) animSel = 4;
                 SendMessageW(hAnim, CB_SETCURSEL, animSel, 0);
             }
-            BOOL animEnabled = IsDlgButtonChecked(pg, IDC_ROOT_MENU_ICON_SIZE) == BST_CHECKED;
-            EnableWindow(hAnim, animEnabled);
-            {
-                HWND hAnimLabel = GetDlgItem(pg, IDC_ANIMATION_LABEL);
-                if (hAnimLabel) EnableWindow(hAnimLabel, animEnabled);
-            }
         }
     }
+    {
+        HWND hSize = GetDlgItem(pg, IDC_WINUI_SIZE_COMBO);
+        if (hSize) {
+            SendMessageW(hSize, CB_RESETCONTENT, 0, 0);
+            SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)L"Compact");
+            SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)L"Default");
+            int sel = !lstrcmpiW(c->winuiSize, L"default") ? 1 : 0;
+            SendMessageW(hSize, CB_SETCURSEL, sel, 0);
+        }
+    }
+    Appearance_UpdateEnabled(pg);
 }
 
 static BOOL Appearance_Save(HWND pg, Config* c){
-    BOOL ch=FALSE; BOOL b;
-    b=get_check(pg,IDC_ROOT_MENU_ICON_SIZE); if(c->rootMenuLargeIcons!=b){c->rootMenuLargeIcons=b;ch=TRUE;}
-    b=get_check(pg,IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR); if(c->keepLargeMenuHighlightTextColor!=b){c->keepLargeMenuHighlightTextColor=b;ch=TRUE;}
+    BOOL ch=FALSE;
+    {
+        HWND hRenderer = GetDlgItem(pg, IDC_RENDERER_COMBO);
+        int renderer = hRenderer ? (int)SendMessageW(hRenderer, CB_GETCURSEL, 0, 0) : 0;
+        if (renderer < 0 || renderer > 2) renderer = 0;
+        BOOL useWinUI = (renderer == 2);
+        BOOL useOther = (renderer == 1);
+        if (c->useWinUI3Menu != useWinUI) { c->useWinUI3Menu = useWinUI; ch = TRUE; }
+        if (c->rootMenuLargeIcons != useOther) { c->rootMenuLargeIcons = useOther; ch = TRUE; }
+        int menuStyle = useOther ? 1 : 0;
+        if (c->menuStyle != menuStyle) { c->menuStyle = menuStyle; ch = TRUE; }
+    }
+    {
+        HWND hFrame = GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_COMBO);
+        if (hFrame) {
+            int frameSel = (int)SendMessageW(hFrame, CB_GETCURSEL, 0, 0);
+            if (frameSel < HIGHLIGHT_BACKGROUND || frameSel > HIGHLIGHT_BACKGROUND_BORDER) frameSel = HIGHLIGHT_BACKGROUND;
+            if (c->largeMenuHighlightFrame != frameSel) { c->largeMenuHighlightFrame = frameSel; ch = TRUE; }
+        }
+    }
     {
         HWND hAnim = GetDlgItem(pg, IDC_ANIMATION_COMBO);
         if (hAnim) {
@@ -524,10 +590,26 @@ static BOOL Appearance_Save(HWND pg, Config* c){
             if (c->animationDirection != animValue) { c->animationDirection = animValue; ch = TRUE; }
         }
     }
+    {
+        HWND hSize = GetDlgItem(pg, IDC_WINUI_SIZE_COMBO);
+        int sizeSel = hSize ? (int)SendMessageW(hSize, CB_GETCURSEL, 0, 0) : 0;
+        const WCHAR* sizeValue = (sizeSel == 1) ? L"default" : L"compact";
+        if (lstrcmpiW(c->winuiSize, sizeValue)) {
+            lstrcpynW(c->winuiSize, sizeValue, ARRAYSIZE(c->winuiSize));
+            ch = TRUE;
+        }
+    }
     if(!ch) return FALSE;
     if(c->iniPath[0]){
-        WritePrivateProfileStringW(L"Appearance",L"LargeMenuIcons",c->rootMenuLargeIcons?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"Appearance",L"KeepLargeMenuHighlightTextColor",c->keepLargeMenuHighlightTextColor?L"true":L"false",c->iniPath);
+        const WCHAR* renderer = c->useWinUI3Menu ? L"WinUI" : (c->rootMenuLargeIcons ? L"Large" : L"Win32");
+        WritePrivateProfileStringW(L"Appearance",L"Renderer",renderer,c->iniPath);
+        WritePrivateProfileStringW(L"General",L"MenuStyle",c->rootMenuLargeIcons?L"modern":L"legacy",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"UseWinUI3Menu",c->useWinUI3Menu?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"WinUISize",c->winuiSize[0]?c->winuiSize:L"compact",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"LargeMenuHighlightFrame",
+            c->largeMenuHighlightFrame==HIGHLIGHT_BORDER?L"border":
+            (c->largeMenuHighlightFrame==HIGHLIGHT_BACKGROUND_BORDER?L"background-border":L"background"),
+            c->iniPath);
         {
             const WCHAR* anim = L"bottom";
             if (c->animationDirection == ANIM_AUTO) anim = L"disabled";
@@ -537,9 +619,11 @@ static BOOL Appearance_Save(HWND pg, Config* c){
             WritePrivateProfileStringW(L"Appearance", L"LargeMenuAnimation", anim, c->iniPath);
         }
         // Cleanup old location keys after migration.
+        WritePrivateProfileStringW(L"Appearance",L"LargeMenuIcons",NULL,c->iniPath);
         WritePrivateProfileStringW(L"Advanced",L"LargeMenuIcons",NULL,c->iniPath);
         WritePrivateProfileStringW(L"Advanced",L"LargeMenuAnimation",NULL,c->iniPath);
         WritePrivateProfileStringW(L"Advanced",L"KeepLargeMenuHighlightTextColor",NULL,c->iniPath);
+        WritePrivateProfileStringW(L"WinUI3",L"Size",NULL,c->iniPath);
     }
     return TRUE;
 }
@@ -548,6 +632,7 @@ static BOOL Appearance_Save(HWND pg, Config* c){
 static void Advanced_Load(HWND pg, Config* c){
     set_check(pg,IDC_RECENT_SHOW_EXT,c->recentShowExtensions);
     set_check(pg,IDC_RECENT_SHOW_CLEAN,c->recentShowCleanItems);
+    set_check(pg,IDC_RECENT_SEPARATE_ITEMS,c->separateItems);
     set_check(pg,IDC_THISPC_AS_SUBMENU,c->thisPCAsSubmenu);
     set_check(pg,IDC_THISPC_ITEMS_AS_SUBMENUS,c->thisPCItemsAsSubmenus);
     set_check(pg,IDC_THISPC_SHOW_ICONS,c->thisPCShowIcons);
@@ -589,6 +674,7 @@ static BOOL Advanced_Save(HWND pg, Config* c){
     BOOL ch=FALSE; BOOL b;
     b=get_check(pg,IDC_RECENT_SHOW_EXT); if(c->recentShowExtensions!=b){c->recentShowExtensions=b;ch=TRUE;}
     b=get_check(pg,IDC_RECENT_SHOW_CLEAN); if(c->recentShowCleanItems!=b){c->recentShowCleanItems=b;ch=TRUE;}
+    b=get_check(pg,IDC_RECENT_SEPARATE_ITEMS); if(c->separateItems!=b){c->separateItems=b;ch=TRUE;}
     b=get_check(pg,IDC_THISPC_AS_SUBMENU); if(c->thisPCAsSubmenu!=b){c->thisPCAsSubmenu=b;ch=TRUE;}
     b=get_check(pg,IDC_THISPC_ITEMS_AS_SUBMENUS); if(c->thisPCItemsAsSubmenus!=b){c->thisPCItemsAsSubmenus=b;ch=TRUE;}
     b=get_check(pg,IDC_THISPC_SHOW_ICONS); if(c->thisPCShowIcons!=b){c->thisPCShowIcons=b;ch=TRUE;}
@@ -623,6 +709,8 @@ static BOOL Advanced_Save(HWND pg, Config* c){
     if(c->iniPath[0]){
         WritePrivateProfileStringW(L"RecentItems",L"RecentShowExtensions",c->recentShowExtensions?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"RecentItems",L"RecentShowCleanItems",c->recentShowCleanItems?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"RecentItems",L"SeparateItems",c->separateItems?L"true":L"false",c->iniPath);
+        WritePrivateProfileStringW(L"RecentItems",L"RecentGroupFoldersFirst",NULL,c->iniPath);
         WritePrivateProfileStringW(L"RecentItems",L"RecentLabel", c->recentLabelMode==0?L"fullpath":L"name", c->iniPath);
         WritePrivateProfileStringW(L"ThisPC",L"ThisPCAsSubmenu",c->thisPCAsSubmenu?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"ThisPC",L"ThisPCItemsAsSubmenus",c->thisPCItemsAsSubmenus?L"true":L"false",c->iniPath);
@@ -1230,6 +1318,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
             EndDialog(dlg, IDCANCEL);
             return TRUE;
         case WM_INITDIALOG:
+            g_activeSettingsDlg = dlg;
             st = (SettingsState*)calloc(1, sizeof(SettingsState));
             st->cfg = (Config*)lParam;
             st->dragging = FALSE;
@@ -1255,6 +1344,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 SetWindowPos(dlg, NULL, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
             }
             return TRUE;
+        case WM_DESTROY:
+            if (g_activeSettingsDlg == dlg) g_activeSettingsDlg = NULL;
+            break;
         case WM_SIZE:
             if (st) {
                 int cw = LOWORD(lParam); int ch = HIWORD(lParam);
@@ -1399,15 +1491,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                     }
                     return TRUE;
                 }
-                case IDC_ROOT_MENU_ICON_SIZE: {
+                case IDC_RENDERER_COMBO: {
                     if (st && st->pages[PAGE_APPEARANCE]) {
-                        HWND hAnim = GetDlgItem(st->pages[PAGE_APPEARANCE], IDC_ANIMATION_COMBO);
-                        BOOL enabled = IsDlgButtonChecked(st->pages[PAGE_APPEARANCE], IDC_ROOT_MENU_ICON_SIZE) == BST_CHECKED;
-                        EnableWindow(hAnim, enabled);
-                        {
-                            HWND hAnimLabel = GetDlgItem(st->pages[PAGE_APPEARANCE], IDC_ANIMATION_LABEL);
-                            if (hAnimLabel) EnableWindow(hAnimLabel, enabled);
-                        }
+                        Appearance_UpdateEnabled(st->pages[PAGE_APPEARANCE]);
                     }
                     return TRUE;
                 }

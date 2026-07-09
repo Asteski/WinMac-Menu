@@ -44,7 +44,7 @@ public static class IniParser
         cfg.ShowFileIcons = GetBool("General", "ShowFileIcons", true, iniPath);
         cfg.ShowFileExtensions = GetBool("General", "ShowFileExtensions", true, iniPath);
         cfg.ShowHidden = GetBool("General", "ShowHidden", false, iniPath);
-        cfg.MaxItems = GetInt("General", "MaxItems", 40, iniPath);
+        cfg.MaxItems = GetInt("General", "MaxItems", 0, iniPath);
         cfg.DefaultIconPath = GetString("General", "DefaultIcon", "", iniPath);
         cfg.TrayIconPath    = GetString("General", "TrayIcon",   "", iniPath);
         cfg.MenuStyle = GetString("General", "MenuStyle", "modern", iniPath);
@@ -56,6 +56,13 @@ public static class IniParser
         cfg.VOffset = GetInt("Placement", "VOffset", 0, iniPath);
 
         cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
+
+        cfg.WinUI3Size = GetString("Appearance", "WinUISize", "", iniPath);
+        if (string.IsNullOrWhiteSpace(cfg.WinUI3Size))
+            cfg.WinUI3Size = GetString("WinUI3", "Size", "compact", iniPath);
+        if (!cfg.WinUI3Size.Equals("default", StringComparison.OrdinalIgnoreCase) &&
+            !cfg.WinUI3Size.Equals("compact", StringComparison.OrdinalIgnoreCase))
+            cfg.WinUI3Size = "compact";
 
         cfg.WindowsKey      = GetBool("Controls", "WindowsKey",      false, iniPath);
         cfg.ShiftWindowsKey = GetBool("Controls", "ShiftWindowsKey", false, iniPath);
@@ -77,6 +84,7 @@ public static class IniParser
         cfg.RecentShowExtensions = GetBool("RecentItems", "RecentShowExtensions", true, iniPath);
         cfg.RecentShowIcons = GetBool("RecentItems", "RecentShowIcons", true, iniPath);
         cfg.RecentShowCleanItems = GetBool("RecentItems", "RecentShowCleanItems", true, iniPath);
+        cfg.RecentSeparateItems = GetBool("RecentItems", "SeparateItems", false, iniPath);
 
         cfg.TaskKillMax = GetInt("TaskKill", "TaskKillMax", 24, iniPath);
         cfg.TaskKillIgnoreSystem = GetBool("TaskKill", "TaskKillIgnoreSystem", true, iniPath);
