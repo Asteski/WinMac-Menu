@@ -17,6 +17,7 @@
 #include "recent.h"
 #include "util.h"
 #include "theme.h"
+#include "resource.h"
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(a) (sizeof(a)/sizeof((a)[0]))
@@ -269,6 +270,74 @@ static void draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF 
     DeleteObject(pen);
 }
 
+static void draw_aa_rounded_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor, COLORREF backgroundColor) {
+    HBRUSH brush;
+    RECT line;
+    int left;
+    int top;
+    int right;
+    int bottom;
+    int innerRadius;
+    int samples;
+    int totalSamples;
+
+    if (!hdc || !rc) return;
+    if (radius <= 0) {
+        draw_highlight_border(hdc, rc, radius, borderColor);
+        return;
+    }
+
+    left = rc->left;
+    top = rc->top;
+    right = rc->right;
+    bottom = rc->bottom;
+    if (right - left <= 2 || bottom - top <= 2) return;
+
+    radius = min(radius, min((right - left) / 2, (bottom - top) / 2));
+    innerRadius = max(0, radius - 1);
+    samples = 4;
+    totalSamples = samples * samples;
+
+    brush = CreateSolidBrush(borderColor);
+    if (brush) {
+        line = (RECT){ left + radius, top, right - radius, top + 1 };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ left + radius, bottom - 1, right - radius, bottom };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ left, top + radius, left + 1, bottom - radius };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ right - 1, top + radius, right, bottom - radius };
+        FillRect(hdc, &line, brush);
+        DeleteObject(brush);
+    }
+
+    for (int y = 0; y < radius; ++y) {
+        for (int x = 0; x < radius; ++x) {
+            int covered = 0;
+            for (int sy = 0; sy < samples; ++sy) {
+                for (int sx = 0; sx < samples; ++sx) {
+                    double px = (double)x + ((double)sx + 0.5) / (double)samples;
+                    double py = (double)y + ((double)sy + 0.5) / (double)samples;
+                    double dx = (double)radius - px;
+                    double dy = (double)radius - py;
+                    double dist2 = dx * dx + dy * dy;
+                    if (dist2 <= (double)(radius * radius) &&
+                        dist2 >= (double)(innerRadius * innerRadius)) {
+                        covered++;
+                    }
+                }
+            }
+            if (covered > 0) {
+                COLORREF color = blend_colors(backgroundColor, borderColor, (covered * 255) / totalSamples);
+                SetPixelV(hdc, left + x, top + y, color);
+                SetPixelV(hdc, right - 1 - x, top + y, color);
+                SetPixelV(hdc, left + x, bottom - 1 - y, color);
+                SetPixelV(hdc, right - 1 - x, bottom - 1 - y, color);
+            }
+        }
+    }
+}
+
 static void apply_menu_window_corners(HWND hWnd) {
     if (!hWnd) return;
     {
@@ -406,6 +475,120 @@ static void assign_icon_to_last_popup(HMENU hMenu, HICON hico) {
 //   shell32.dll,10            (searches System32)
 //   imageres.dll,-3           (negative index still passed through; Windows treats as resource ID)
 // If no comma present, falls back to LoadImageW for .ico file.
+static BOOL parse_fluent_glyph_spec(const WCHAR* spec, UINT* codepoint) {
+    const WCHAR* p;
+    UINT value = 0;
+    int digits = 0;
+
+    if (!spec || !codepoint) return FALSE;
+    p = spec;
+    while (*p == L' ' || *p == L'\t') ++p;
+    if (p[0] == L'\\' && (p[1] == L'u' || p[1] == L'U')) p += 2;
+    else if (p[0] == L'#') p += 1;
+    else if (p[0] == L'&' && p[1] == L'#' && (p[2] == L'x' || p[2] == L'X')) p += 3;
+    else return FALSE;
+
+    while (digits < 6) {
+        WCHAR ch = *p;
+        UINT nibble;
+        if (ch >= L'0' && ch <= L'9') nibble = (UINT)(ch - L'0');
+        else if (ch >= L'a' && ch <= L'f') nibble = (UINT)(ch - L'a' + 10);
+        else if (ch >= L'A' && ch <= L'F') nibble = (UINT)(ch - L'A' + 10);
+        else break;
+        value = (value << 4) | nibble;
+        ++p;
+        ++digits;
+    }
+    if (digits < 4) return FALSE;
+    if (*p == L';') ++p;
+    while (*p == L' ' || *p == L'\t') ++p;
+    if (*p || value == 0 || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) return FALSE;
+    *codepoint = value;
+    return TRUE;
+}
+
+static HICON render_fluent_glyph_icon(UINT codepoint, int size) {
+    BITMAPV5HEADER bi;
+    HDC hdc = NULL;
+    HBITMAP colorBitmap = NULL;
+    HBITMAP maskBitmap = NULL;
+    HBITMAP oldBitmap = NULL;
+    HFONT font = NULL;
+    HFONT oldFont = NULL;
+    DWORD* pixels = NULL;
+    WCHAR glyph[3] = {0};
+    RECT rc;
+    ICONINFO info;
+    HICON icon = NULL;
+
+    if (size <= 0) return NULL;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.bV5Size = sizeof(bi);
+    bi.bV5Width = size;
+    bi.bV5Height = -size;
+    bi.bV5Planes = 1;
+    bi.bV5BitCount = 32;
+    bi.bV5Compression = BI_BITFIELDS;
+    bi.bV5RedMask = 0x00FF0000;
+    bi.bV5GreenMask = 0x0000FF00;
+    bi.bV5BlueMask = 0x000000FF;
+    bi.bV5AlphaMask = 0xFF000000;
+
+    hdc = CreateCompatibleDC(NULL);
+    if (!hdc) goto cleanup;
+    colorBitmap = CreateDIBSection(hdc, (BITMAPINFO*)&bi, DIB_RGB_COLORS, (void**)&pixels, NULL, 0);
+    if (!colorBitmap || !pixels) goto cleanup;
+    ZeroMemory(pixels, (SIZE_T)size * (SIZE_T)size * sizeof(DWORD));
+    oldBitmap = (HBITMAP)SelectObject(hdc, colorBitmap);
+    font = CreateFontW(-size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                       DEFAULT_PITCH, L"Segoe Fluent Icons");
+    if (!font) goto cleanup;
+    oldFont = (HFONT)SelectObject(hdc, font);
+
+    if (codepoint <= 0xFFFF) {
+        glyph[0] = (WCHAR)codepoint;
+    } else {
+        codepoint -= 0x10000;
+        glyph[0] = (WCHAR)(0xD800 + (codepoint >> 10));
+        glyph[1] = (WCHAR)(0xDC00 + (codepoint & 0x3FF));
+    }
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(255, 255, 255));
+    rc = (RECT){0, 0, size, size};
+    DrawTextW(hdc, glyph, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    {
+        BOOL dark = theme_is_dark();
+        for (int i = 0; i < size * size; ++i) {
+            BYTE blue = (BYTE)(pixels[i] & 0xFF);
+            BYTE green = (BYTE)((pixels[i] >> 8) & 0xFF);
+            BYTE red = (BYTE)((pixels[i] >> 16) & 0xFF);
+            BYTE alpha = max(red, max(green, blue));
+            BYTE color = dark ? alpha : 0;
+            pixels[i] = ((DWORD)alpha << 24) | ((DWORD)color << 16) |
+                        ((DWORD)color << 8) | color;
+        }
+    }
+
+    maskBitmap = CreateBitmap(size, size, 1, 1, NULL);
+    if (!maskBitmap) goto cleanup;
+    ZeroMemory(&info, sizeof(info));
+    info.fIcon = TRUE;
+    info.hbmColor = colorBitmap;
+    info.hbmMask = maskBitmap;
+    icon = CreateIconIndirect(&info);
+
+cleanup:
+    if (oldFont) SelectObject(hdc, oldFont);
+    if (font) DeleteObject(font);
+    if (oldBitmap) SelectObject(hdc, oldBitmap);
+    if (maskBitmap) DeleteObject(maskBitmap);
+    if (colorBitmap) DeleteObject(colorBitmap);
+    if (hdc) DeleteDC(hdc);
+    return icon;
+}
+
 static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
     HICON hSmall = NULL;
     HICON hLarge = NULL;
@@ -416,7 +599,10 @@ static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
     int idx;
     WCHAR expanded[MAX_PATH];
     UINT extracted;
+    UINT glyphCodepoint;
     if (!spec || !spec[0]) return NULL;
+    if (parse_fluent_glyph_spec(spec, &glyphCodepoint))
+        return render_fluent_glyph_icon(glyphCodepoint, size);
     comma = wcschr(spec, L',');
     if (!comma) {
         return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE|LR_SHARED);
@@ -540,6 +726,7 @@ static BOOL resolve_filesystem_path_by_command(UINT cmd, WCHAR* outPath, size_t 
         case CI_THISPC:
         case CI_HOME:
         case CI_TASKKILL:
+        case CI_SETTINGS:
             break;
         case CI_URI:
         case CI_CMD:
@@ -1542,13 +1729,85 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
     return added;
 }
 
-static HMENU build_menu(void) {
+static BOOL should_show_automatic_settings_item(MenuTriggerType trigger) {
+    switch (g_cfg.showSettingsItem) {
+    case SETTINGS_ITEM_SHIFT: return trigger == MENU_TRIGGER_SHIFT;
+    case SETTINGS_ITEM_WIN_X: return trigger == MENU_TRIGGER_WIN_X;
+    case SETTINGS_ITEM_RIGHT_CLICK: return trigger == MENU_TRIGGER_RIGHT_CLICK;
+    case SETTINGS_ITEM_MIDDLE_CLICK: return trigger == MENU_TRIGGER_MIDDLE_CLICK;
+    case SETTINGS_ITEM_ALWAYS: return TRUE;
+    default: return FALSE;
+    }
+}
+
+static void append_settings_item(HMENU hMenu, const ConfigItem* item) {
+    const WCHAR* label = (item && item->label[0]) ? item->label : L"WinMac Menu Settings";
+    AppendMenuW(hMenu, MF_STRING, IDM_WINMAC_SETTINGS, label);
+    if (g_cfg.showIcons == 1) {
+        const BOOL dark = theme_is_dark();
+        const int size = get_root_icon_size();
+        const WCHAR* iconPath = NULL;
+        HICON icon = NULL;
+        int resourceId = IDI_TRAY_DEFAULT;
+
+        if (g_cfg.monochromeTrayIcon) {
+            if (dark && g_cfg.trayIconPathDark[0]) iconPath = g_cfg.trayIconPathDark;
+            else if (!dark && g_cfg.trayIconPathLight[0]) iconPath = g_cfg.trayIconPathLight;
+            resourceId = dark ? IDI_TRAY_DARK : IDI_TRAY_LIGHT;
+        }
+        if (iconPath) icon = load_icon_path_or_module_sized(iconPath, size);
+        if (!icon && g_cfg.monochromeTrayIcon && g_cfg.trayIconPath[0])
+            icon = load_icon_path_or_module_sized(g_cfg.trayIconPath, size);
+        if (!icon) {
+            icon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(resourceId),
+                                     IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+        }
+        if (!icon) {
+            icon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APPICON),
+                                     IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+        }
+        if (icon) {
+            add_item_icon(IDM_WINMAC_SETTINGS, icon);
+            if (g_cfg.menuStyle == STYLE_LEGACY && !use_legacy_root_large_icon_layout())
+                assign_legacy_item_bitmap(hMenu, IDM_WINMAC_SETTINGS, icon);
+        }
+    }
+}
+
+static void apply_configured_root_item_icon(HMENU hMenu, UINT id, const ConfigItem* item) {
+    if (!item || g_cfg.showIcons != 1) return;
+
+    const BOOL dark = theme_is_dark();
+    const WCHAR* iconPath = NULL;
+    if (dark && item->iconPathDark[0]) iconPath = item->iconPathDark;
+    else if (!dark && item->iconPathLight[0]) iconPath = item->iconPathLight;
+    else if (item->iconPath[0]) iconPath = item->iconPath;
+    else if (dark && g_cfg.defaultIconPathDark[0]) iconPath = g_cfg.defaultIconPathDark;
+    else if (!dark && g_cfg.defaultIconPathLight[0]) iconPath = g_cfg.defaultIconPathLight;
+    else if (g_cfg.defaultIconPath[0]) iconPath = g_cfg.defaultIconPath;
+    if (!iconPath) return;
+
+    HICON icon = g_cfg.rootMenuLargeIcons
+        ? load_root_icon_path_or_module(iconPath)
+        : load_icon_path_or_module(iconPath);
+    if (!icon) return;
+
+    add_item_icon(id, icon);
+    if (g_cfg.menuStyle == STYLE_LEGACY && !use_legacy_root_large_icon_layout())
+        assign_legacy_item_bitmap(hMenu, id, icon);
+}
+
+static HMENU build_menu(MenuTriggerType trigger) {
     config_load(&g_cfg);
     HMENU hMenu = CreatePopupMenu();
     g_mapCount = 0; // reset mapping for this menu build
     g_itemIconCount = 0; // reset icons
     g_nextFolderId = IDM_FOLDER_BASE;
     UINT id = IDM_DYNAMIC_BASE;
+    BOOL hasManualSettingsItem = FALSE;
+    for (int i = 0; i < g_cfg.count; ++i) {
+        if (g_cfg.items[i].type == CI_SETTINGS) { hasManualSettingsItem = TRUE; break; }
+    }
     for (int i = 0; i < g_cfg.count; ++i) {
         ConfigItem* it = &g_cfg.items[i];
         switch (it->type) {
@@ -1557,6 +1816,9 @@ static HMENU build_menu(void) {
             break;
         case CI_CATEGORY:
             AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label[0] ? it->label : it->path);
+            break;
+        case CI_SETTINGS:
+            append_settings_item(hMenu, it);
             break;
         case CI_URI:
         case CI_FILE:
@@ -1805,10 +2067,10 @@ static HMENU build_menu(void) {
         case CI_POWER_RESTART:
         case CI_POWER_LOCK:
         case CI_POWER_LOGOFF:
-            AppendMenuW(hMenu, MF_STRING, id++, it->label);
-            break;
         case CI_POWER_HIBERNATE:
-            AppendMenuW(hMenu, MF_STRING, id++, it->label);
+            AppendMenuW(hMenu, MF_STRING, id, it->label);
+            apply_configured_root_item_icon(hMenu, id, it);
+            id++;
             break;
     case CI_RECENT_SUBMENU:
         {
@@ -1840,12 +2102,12 @@ static HMENU build_menu(void) {
         case CI_POWER_MENU:
         {
             HMENU sub = CreatePopupMenu();
-            // Order: Sleep, Hibernate, Shutdown, Restart, Lock, Log off (group with separator before lock group)
+            // Order: Sleep, Restart, Shutdown, Hibernate, Lock, Log off (group with separator before lock group)
             BOOL firstGroupAdded = FALSE;
             if (!g_cfg.excludeSleep) { AppendMenuW(sub, MF_STRING, id, L"Sleep"); map_add(id++, L"POWER_SLEEP"); firstGroupAdded=TRUE; }
-            if (!g_cfg.excludeHibernate) { AppendMenuW(sub, MF_STRING, id, L"Hibernate"); map_add(id++, L"POWER_HIBERNATE"); firstGroupAdded=TRUE; }
-            if (!g_cfg.excludeShutdown) { AppendMenuW(sub, MF_STRING, id, L"Shut down"); map_add(id++, L"POWER_SHUTDOWN"); firstGroupAdded=TRUE; }
             if (!g_cfg.excludeRestart) { AppendMenuW(sub, MF_STRING, id, L"Restart"); map_add(id++, L"POWER_RESTART"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeShutdown) { AppendMenuW(sub, MF_STRING, id, L"Shut down"); map_add(id++, L"POWER_SHUTDOWN"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeHibernate) { AppendMenuW(sub, MF_STRING, id, L"Hibernate"); map_add(id++, L"POWER_HIBERNATE"); firstGroupAdded=TRUE; }
             BOOL secondGroup = FALSE;
             if (!g_cfg.excludeLock || !g_cfg.excludeLogoff) {
                 if (firstGroupAdded) AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
@@ -1857,7 +2119,8 @@ static HMENU build_menu(void) {
             if (!firstGroupAdded && !secondGroup) {
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
             }
-            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Power");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub,
+                        it->label[0] ? it->label : L"Shut down or sign out");
             UINT popupId = g_nextFolderId++;
             MENUITEMINFOW popupMii = { sizeof(popupMii) };
             popupMii.fMask = MIIM_ID;
@@ -2008,6 +2271,17 @@ static HMENU build_menu(void) {
         }
         }
     }
+    if (!hasManualSettingsItem && should_show_automatic_settings_item(trigger)) {
+        int count = GetMenuItemCount(hMenu);
+        BOOL lastIsSeparator = FALSE;
+        if (count > 0) {
+            MENUITEMINFOW last = { sizeof(last) };
+            last.fMask = MIIM_FTYPE;
+            if (GetMenuItemInfoW(hMenu, count - 1, TRUE, &last)) lastIsSeparator = (last.fType & MFT_SEPARATOR) != 0;
+        }
+        if (count > 0 && !lastIsSeparator) AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        append_settings_item(hMenu, NULL);
+    }
     theme_style_menu(hMenu);
     if (use_legacy_root_large_icon_layout()) set_legacy_root_owner_draw(hMenu);
     g_rootMenuHandle = hMenu;
@@ -2138,6 +2412,11 @@ BOOL MenuOnMenuRButtonUp(HWND owner, UINT itemPos, HMENU hMenu) {
 void MenuExecuteCommand(HWND owner, UINT cmd) {
     if (!cmd) return;
 
+    if (cmd == IDM_WINMAC_SETTINGS) {
+        PostMessageW(owner, WM_COMMAND, IDM_WINMAC_SETTINGS, 0);
+        return;
+    }
+
     wchar_t dbg_buf[256];
     wsprintfW(dbg_buf, L"[MenuExecuteCommand] Received cmd: %u\n", cmd);
     OutputDebugStringW(dbg_buf);
@@ -2256,6 +2535,7 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
         case CI_THISPC:
         case CI_HOME:
         case CI_TASKKILL:
+        case CI_SETTINGS:
             break;
         }
     }
@@ -2286,7 +2566,7 @@ BOOL MenuOpenRecentParentFolder(UINT cmd) {
     return result;
 }
 
-void ShowWinXMenu(HWND owner, POINT screenPt) {
+void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
     g_suppressCmd = 0;
     if (screenPt.x == 0 && screenPt.y == 0) {
         screenPt = compute_menu_pos(owner);
@@ -2294,7 +2574,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt) {
     // Reload config on each open so INI toggles apply immediately in background mode.
     config_load(&g_cfg);
     do {
-        HMENU hMenu = build_menu();
+        HMENU hMenu = build_menu(trigger);
         UINT dllCommand = 0;
         BOOL handledByDll = FALSE;
         SetForegroundWindow(owner);
@@ -2451,7 +2731,7 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
     int rightPad = 10;
     int arrowPad = 14;
     int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
-    int selectionRadius = is_windows_11_or_greater() ? MulDiv(8, dpi, 96) : 0;
+    int selectionRadius = is_windows_11_or_greater() ? MulDiv(4, dpi, 96) : 0;
 
     if (theme_get_menu_highlight(&highlightColor) || theme_get_accent(&highlightColor)) {
         int lum = ((30 * GetRValue(highlightColor)) + (59 * GetGValue(highlightColor)) + (11 * GetBValue(highlightColor))) / 100;
@@ -2478,11 +2758,25 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
     FillRect(hdc, &rc, GetSysColorBrush(COLOR_MENU));
     if (selected) {
         RECT sel = rc;
+        RECT borderSel;
         BOOL drawBackground = (g_cfg.largeMenuHighlightFrame != HIGHLIGHT_BORDER);
         BOOL drawBorder = (g_cfg.largeMenuHighlightFrame != HIGHLIGHT_BACKGROUND);
-        InflateRect(&sel, -1, 0);
-        if (sel.top > rc.top) sel.top -= 1;
-        if (sel.bottom < rc.bottom) sel.bottom += 1;
+        int highlightInset = max(3, MulDiv(3, dpi, 96));
+        if (selectionRadius > 0) {
+            InflateRect(&sel, -highlightInset, -highlightInset);
+        } else {
+            InflateRect(&sel, -1, 0);
+            if (sel.top > rc.top) sel.top -= 1;
+            if (sel.bottom < rc.bottom) sel.bottom += 1;
+        }
+        borderSel = sel;
+        if (!drawBackground) {
+            borderSel = rc;
+            InflateRect(&borderSel, -highlightInset, -highlightInset);
+        } else {
+            if (borderSel.top <= dis->rcItem.top) borderSel.top = dis->rcItem.top + 1;
+            if (borderSel.bottom >= dis->rcItem.bottom) borderSel.bottom = dis->rcItem.bottom - 1;
+        }
         if (drawBackground) {
             if (selectionRadius > 0) {
                 draw_fake_rounded_highlight(hdc, &sel, selectionRadius, highlightColor, GetSysColor(COLOR_MENU));
@@ -2498,7 +2792,10 @@ static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis) {
         }
         if (drawBorder) {
             COLORREF stroke = drawBackground ? blend_colors(highlightColor, highlightTextColor, 96) : highlightColor;
-            draw_highlight_border(hdc, &sel, selectionRadius, stroke);
+            if (selectionRadius > 0)
+                draw_aa_rounded_border(hdc, &borderSel, selectionRadius, stroke, GetSysColor(COLOR_MENU));
+            else
+                draw_highlight_border(hdc, &borderSel, selectionRadius, stroke);
         }
     }
 

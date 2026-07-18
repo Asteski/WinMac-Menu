@@ -2,9 +2,11 @@
 // Reconstructed clean settings.c to address prior hidden corruption causing C2181.
 #include "settings.h"
 #include "settings_extra.h"
+#include "winui3_launcher.h"
 #include "resource.h"
 #include "util.h"
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #ifndef LVIM_BEFORE
 #define LVIM_BEFORE 0x00000001
@@ -66,6 +68,7 @@ typedef struct SettingsState {
     BOOL reloadNeeded; // set if tray reload is needed after Save & Close
     // Drag state for menu list reordering
     BOOL dragging;
+    BOOL menuListPressed;
     int dragSource; // index in workingItems being dragged
     HIMAGELIST hDragImage; // Image list for drag-and-drop operations
     int insertTarget; // visual row index for insert mark
@@ -124,7 +127,13 @@ static INT_PTR CALLBACK PageDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
 static void set_check(HWND d,int id,BOOL v){ CheckDlgButton(d,id,v?BST_CHECKED:BST_UNCHECKED); }
 static BOOL get_check(HWND d,int id){ return IsDlgButtonChecked(d,id)==BST_CHECKED; }
 static void set_int(HWND d,int id,int v){ WCHAR b[32]; wsprintfW(b,L"%d",v); SetDlgItemTextW(d,id,b);} 
-static int  get_int(HWND d,int id,int def){ WCHAR b[32]; if(!GetDlgItemTextW(d,id,b,ARRAYSIZE(b))) return def; int v=_wtoi(b); return (v==0)?def:v; }
+static int  get_int(HWND d,int id,int def){
+    WCHAR b[32];
+    if(!GetDlgItemTextW(d,id,b,ARRAYSIZE(b))) return def;
+    StrTrimW(b, L" \t\r\n");
+    if(!b[0]) return def;
+    return _wtoi(b);
+}
 
 static int show_icons_combo_index_from_value(int showIcons){
     if(showIcons == 1) return 0;
@@ -160,6 +169,115 @@ static void apply_dialog_icon(HWND dlg,const Config* cfg){
     if(!icoSmall) icoSmall=(HICON)LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(IDI_APPICON),IMAGE_ICON,cxs,cys,LR_DEFAULTCOLOR);
     if(icoBig)   SendMessageW(dlg,WM_SETICON,ICON_BIG,(LPARAM)icoBig);
     if(icoSmall) SendMessageW(dlg,WM_SETICON,ICON_SMALL,(LPARAM)icoSmall);
+}
+
+static void apply_settings_title(HWND dlg, const Config* cfg) {
+    static const WCHAR baseTitle[] = L"WinMac Menu Settings";
+    if(!cfg || !cfg->iniPath[0]) {
+        SetWindowTextW(dlg, baseTitle);
+        return;
+    }
+
+    const WCHAR* slash = wcsrchr(cfg->iniPath, L'\\');
+    const WCHAR* fileName = slash ? slash + 1 : cfg->iniPath;
+    if(!lstrcmpiW(fileName, L"config.ini")) {
+        SetWindowTextW(dlg, baseTitle);
+        return;
+    }
+
+    WCHAR stem[MAX_PATH];
+    lstrcpynW(stem, fileName, ARRAYSIZE(stem));
+    WCHAR* dot = wcsrchr(stem, L'.');
+    if(dot) *dot = 0;
+
+    WCHAR title[MAX_PATH + 64];
+    wsprintfW(title, L"%s (%s)", baseTitle, stem[0] ? stem : fileName);
+    SetWindowTextW(dlg, title);
+}
+
+static BOOL menu_list_point_hits_row(HWND hwnd, POINT pt) {
+    RECT client;
+    if(!GetClientRect(hwnd, &client) || !PtInRect(&client, pt)) return FALSE;
+
+    LVHITTESTINFO ht;
+    ZeroMemory(&ht, sizeof(ht));
+    ht.pt = pt;
+    if((int)SendMessageW(hwnd, LVM_SUBITEMHITTEST, 0, (LPARAM)&ht) >= 0) return TRUE;
+
+    int count = ListView_GetItemCount(hwnd);
+    for(int i = 0; i < count; ++i) {
+        RECT row;
+        if(ListView_GetItemRect(hwnd, i, &row, LVIR_BOUNDS)) {
+            row.left = client.left;
+            row.right = client.right;
+            if(PtInRect(&row, pt)) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOL menu_list_cursor_hit(SettingsState* st, HWND hwnd) {
+    if(!st || !st->pages[PAGE_MENU] || hwnd != GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST)) return FALSE;
+    POINT pt;
+    GetCursorPos(&pt);
+    ScreenToClient(hwnd, &pt);
+    return menu_list_point_hits_row(hwnd, pt);
+}
+
+static LRESULT CALLBACK MenuListSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR idSubclass, DWORD_PTR refData) {
+    SettingsState* st = (SettingsState*)refData;
+    switch(msg) {
+    case WM_SETCURSOR:
+        if(st && st->menuListPressed && !(GetKeyState(VK_LBUTTON) & 0x8000)) {
+            st->menuListPressed = FALSE;
+        }
+        if(st && st->dragging) {
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+            return TRUE;
+        }
+        if(st && st->menuListPressed) {
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+            return TRUE;
+        }
+        if(menu_list_cursor_hit(st, hwnd)) {
+            SetCursor(LoadCursorW(NULL, IDC_HAND));
+            return TRUE;
+        }
+        break;
+    case WM_LBUTTONDOWN: {
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if(st) st->menuListPressed = menu_list_point_hits_row(hwnd, pt);
+        if(st && st->menuListPressed) {
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+            LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+            return result;
+        }
+        break; }
+    case WM_LBUTTONUP: {
+        LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
+        if(st) st->menuListPressed = FALSE;
+        SetCursor(LoadCursorW(NULL, menu_list_cursor_hit(st, hwnd) ? IDC_HAND : IDC_ARROW));
+        return result;
+    }
+    case WM_MOUSEMOVE:
+        if(st && st->dragging) {
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+        } else if(st && st->menuListPressed && (wParam & MK_LBUTTON)) {
+            SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+        } else if(menu_list_cursor_hit(st, hwnd)) {
+            SetCursor(LoadCursorW(NULL, IDC_HAND));
+        }
+        break;
+    case WM_CAPTURECHANGED:
+    case WM_CANCELMODE:
+        if(st) st->menuListPressed = FALSE;
+        break;
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(hwnd, MenuListSubclassProc, idSubclass);
+        break;
+    }
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 // -------- General Page --------
@@ -445,6 +563,15 @@ static void Controls_Load(HWND pg, Config* c){
     set_check(pg, IDC_CTRL_WINDOWS_KEY, c->windowsKeyTrigger);
     set_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY, c->shiftWindowsKeyTrigger);
     set_check(pg, IDC_CTRL_WINDOWS_KEY_X, c->windowsKeyXTrigger);
+    {
+        HWND combo = GetDlgItem(pg, IDC_CTRL_SETTINGS_ITEM_COMBO);
+        if (combo) {
+            static const WCHAR* labels[] = { L"Disable", L"With Shift", L"Win + X", L"Right click", L"Middle click", L"Always" };
+            SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+            for (int i = 0; i < ARRAYSIZE(labels); ++i) SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)labels[i]);
+            SendMessageW(combo, CB_SETCURSEL, c->showSettingsItem, 0);
+        }
+    }
     set_check(pg, IDC_IGNORE_FULLSCREEN_CHECK, c->ignoreTriggersWhenFullscreen);
     SetDlgItemTextW(pg, IDC_FULLSCREEN_EXCLUSION_EDIT, c->fullscreenExclusionList);
 }
@@ -462,6 +589,12 @@ static BOOL Controls_Save(HWND pg, Config* c){
     b = get_check(pg, IDC_CTRL_WINDOWS_KEY); if(c->windowsKeyTrigger != b){ c->windowsKeyTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_SHIFT_WINDOWS_KEY); if(c->shiftWindowsKeyTrigger != b){ c->shiftWindowsKeyTrigger = b; ch = TRUE; }
     b = get_check(pg, IDC_CTRL_WINDOWS_KEY_X); if(c->windowsKeyXTrigger != b){ c->windowsKeyXTrigger = b; ch = TRUE; }
+    {
+        HWND combo = GetDlgItem(pg, IDC_CTRL_SETTINGS_ITEM_COMBO);
+        int mode = combo ? (int)SendMessageW(combo, CB_GETCURSEL, 0, 0) : SETTINGS_ITEM_DISABLED;
+        if (mode < SETTINGS_ITEM_DISABLED || mode > SETTINGS_ITEM_ALWAYS) mode = SETTINGS_ITEM_DISABLED;
+        if (c->showSettingsItem != mode) { c->showSettingsItem = (SettingsItemMode)mode; ch = TRUE; }
+    }
     b = get_check(pg, IDC_IGNORE_FULLSCREEN_CHECK); if(c->ignoreTriggersWhenFullscreen != b){ c->ignoreTriggersWhenFullscreen = b; ch = TRUE; }
     
     WCHAR exclusionBuf[1024];
@@ -482,6 +615,10 @@ static BOOL Controls_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"Controls", L"WindowsKey", c->windowsKeyTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"ShiftWindowsKey", c->shiftWindowsKeyTrigger?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"WindowsKeyX", c->windowsKeyXTrigger?L"true":L"false", c->iniPath);
+        {
+            static const WCHAR* values[] = { L"disabled", L"shift", L"winx", L"rightclick", L"middleclick", L"always" };
+            WritePrivateProfileStringW(L"Controls", L"ShowSettingsItem", values[c->showSettingsItem], c->iniPath);
+        }
         WritePrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", c->ignoreTriggersWhenFullscreen?L"true":L"false", c->iniPath);
         WritePrivateProfileStringW(L"Controls", L"FullscreenExclusionList", c->fullscreenExclusionList, c->iniPath);
     }
@@ -501,6 +638,7 @@ static void Appearance_UpdateEnabled(HWND pg) {
     EnableWindow(GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_COMBO), otherEnabled);
     EnableWindow(GetDlgItem(pg, IDC_WINUI_SIZE_LABEL), winuiEnabled);
     EnableWindow(GetDlgItem(pg, IDC_WINUI_SIZE_COMBO), winuiEnabled);
+    EnableWindow(GetDlgItem(pg, IDC_WINUI_ALWAYS_SHOW_ICONS), winuiEnabled);
 }
 
 static void Appearance_Load(HWND pg, Config* c){
@@ -521,8 +659,7 @@ static void Appearance_Load(HWND pg, Config* c){
             SendMessageW(hFrame, CB_RESETCONTENT, 0, 0);
             SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Background");
             SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Border");
-            SendMessageW(hFrame, CB_ADDSTRING, 0, (LPARAM)L"Background + border");
-            SendMessageW(hFrame, CB_SETCURSEL, c->largeMenuHighlightFrame, 0);
+            SendMessageW(hFrame, CB_SETCURSEL, c->largeMenuHighlightFrame == HIGHLIGHT_BORDER ? 1 : 0, 0);
         }
     }
     {
@@ -548,21 +685,34 @@ static void Appearance_Load(HWND pg, Config* c){
         HWND hSize = GetDlgItem(pg, IDC_WINUI_SIZE_COMBO);
         if (hSize) {
             SendMessageW(hSize, CB_RESETCONTENT, 0, 0);
-            SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)L"Compact");
             SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)L"Default");
-            int sel = !lstrcmpiW(c->winuiSize, L"default") ? 1 : 0;
+            SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)L"Large");
+            int sel = !lstrcmpiW(c->winuiSize, L"large") ? 1 : 0;
             SendMessageW(hSize, CB_SETCURSEL, sel, 0);
         }
     }
+    set_check(pg, IDC_WINUI_ALWAYS_SHOW_ICONS, c->winuiAlwaysShowIcons);
     Appearance_UpdateEnabled(pg);
 }
 
 static BOOL Appearance_Save(HWND pg, Config* c){
     BOOL ch=FALSE;
+    BOOL rendererChanged = FALSE;
     {
         HWND hRenderer = GetDlgItem(pg, IDC_RENDERER_COMBO);
         int renderer = hRenderer ? (int)SendMessageW(hRenderer, CB_GETCURSEL, 0, 0) : 0;
         if (renderer < 0 || renderer > 2) renderer = 0;
+        if (c->iniPath[0]) {
+            WCHAR persisted[32];
+            GetPrivateProfileStringW(L"Appearance", L"Renderer", L"", persisted, ARRAYSIZE(persisted), c->iniPath);
+            int persistedRenderer = 0;
+            if (!lstrcmpiW(persisted, L"WinUI") || !lstrcmpiW(persisted, L"WinUI3") || !lstrcmpiW(persisted, L"2")) persistedRenderer = 2;
+            else if (!lstrcmpiW(persisted, L"Large") || !lstrcmpiW(persisted, L"1") || !lstrcmpiW(persisted, L"custom-drawn") ||
+                     !lstrcmpiW(persisted, L"other") || !lstrcmpiW(persisted, L"bigmenu") ||
+                     !lstrcmpiW(persisted, L"big-menu")) persistedRenderer = 1;
+            rendererChanged = (persistedRenderer != renderer);
+            if (rendererChanged) ch = TRUE;
+        }
         BOOL useWinUI = (renderer == 2);
         BOOL useOther = (renderer == 1);
         if (c->useWinUI3Menu != useWinUI) { c->useWinUI3Menu = useWinUI; ch = TRUE; }
@@ -574,8 +724,8 @@ static BOOL Appearance_Save(HWND pg, Config* c){
         HWND hFrame = GetDlgItem(pg, IDC_HIGHLIGHT_FRAME_COMBO);
         if (hFrame) {
             int frameSel = (int)SendMessageW(hFrame, CB_GETCURSEL, 0, 0);
-            if (frameSel < HIGHLIGHT_BACKGROUND || frameSel > HIGHLIGHT_BACKGROUND_BORDER) frameSel = HIGHLIGHT_BACKGROUND;
-            if (c->largeMenuHighlightFrame != frameSel) { c->largeMenuHighlightFrame = frameSel; ch = TRUE; }
+            int frame = frameSel == 1 ? HIGHLIGHT_BORDER : HIGHLIGHT_BACKGROUND;
+            if (c->largeMenuHighlightFrame != frame) { c->largeMenuHighlightFrame = frame; ch = TRUE; }
         }
     }
     {
@@ -593,22 +743,25 @@ static BOOL Appearance_Save(HWND pg, Config* c){
     {
         HWND hSize = GetDlgItem(pg, IDC_WINUI_SIZE_COMBO);
         int sizeSel = hSize ? (int)SendMessageW(hSize, CB_GETCURSEL, 0, 0) : 0;
-        const WCHAR* sizeValue = (sizeSel == 1) ? L"default" : L"compact";
+        const WCHAR* sizeValue = (sizeSel == 1) ? L"large" : L"default";
         if (lstrcmpiW(c->winuiSize, sizeValue)) {
             lstrcpynW(c->winuiSize, sizeValue, ARRAYSIZE(c->winuiSize));
             ch = TRUE;
         }
+    }
+    {
+        BOOL b = get_check(pg, IDC_WINUI_ALWAYS_SHOW_ICONS);
+        if (c->winuiAlwaysShowIcons != b) { c->winuiAlwaysShowIcons = b; ch = TRUE; }
     }
     if(!ch) return FALSE;
     if(c->iniPath[0]){
         const WCHAR* renderer = c->useWinUI3Menu ? L"WinUI" : (c->rootMenuLargeIcons ? L"Large" : L"Win32");
         WritePrivateProfileStringW(L"Appearance",L"Renderer",renderer,c->iniPath);
         WritePrivateProfileStringW(L"General",L"MenuStyle",c->rootMenuLargeIcons?L"modern":L"legacy",c->iniPath);
-        WritePrivateProfileStringW(L"Appearance",L"UseWinUI3Menu",c->useWinUI3Menu?L"true":L"false",c->iniPath);
-        WritePrivateProfileStringW(L"Appearance",L"WinUISize",c->winuiSize[0]?c->winuiSize:L"compact",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"WinUISize",c->winuiSize[0]?c->winuiSize:L"default",c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"WinUIAlwaysShowIcons",c->winuiAlwaysShowIcons?L"true":L"false",c->iniPath);
         WritePrivateProfileStringW(L"Appearance",L"LargeMenuHighlightFrame",
-            c->largeMenuHighlightFrame==HIGHLIGHT_BORDER?L"border":
-            (c->largeMenuHighlightFrame==HIGHLIGHT_BACKGROUND_BORDER?L"background-border":L"background"),
+            c->largeMenuHighlightFrame==HIGHLIGHT_BORDER?L"border":L"background",
             c->iniPath);
         {
             const WCHAR* anim = L"bottom";
@@ -623,8 +776,10 @@ static BOOL Appearance_Save(HWND pg, Config* c){
         WritePrivateProfileStringW(L"Advanced",L"LargeMenuIcons",NULL,c->iniPath);
         WritePrivateProfileStringW(L"Advanced",L"LargeMenuAnimation",NULL,c->iniPath);
         WritePrivateProfileStringW(L"Advanced",L"KeepLargeMenuHighlightTextColor",NULL,c->iniPath);
+        WritePrivateProfileStringW(L"Appearance",L"UseWinUI3Menu",NULL,c->iniPath);
         WritePrivateProfileStringW(L"WinUI3",L"Size",NULL,c->iniPath);
     }
+    if (rendererChanged) ShutdownWinUI3Menu();
     return TRUE;
 }
 
@@ -751,6 +906,7 @@ static const WCHAR* item_type_name(ConfigItemType t){
         case CI_POWER_MENU: return L"Power Menu";
         case CI_THISPC: return L"This PC";
         case CI_HOME: return L"Home";
+        case CI_SETTINGS: return L"WinMac Menu Settings";
         case CI_TASKKILL: return L"Task Kill";
     }
     return L"?";
@@ -842,10 +998,11 @@ static const WCHAR* item_type_token(ConfigItemType t){
         case CI_TASKKILL: return L"TASKKILL";
         case CI_THISPC: return L"THISPC";
         case CI_HOME: return L"HOME";
+        case CI_SETTINGS: return L"SETTINGS";
         default: return L"UNKNOWN";
     }
 }
-static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c->iniPath[0]) return FALSE; BOOL any=FALSE;
+static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c->iniPath[0]) return FALSE;
     // Legacy format: ItemN=Label|TYPE|Path|(optional Params)
     // We overwrite each ItemN key preserving compatibility with existing parser.
     WCHAR key[32]; WCHAR line[2048];
@@ -861,7 +1018,8 @@ static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c
                 it->type==CI_RECENT_SUBMENU ||
                 it->type==CI_TASKKILL ||
                 it->type==CI_THISPC ||
-                it->type==CI_HOME
+                it->type==CI_HOME ||
+                it->type==CI_SETTINGS
             ){
                 // These types do not use path/params, just label and type
                 wsprintfW(line,L"%s|%s|",it->label,token);
@@ -874,11 +1032,17 @@ static BOOL Menu_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!c
                 else wsprintfW(line,L"%s|%s|",it->label,token);
             }
         }
-        WritePrivateProfileStringW(L"Menu",key,line,c->iniPath); any=TRUE;
+        WritePrivateProfileStringW(L"Menu",key,line,c->iniPath);
+    }
+    // Remove entries left behind when the list becomes shorter. The parser
+    // scans Item1..Item64 and would otherwise load deleted trailing items.
+    for(int i=c->count;i<64;i++){
+        wsprintfW(key,L"Item%d",i+1);
+        WritePrivateProfileStringW(L"Menu",key,NULL,c->iniPath);
     }
     // Write Count for convenience (parser ignores if absent)
     WCHAR buf[16]; wsprintfW(buf,L"%d",c->count); WritePrivateProfileStringW(L"Menu",L"Count",buf,c->iniPath);
-    return any; }
+    return TRUE; }
 static void Icons_Load(HWND pg, Config* c){
     HWND lv=GetDlgItem(pg,IDC_ICONS_LIST); if(!lv||!c) return;
     SettingsState* st=(SettingsState*)GetWindowLongPtrW(GetParent(pg),GWLP_USERDATA);
@@ -945,7 +1109,14 @@ static BOOL Icons_Save(HWND pg, Config* c){ UNREFERENCED_PARAMETER(pg); if(!c||!
         // Remove obsolete experimental triplet
         wsprintfW(key,L"Item%d",i+1); WritePrivateProfileStringW(L"Icons",key,NULL,c->iniPath);
     }
-    for(int i=c->count;i<64;i++){ wsprintfW(key,L"Item%d",i+1); WritePrivateProfileStringW(L"Icons",key,NULL,c->iniPath); }
+    for(int i=c->count;i<64;i++){
+        wsprintfW(key,L"Icon%d",i+1);
+        WritePrivateProfileStringW(L"Icons",key,NULL,c->iniPath);
+        WritePrivateProfileStringW(L"IconsLight",key,NULL,c->iniPath);
+        WritePrivateProfileStringW(L"IconsDark",key,NULL,c->iniPath);
+        wsprintfW(key,L"Item%d",i+1);
+        WritePrivateProfileStringW(L"Icons",key,NULL,c->iniPath);
+    }
     if(!any){
         // No icons referenced in any of the three sections: remove them entirely
         WritePrivateProfileStringW(L"Icons", NULL, NULL, c->iniPath);
@@ -1053,6 +1224,7 @@ static void item_fill_type_combo(HWND h){
         {CI_POWER_MENU,L"Power Menu"},
         {CI_THISPC,L"This PC"},
         {CI_HOME,L"Home"},
+        {CI_SETTINGS,L"WinMac Menu Settings"},
         {CI_TASKKILL,L"Task Kill"}
     };
     for(int i=0;i< (int)(sizeof(types)/sizeof(types[0])); i++){
@@ -1077,7 +1249,14 @@ static INT_PTR CALLBACK ItemEditDlg(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
         switch(LOWORD(wParam)){
         case IDC_ITEM_TYPE_COMBO:{
             if(HIWORD(wParam)==CBN_SELCHANGE){
-                item_update_path_controls(dlg, item_get_selected_type(dlg));
+                ConfigItemType selectedType = item_get_selected_type(dlg);
+                item_update_path_controls(dlg, selectedType);
+                if (!ctx->editing && selectedType == CI_POWER_MENU) {
+                    WCHAR label[256] = L"";
+                    GetDlgItemTextW(dlg, IDC_ITEM_LABEL, label, ARRAYSIZE(label));
+                    if (!label[0])
+                        SetDlgItemTextW(dlg, IDC_ITEM_LABEL, L"Shut down or sign out");
+                }
                 RedrawWindow(dlg,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW);
             }
             break;
@@ -1225,6 +1404,10 @@ static void init_tabs(HWND dlg, SettingsState* st){
 
     // Attach st pointer to parent dialog for child retrieval (used in loads)
     SetWindowLongPtrW(dlg,GWLP_USERDATA,(LONG_PTR)st);
+    {
+        HWND lvMenu = GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST);
+        if(lvMenu) SetWindowSubclass(lvMenu, MenuListSubclassProc, 1, (DWORD_PTR)st);
+    }
     working_clone(st);
     General_Load(st->pages[PAGE_GENERAL],st->cfg);
     Placement_Load(st->pages[PAGE_PLACEMENT],st->cfg);
@@ -1317,11 +1500,18 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
         case WM_CLOSE:
             EndDialog(dlg, IDCANCEL);
             return TRUE;
+        case WM_SETCURSOR:
+            if (st && st->dragging) {
+                SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
+                return TRUE;
+            }
+            break;
         case WM_INITDIALOG:
             g_activeSettingsDlg = dlg;
             st = (SettingsState*)calloc(1, sizeof(SettingsState));
             st->cfg = (Config*)lParam;
             st->dragging = FALSE;
+            st->menuListPressed = FALSE;
             st->dragSource = -1;
             // Store original power option states
             st->origExcludeSleep = st->cfg->excludeSleep;
@@ -1335,6 +1525,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 LONG_PTR ex = GetWindowLongPtrW(dlg, GWL_EXSTYLE); SetWindowLongPtrW(dlg, GWL_EXSTYLE, ex | WS_EX_APPWINDOW);
             }
             apply_dialog_icon(dlg, st->cfg);
+            apply_settings_title(dlg, st->cfg);
             init_tabs(dlg, st);
             // Center window manually (DS_CENTER removed). Use work area.
             {
@@ -1436,6 +1627,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                         LVINSERTMARK im; ZeroMemory(&im, sizeof(im)); im.iItem = row; im.dwFlags = LVIM_AFTER;
                         ListView_SetInsertMark(lv, &im);
                         SetCapture(dlg);
+                        SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
                     }
                 }
                 return TRUE;
@@ -1501,6 +1693,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
             break;
         case WM_MOUSEMOVE: {
             if (st && st->dragging) {
+                SetCursor(LoadCursorW(NULL, IDC_SIZEALL));
                 POINT p; GetCursorPos(&p); HWND lv = GetDlgItem(st->pages[PAGE_MENU], IDC_MENU_LIST);
                 if (!lv) break;
                 ScreenToClient(lv, &p);
@@ -1558,7 +1751,8 @@ static INT_PTR CALLBACK MainDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                         st->workingDirty = TRUE;
                     }
                 }
-                st->dragging = FALSE; st->dragSource = -1; st->insertTarget = -1; ReleaseCapture();
+                st->dragging = FALSE; st->menuListPressed = FALSE; st->dragSource = -1; st->insertTarget = -1; ReleaseCapture();
+                SetCursor(LoadCursorW(NULL, IDC_ARROW));
                 refresh_lists(st);
                 return TRUE;
             }

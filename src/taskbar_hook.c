@@ -84,6 +84,7 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
                 ControlActionType action = CA_NOTHING;
                 const WCHAR* command = NULL;
                 BOOL shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                MenuTriggerType trigger = MENU_TRIGGER_OTHER;
                 
                 if (bLeftClick) {
                     if ((!shiftPressed && g_cfg.leftClickTrigger) || (shiftPressed && g_cfg.shiftLeftClickTrigger)) {
@@ -101,6 +102,10 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
                         command = g_cfg.leftClickCommand;
                     }
                 }
+
+                if (shiftPressed) trigger = MENU_TRIGGER_SHIFT;
+                else if (bRightClick) trigger = MENU_TRIGGER_RIGHT_CLICK;
+                else if (bMiddleClick) trigger = MENU_TRIGGER_MIDDLE_CLICK;
                 
                 if (action != CA_NOTHING) {
                     HWND hTarget = g_hOwnerWnd ? g_hOwnerWnd : g_hTaskbar;
@@ -109,16 +114,17 @@ static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lPara
                     // WinUI bridge startup can take long enough for Windows to
                     // punish the hook and leave mouse state feeling stuck.
                     if (action == CA_WINMAC_MENU && hTarget) {
-                        PostMessageW(hTarget, WM_APP, 0, 0);
+                        AllowSetForegroundWindow(ASFW_ANY);
+                        PostMessageW(hTarget, WM_APP, (WPARAM)trigger, 0);
                     } else {
-                        ExecuteControlAction(action, command, hTarget);
+                        ExecuteControlAction(action, command, hTarget, trigger);
                     }
                     
                     // Suppress the click if we're not showing Windows menu
                     if (action != CA_WINDOWS_MENU) {
-                        g_suppressNextLeftUp = FALSE;
-                        g_suppressNextMiddleUp = FALSE;
-                        g_suppressNextRightUp = FALSE;
+                        if (bLeftClick) g_suppressNextLeftUp = TRUE;
+                        if (bMiddleClick) g_suppressNextMiddleUp = TRUE;
+                        if (bRightClick) g_suppressNextRightUp = TRUE;
                         return 1; // Suppress the mouse event
                     }
                 }

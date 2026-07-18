@@ -72,11 +72,13 @@ public sealed class HookService : IDisposable
     private uint   _winKeyCapturedVk;
     private bool   _winKeyCaptureNeedsShift;
     private bool   _winKeyChordCancelled;
+    private bool   _winKeyXTriggered;
+    private uint   _winKeyXReleaseVk;
     private bool   _leftBlocked, _rightBlocked, _middleBlocked;
     private RECT   _startRect;
     private int    _startRectAge;
 
-    public event Action? MenuRequested;
+    public event Action<MenuTriggerType>? MenuRequested;
 
     // ── Constructor ───────────────────────────────────────────────────────
 
@@ -91,7 +93,7 @@ public sealed class HookService : IDisposable
         _kbProc    = KeyboardProc;  // stored as fields — prevents GC from collecting the delegates
         _mouseProc = MouseProc;
 
-        bool needsKb    = config.WindowsKey || config.ShiftWindowsKey;
+        bool needsKb    = config.WindowsKey || config.ShiftWindowsKey || config.WindowsKeyX;
         bool needsMouse = config.LeftClick || config.RightClick || config.MiddleClick ||
                           config.ShiftLeftClick || config.ShiftRightClick || config.ShiftMiddleClick;
 
@@ -152,11 +154,30 @@ public sealed class HookService : IDisposable
             if (ShouldIgnore())
             {
                 ClearWinKeyCapture();
+                ClearWinKeyXTrigger();
                 return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+            }
+
+            if ((msg is WM_KEYUP or WM_SYSKEYUP) && _winKeyXTriggered && isWin && kb.vkCode == _winKeyXReleaseVk)
+            {
+                ReleaseWinKeyForShell(kb.vkCode);
+                ClearWinKeyXTrigger();
+                return (IntPtr)1;
             }
 
             if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
             {
+                if (_config.WindowsKeyX && kb.vkCode == 'X' &&
+                    (((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0)))
+                {
+                    var releaseVk = ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0) ? (uint)VK_RWIN : (uint)VK_LWIN;
+                    ClearWinKeyCapture();
+                    _winKeyXTriggered = true;
+                    _winKeyXReleaseVk = releaseVk;
+                    _ui.TryEnqueue(() => MenuRequested?.Invoke(MenuTriggerType.WinX));
+                    return (IntPtr)1;
+                }
+
                 if (isWin)
                 {
                     if (!_winKeyCaptureActive)
@@ -185,6 +206,7 @@ public sealed class HookService : IDisposable
             {
                 if (isWin && _winKeyCaptureActive && kb.vkCode == _winKeyCapturedVk)
                 {
+                    bool wasShiftTrigger = _winKeyCaptureNeedsShift;
                     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
                     bool shiftMatch = _winKeyCaptureNeedsShift ? shift : !shift;
                     bool triggerMenu = !_winKeyChordCancelled && shiftMatch;
@@ -193,7 +215,8 @@ public sealed class HookService : IDisposable
                     if (triggerMenu)
                     {
                         ReleaseWinKeyForShell(kb.vkCode);
-                        _ui.TryEnqueue(() => MenuRequested?.Invoke());
+                        _ui.TryEnqueue(() => MenuRequested?.Invoke(
+                            wasShiftTrigger ? MenuTriggerType.Shift : MenuTriggerType.Other));
                         return (IntPtr)1;
                     }
                 }
@@ -208,6 +231,20 @@ public sealed class HookService : IDisposable
         _winKeyCapturedVk = 0;
         _winKeyCaptureNeedsShift = false;
         _winKeyChordCancelled = false;
+    }
+
+    private void ClearWinKeyXTrigger()
+    {
+        _winKeyXTriggered = false;
+        _winKeyXReleaseVk = 0;
+    }
+
+    public void ReleaseSuppressedWinKeys()
+    {
+        ReleaseWinKeyForShell(VK_LWIN);
+        ReleaseWinKeyForShell(VK_RWIN);
+        ClearWinKeyCapture();
+        ClearWinKeyXTrigger();
     }
 
     private static void ReleaseWinKeyForShell(uint vkCode)
@@ -259,7 +296,14 @@ public sealed class HookService : IDisposable
                         if (msg == WM_RBUTTONDOWN) _rightBlocked  = true;
                         if (msg == WM_MBUTTONDOWN) _middleBlocked = true;
 
-                        _ui.TryEnqueue(() => MenuRequested?.Invoke());
+                        var source = shift
+                            ? MenuTriggerType.Shift
+                            : msg == WM_RBUTTONDOWN
+                                ? MenuTriggerType.RightClick
+                                : msg == WM_MBUTTONDOWN
+                                    ? MenuTriggerType.MiddleClick
+                                    : MenuTriggerType.Other;
+                        _ui.TryEnqueue(() => MenuRequested?.Invoke(source));
                         return (IntPtr)1;
                     }
                 }

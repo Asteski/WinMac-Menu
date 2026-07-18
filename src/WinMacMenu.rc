@@ -31,11 +31,11 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName",      "Asteski"
 			VALUE "FileDescription", "WinMac Menu"
-			VALUE "FileVersion",     "1.0.0-beta"
+			VALUE "FileVersion",     "1.0.0-beta4"
 			VALUE "InternalName",    "WinMacMenu.exe"
 			VALUE "OriginalFilename", "WinMacMenu.exe"
 			VALUE "ProductName",     "WinMac Menu"
-			VALUE "ProductVersion",  "1.0.0-beta"
+			VALUE "ProductVersion",  "1.0.0-beta4"
 			VALUE "LegalCopyright",  "Copyright 2026 Asteski"
 		END // BLOCK "040904B0"
 	END // BLOCK "StringFileInfo"
@@ -155,7 +155,7 @@ BEGIN
 END
 
 // Controls Page
-IDD_PAGE_CONTROLS DIALOGEX 0,0,295,210
+IDD_PAGE_CONTROLS DIALOGEX 0,0,295,240
 STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
 FONT 9, "Segoe UI"
 BEGIN
@@ -176,13 +176,18 @@ BEGIN
 	CONTROL       "Shift + Win", IDC_CTRL_SHIFT_WINDOWS_KEY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 104, 100, 84, 10
 	CONTROL       "Win + X", IDC_CTRL_WINDOWS_KEY_X, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 194, 100, 70, 10
 
-	GROUPBOX      "Fullscreen applications", -1, 6, 120, 283, 56
-	CONTROL       "Ignore triggers when fullscreen app is focused", IDC_IGNORE_FULLSCREEN_CHECK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 132, 260, 10
+	GROUPBOX      "WinMac Menu settings item", -1, 6, 120, 283, 42
+	LTEXT         "Show at bottom", IDC_CTRL_SETTINGS_ITEM_LABEL, 14, 134, 82, 8
+	COMBOBOX      IDC_CTRL_SETTINGS_ITEM_COMBO, 104, 131, 175, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	LTEXT         "Ignored when a Settings item is already present in [Menu].", -1, 14, 148, 265, 8
 
-	LTEXT         "Exclusion list (comma-separated app names):", -1, 14, 148, 260, 8
-	EDITTEXT      IDC_FULLSCREEN_EXCLUSION_EDIT, 14, 158, 260, 12, ES_AUTOHSCROLL | ES_MULTILINE | WS_TABSTOP
+	GROUPBOX      "Fullscreen applications", -1, 6, 168, 283, 56
+	CONTROL       "Ignore triggers when fullscreen app is focused", IDC_IGNORE_FULLSCREEN_CHECK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 180, 260, 10
 
-	LTEXT         "A reload is required for the changes to take effect. The reload option is available from the WinMac Menu tray icon context menu.", -1, 8, 178, 279, 36
+	LTEXT         "Exclusion list (comma-separated app names):", -1, 14, 196, 260, 8
+	EDITTEXT      IDC_FULLSCREEN_EXCLUSION_EDIT, 14, 206, 260, 12, ES_AUTOHSCROLL | ES_MULTILINE | WS_TABSTOP
+
+	LTEXT         "A reload is required for trigger changes to take effect.", -1, 8, 228, 279, 8
 END
 
 // Advanced Page
@@ -200,7 +205,7 @@ BEGIN
 	LTEXT          "Number of jumplist items", -1, 120, 36, 110, 8
 	EDITTEXT       IDC_RECENTMAX_EDIT, 235, 34, 34, 12, ES_NUMBER | WS_TABSTOP
 	CONTROL        "", IDC_RECENTMAX_SPIN, "msctls_updown32", UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT, 269, 34, 12, 12
-	CONTROL        "Separate files and folders", IDC_RECENT_SEPARATE_ITEMS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 50, 140, 10
+	CONTROL        "List files and folders separately", IDC_RECENT_SEPARATE_ITEMS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 50, 180, 10
 	GROUPBOX      "Task Kill", -1, 6, 74, 283, 74
 	// First row of checkboxes
 	CONTROL       "Show tasks from all desktops", 2000, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 88, 120, 10
@@ -240,9 +245,10 @@ BEGIN
 	COMBOBOX      IDC_ANIMATION_COMBO, 120, 52, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 	LTEXT         "Highlight style", IDC_HIGHLIGHT_FRAME_LABEL, 14, 72, 92, 8
 	COMBOBOX      IDC_HIGHLIGHT_FRAME_COMBO, 120, 70, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-	GROUPBOX      "WinUI", -1, 6, 102, 283, 38
+	GROUPBOX      "WinUI", -1, 6, 102, 283, 56
 	LTEXT         "Size", IDC_WINUI_SIZE_LABEL, 14, 118, 92, 8
 	COMBOBOX      IDC_WINUI_SIZE_COMBO, 120, 116, 100, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+	CONTROL       "Use icons instead of thumbnails", IDC_WINUI_ALWAYS_SHOW_ICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 136, 160, 10
 END
 
 // Item Edit Dialog

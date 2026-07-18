@@ -85,6 +85,40 @@ public static class CommandExecutor
         Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
     }
 
+    public static void OpenSettings(int? parentPid, string iniPath)
+    {
+        try
+        {
+            if (parentPid is > 0)
+            {
+                using var parent = Process.GetProcessById(parentPid.Value);
+                var nativeExe = parent.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(nativeExe))
+                {
+                    Process.Start(new ProcessStartInfo(nativeExe, $"--settings {parentPid.Value}")
+                    {
+                        UseShellExecute = true
+                    });
+                    return;
+                }
+            }
+
+            var root = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))?.FullName;
+            var settingsExe = root == null ? null : Path.Combine(root, "bin", "WinMacMenuSettings.exe");
+            if (settingsExe != null && File.Exists(settingsExe))
+            {
+                Process.Start(new ProcessStartInfo(settingsExe, $"--config \"{iniPath}\" --from-tray")
+                {
+                    UseShellExecute = true
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Open settings failed: {ex.Message}");
+        }
+    }
+
     public static void ShellOpen(string path, string? args = null)
     {
         if (string.IsNullOrEmpty(path)) return;

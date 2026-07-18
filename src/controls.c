@@ -6,7 +6,7 @@
 
 extern Config g_cfg;
 
-void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND hWnd) {
+void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND hWnd, MenuTriggerType trigger) {
     // Debug output
     WCHAR debug[512];
     wsprintfW(debug, L"ExecuteControlAction: action=%d, command='%s', hWnd=%p\n", 
@@ -22,11 +22,11 @@ void ExecuteControlAction(ControlActionType action, const WCHAR* command, HWND h
         case CA_WINMAC_MENU:
             // Show WinMac Menu - same as the current behavior
             OutputDebugStringW(L"Action: CA_WINMAC_MENU\n");
-            if (g_cfg.useWinUI3Menu && LaunchWinUI3Menu(&g_cfg)) {
+            if (g_cfg.useWinUI3Menu && LaunchWinUI3Menu(&g_cfg, trigger)) {
                 break;
             }
             if (hWnd) {
-                PostMessageW(hWnd, WM_APP, 0, 0);
+                PostMessageW(hWnd, WM_APP, (WPARAM)trigger, 0);
             }
             break;
             

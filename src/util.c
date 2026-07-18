@@ -92,6 +92,17 @@ static BOOL is_window_fullscreen(HWND hwnd) {
             abs(wr.bottom - mr.bottom) <= 2);
 }
 
+static BOOL is_shell_surface_window(HWND hwnd) {
+    WCHAR cls[64];
+    if (!hwnd) return FALSE;
+    if (!GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) return FALSE;
+    return !lstrcmpiW(cls, L"Progman") ||
+           !lstrcmpiW(cls, L"WorkerW") ||
+           !lstrcmpiW(cls, L"SHELLDLL_DefView") ||
+           !lstrcmpiW(cls, L"Shell_TrayWnd") ||
+           !lstrcmpiW(cls, L"Shell_SecondaryTrayWnd");
+}
+
 void open_uri(LPCWSTR uri) {
     ShellExecuteW(NULL, L"open", uri, NULL, NULL, SW_SHOWNORMAL);
 }
@@ -250,6 +261,7 @@ BOOL should_block_triggers_for_fullscreen(BOOL enabled, LPCWSTR exclusionCsv, HW
     fg = GetForegroundWindow();
     if (!fg) return FALSE;
     if (appWindow && (fg == appWindow || IsChild(appWindow, fg))) return FALSE;
+    if (is_shell_surface_window(fg)) return FALSE;
     if (IsIconic(fg)) return FALSE;
 
     GetWindowThreadProcessId(fg, &fgPid);

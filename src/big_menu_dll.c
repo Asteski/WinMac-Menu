@@ -270,27 +270,60 @@ static void big_menu_fill_translucent_rect(HDC hdc, const RECT* rc, COLORREF col
 }
 
 static void big_menu_draw_fake_rounded_highlight(HDC hdc, const RECT* rc, int radius, COLORREF fillColor, COLORREF backgroundColor) {
+    RECT fill;
+    HBRUSH fillBrush;
+
     if (!hdc || !rc) return;
+    fill = *rc;
     if (radius <= 0) {
-        HBRUSH fillBrush = CreateSolidBrush(fillColor);
-        FillRect(hdc, rc, fillBrush ? fillBrush : GetSysColorBrush(COLOR_HIGHLIGHT));
+        fillBrush = CreateSolidBrush(fillColor);
+        FillRect(hdc, &fill, fillBrush ? fillBrush : GetSysColorBrush(COLOR_HIGHLIGHT));
         if (fillBrush) DeleteObject(fillBrush);
         return;
     }
 
-    // Cap radius to 2px for subtle rounding
-    if (radius > 2) radius = 2;
-    // Use RoundRect for a filled rounded rectangle. RoundRect uses ellipse width/height
-    // parameters; to get ~1px corner radius pass radius*2.
-    int ew = radius * 2;
-    int eh = radius * 2;
-    HPEN oldPen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
-    HBRUSH brush = CreateSolidBrush(fillColor);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
-    RoundRect(hdc, rc->left, rc->top, rc->right, rc->bottom, ew, eh);
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
-    DeleteObject(brush);
+    fillBrush = CreateSolidBrush(fillColor);
+    if (!fillBrush) {
+        FillRect(hdc, &fill, GetSysColorBrush(COLOR_HIGHLIGHT));
+        return;
+    }
+
+    FillRect(hdc, &fill, fillBrush);
+    DeleteObject(fillBrush);
+
+    for (int y = 0; y < radius; ++y) {
+        for (int x = 0; x < radius; ++x) {
+            enum { SUBSAMPLES = 6 };
+            int inside = 0;
+            int total = SUBSAMPLES * SUBSAMPLES;
+            COLORREF color;
+
+            for (int sy = 0; sy < SUBSAMPLES; ++sy) {
+                for (int sx = 0; sx < SUBSAMPLES; ++sx) {
+                    double sampleX = (double)x + ((double)sx + 0.5) / (double)SUBSAMPLES;
+                    double sampleY = (double)y + ((double)sy + 0.5) / (double)SUBSAMPLES;
+                    double dx = (double)radius - sampleX;
+                    double dy = (double)radius - sampleY;
+                    if ((dx * dx + dy * dy) <= (double)(radius * radius)) {
+                        inside++;
+                    }
+                }
+            }
+
+            if (inside == total) continue;
+            if (inside <= 0) {
+                color = backgroundColor;
+            } else {
+                int alpha = (inside * 255) / total;
+                color = big_menu_blend_colors(backgroundColor, fillColor, alpha);
+            }
+
+            SetPixelV(hdc, rc->left + x, rc->top + y, color);
+            SetPixelV(hdc, rc->right - 1 - x, rc->top + y, color);
+            SetPixelV(hdc, rc->left + x, rc->bottom - 1 - y, color);
+            SetPixelV(hdc, rc->right - 1 - x, rc->bottom - 1 - y, color);
+        }
+    }
 }
 
 static void big_menu_draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor) {
@@ -313,6 +346,74 @@ static void big_menu_draw_highlight_border(HDC hdc, const RECT* rc, int radius, 
     DeleteObject(pen);
 }
 
+static void big_menu_draw_aa_rounded_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor, COLORREF backgroundColor) {
+    HBRUSH brush;
+    RECT line;
+    int left;
+    int top;
+    int right;
+    int bottom;
+    int innerRadius;
+    int samples;
+    int totalSamples;
+
+    if (!hdc || !rc) return;
+    if (radius <= 0) {
+        big_menu_draw_highlight_border(hdc, rc, radius, borderColor);
+        return;
+    }
+
+    left = rc->left;
+    top = rc->top;
+    right = rc->right;
+    bottom = rc->bottom;
+    if (right - left <= 2 || bottom - top <= 2) return;
+
+    radius = min(radius, min((right - left) / 2, (bottom - top) / 2));
+    innerRadius = max(0, radius - 1);
+    samples = 4;
+    totalSamples = samples * samples;
+
+    brush = CreateSolidBrush(borderColor);
+    if (brush) {
+        line = (RECT){ left + radius, top, right - radius, top + 1 };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ left + radius, bottom - 1, right - radius, bottom };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ left, top + radius, left + 1, bottom - radius };
+        FillRect(hdc, &line, brush);
+        line = (RECT){ right - 1, top + radius, right, bottom - radius };
+        FillRect(hdc, &line, brush);
+        DeleteObject(brush);
+    }
+
+    for (int y = 0; y < radius; ++y) {
+        for (int x = 0; x < radius; ++x) {
+            int covered = 0;
+            for (int sy = 0; sy < samples; ++sy) {
+                for (int sx = 0; sx < samples; ++sx) {
+                    double px = (double)x + ((double)sx + 0.5) / (double)samples;
+                    double py = (double)y + ((double)sy + 0.5) / (double)samples;
+                    double dx = (double)radius - px;
+                    double dy = (double)radius - py;
+                    double dist2 = dx * dx + dy * dy;
+                    if (dist2 <= (double)(radius * radius) &&
+                        dist2 >= (double)(innerRadius * innerRadius)) {
+                        covered++;
+                    }
+                }
+            }
+            if (covered > 0) {
+                COLORREF color = big_menu_blend_colors(backgroundColor, borderColor, (covered * 255) / totalSamples);
+                SetPixelV(hdc, left + x, top + y, color);
+                SetPixelV(hdc, right - 1 - x, top + y, color);
+                SetPixelV(hdc, left + x, bottom - 1 - y, color);
+                SetPixelV(hdc, right - 1 - x, bottom - 1 - y, color);
+            }
+        }
+    }
+}
+
 static COLORREF big_menu_get_system_menu_text_color(void) {
     return RGB(24, 24, 24);
 }
@@ -320,6 +421,10 @@ static COLORREF big_menu_get_system_menu_text_color(void) {
 static COLORREF big_menu_get_text_color(COLORREF background) {
     int lum = ((30 * GetRValue(background)) + (59 * GetGValue(background)) + (11 * GetBValue(background))) / 100;
     return (lum > 140) ? RGB(24, 24, 24) : RGB(240, 240, 240);
+}
+
+static COLORREF big_menu_get_disabled_text_color(COLORREF background, COLORREF text) {
+    return big_menu_blend_colors(background, text, 108);
 }
 
 static COLORREF big_menu_get_highlight_text_color(COLORREF highlight) {
@@ -747,7 +852,7 @@ static void big_menu_measure(BIG_MENU_STATE* state) {
     state->iconGap = MulDiv(10, state->dpi, 96);
     state->rightPad = MulDiv(12, state->dpi, 96);
     state->submenuPad = MulDiv(18, state->dpi, 96);
-    state->selectionRadius = big_menu_is_windows_11_or_greater() ? MulDiv(8, state->dpi, 96) : 0;
+    state->selectionRadius = big_menu_is_windows_11_or_greater() ? MulDiv(4, state->dpi, 96) : 0;
 
     hdc = GetDC(NULL);
     oldFont = (HFONT)SelectObject(hdc, state->font);
@@ -814,6 +919,7 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
     // accounts for darkMode). Do NOT force a single hardcoded color when
     // useBackdrop is on -- that breaks dark mode contrast.
     COLORREF textColor = big_menu_get_text_color(backgroundColor);
+    COLORREF disabledTextColor = big_menu_get_disabled_text_color(backgroundColor, textColor);
     UINT i;
     HFONT oldFont;
     RECT backgroundRect;
@@ -858,11 +964,25 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
 
         if (selected) {
             RECT sel = rc;
+            RECT borderSel;
             BOOL drawBackground = (state->params->highlightFrame != WMM_BIG_MENU_HIGHLIGHT_BORDER);
             BOOL drawBorder = (state->params->highlightFrame != WMM_BIG_MENU_HIGHLIGHT_BACKGROUND);
-            InflateRect(&sel, -1, 0);
-            sel.top -= 1;
-            sel.bottom += 1;
+            int highlightInset = max(3, MulDiv(3, state->dpi, 96));
+            if (state->selectionRadius > 0) {
+                InflateRect(&sel, -highlightInset, -highlightInset);
+            } else {
+                InflateRect(&sel, -1, 0);
+                sel.top -= 1;
+                sel.bottom += 1;
+            }
+            borderSel = sel;
+            if (!drawBackground) {
+                borderSel = rc;
+                InflateRect(&borderSel, -highlightInset, -highlightInset);
+            } else {
+                if (borderSel.top <= backgroundRect.top) borderSel.top = backgroundRect.top + 1;
+                if (borderSel.bottom >= backgroundRect.bottom) borderSel.bottom = backgroundRect.bottom - 1;
+            }
             // Use system highlight text color as default
             COLORREF selectedTextColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
             // If not keeping normal text color, and dark mode is active, prefer a dark text color
@@ -877,20 +997,23 @@ static void big_menu_paint(BIG_MENU_STATE* state, HDC hdc) {
                 OutputDebugStringW(dbg);
             }
             if (drawBackground) {
-                big_menu_draw_fake_rounded_highlight(hdc, &sel, 0, highlight, backgroundColor);
+                big_menu_draw_fake_rounded_highlight(hdc, &sel, state->selectionRadius, highlight, backgroundColor);
                 SetBkColor(hdc, highlight);
             }
             if (drawBorder) {
                 COLORREF stroke = drawBackground ? big_menu_blend_colors(highlight, selectedTextColor, 96) : highlight;
-                big_menu_draw_highlight_border(hdc, &sel, 0, stroke);
+                if (state->selectionRadius > 0)
+                    big_menu_draw_aa_rounded_border(hdc, &borderSel, state->selectionRadius, stroke, backgroundColor);
+                else
+                    big_menu_draw_highlight_border(hdc, &borderSel, state->selectionRadius, stroke);
             }
             if (state->params->keepLargeMenuHighlightTextColor || !drawBackground) itemTextColor = textColor;
             else itemTextColor = selectedTextColor;
             SetTextColor(hdc, itemTextColor);
         } else {
-            UNREFERENCED_PARAMETER(disabled);
+            if (disabled) itemTextColor = disabledTextColor;
             SetBkColor(hdc, backgroundColor);
-            SetTextColor(hdc, textColor);
+            SetTextColor(hdc, itemTextColor);
         }
 
         if (item->icon) {

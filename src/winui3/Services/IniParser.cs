@@ -47,6 +47,9 @@ public static class IniParser
         cfg.MaxItems = GetInt("General", "MaxItems", 0, iniPath);
         cfg.DefaultIconPath = GetString("General", "DefaultIcon", "", iniPath);
         cfg.TrayIconPath    = GetString("General", "TrayIcon",   "", iniPath);
+        cfg.TrayIconPathLight = GetString("General", "TrayIconLight", "", iniPath);
+        cfg.TrayIconPathDark = GetString("General", "TrayIconDark", "", iniPath);
+        cfg.MonochromeTrayIcon = GetBool("General", "MonochromeTrayIcon", false, iniPath);
         cfg.MenuStyle = GetString("General", "MenuStyle", "modern", iniPath);
 
         cfg.PointerRelative = GetBool("Placement", "PointerRelative", true, iniPath);
@@ -54,24 +57,40 @@ public static class IniParser
         cfg.HOffset = GetInt("Placement", "HOffset", 0, iniPath);
         cfg.Vertical = GetString("Placement", "Vertical", "top", iniPath);
         cfg.VOffset = GetInt("Placement", "VOffset", 0, iniPath);
+        var ignoreRelative = GetString("Placement", "IgnoreOffsetWhenRelative", "false", iniPath).ToLowerInvariant();
+        cfg.IgnoreHOffsetWhenRelative = ignoreRelative is "true" or "1" or "yes" or "hoffset" or "h" or "horizontal";
+        cfg.IgnoreVOffsetWhenRelative = ignoreRelative is "true" or "1" or "yes" or "voffset" or "v" or "vertical";
 
         cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
 
         cfg.WinUI3Size = GetString("Appearance", "WinUISize", "", iniPath);
         if (string.IsNullOrWhiteSpace(cfg.WinUI3Size))
-            cfg.WinUI3Size = GetString("WinUI3", "Size", "compact", iniPath);
-        if (!cfg.WinUI3Size.Equals("default", StringComparison.OrdinalIgnoreCase) &&
-            !cfg.WinUI3Size.Equals("compact", StringComparison.OrdinalIgnoreCase))
-            cfg.WinUI3Size = "compact";
+            cfg.WinUI3Size = GetString("WinUI3", "Size", "default", iniPath);
+        if (cfg.WinUI3Size.Equals("compact", StringComparison.OrdinalIgnoreCase))
+            cfg.WinUI3Size = "default";
+        else if (!cfg.WinUI3Size.Equals("default", StringComparison.OrdinalIgnoreCase) &&
+                 !cfg.WinUI3Size.Equals("large", StringComparison.OrdinalIgnoreCase))
+            cfg.WinUI3Size = "default";
+        cfg.WinUIAlwaysShowIcons = GetBool("Appearance", "WinUIAlwaysShowIcons", false, iniPath);
 
         cfg.WindowsKey      = GetBool("Controls", "WindowsKey",      false, iniPath);
         cfg.ShiftWindowsKey = GetBool("Controls", "ShiftWindowsKey", false, iniPath);
+        cfg.WindowsKeyX     = GetBool("Controls", "WindowsKeyX",     false, iniPath);
         cfg.LeftClick       = GetBool("Controls", "LeftClick",       false, iniPath);
         cfg.RightClick      = GetBool("Controls", "RightClick",      false, iniPath);
         cfg.MiddleClick     = GetBool("Controls", "MiddleClick",     true,  iniPath);
         cfg.ShiftLeftClick  = GetBool("Controls", "ShiftLeftClick",  false, iniPath);
         cfg.ShiftRightClick = GetBool("Controls", "ShiftRightClick", false, iniPath);
         cfg.ShiftMiddleClick= GetBool("Controls", "ShiftMiddleClick",false, iniPath);
+        cfg.ShowSettingsItem = GetString("Controls", "ShowSettingsItem", "disabled", iniPath).Trim().ToLowerInvariant() switch
+        {
+            "shift" or "with shift" => SettingsItemMode.Shift,
+            "winx" or "win+x" or "win + x" => SettingsItemMode.WinX,
+            "rightclick" or "right click" => SettingsItemMode.RightClick,
+            "middleclick" or "middle click" => SettingsItemMode.MiddleClick,
+            "always" => SettingsItemMode.Always,
+            _ => SettingsItemMode.Disabled,
+        };
         cfg.IgnoreTriggersWhenFullscreen = GetBool("Controls", "IgnoreTriggersWhenFullscreen", false, iniPath);
         cfg.FullscreenExclusionList      = GetString("Controls", "FullscreenExclusionList", "", iniPath);
 
@@ -179,6 +198,7 @@ public static class IniParser
             "POWER_HIBERNATE"=> ConfigItemType.PowerHibernate,
             "POWER_MENU"     => ConfigItemType.PowerMenu,
             "TASKKILL"       => ConfigItemType.TaskKill,
+            "SETTINGS" or "WINMAC_SETTINGS" or "WINMACMENU_SETTINGS" => ConfigItemType.Settings,
             _                => ConfigItemType.Uri,
         };
 

@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
+using System.Globalization;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace WinMacMenuWinUI3.Services;
 
@@ -33,6 +35,9 @@ public static class IconLoader
 
     private const uint SHGFI_ICON      = 0x000000100;
     private const uint SHGFI_SMALLICON = 0x000000001;
+    private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
+    private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
 
     // ── Cache ─────────────────────────────────────────────────────────────
 
@@ -41,15 +46,24 @@ public static class IconLoader
 
     // ── Public API ────────────────────────────────────────────────────────
 
-    public static IconElement? Load(string? iconPath)
+    public static IconElement? Load(string? iconPath, bool iconOnly = false)
     {
         if (string.IsNullOrWhiteSpace(iconPath)) return null;
         try
         {
-            if (!_cache.TryGetValue(iconPath, out var pngPath))
+            if (TryParseFluentGlyph(iconPath, out var codepoint))
             {
-                pngPath = Resolve(iconPath);
-                _cache[iconPath] = pngPath;
+                return new FontIcon
+                {
+                    FontFamily = new FontFamily("Segoe Fluent Icons"),
+                    Glyph = char.ConvertFromUtf32(codepoint)
+                };
+            }
+            var cacheKey = iconOnly ? $"icon:{iconPath}" : $"default:{iconPath}";
+            if (!_cache.TryGetValue(cacheKey, out var pngPath))
+            {
+                pngPath = Resolve(iconPath, iconOnly);
+                _cache[cacheKey] = pngPath;
             }
             if (pngPath == null) return null;
             return new BitmapIcon { UriSource = new Uri(pngPath), ShowAsMonochrome = false };
@@ -57,9 +71,31 @@ public static class IconLoader
         catch { return null; }
     }
 
+    private static bool TryParseFluentGlyph(string value, out int codepoint)
+    {
+        codepoint = 0;
+        var text = value.Trim();
+        string hex;
+
+        if (text.StartsWith("\\u", StringComparison.OrdinalIgnoreCase))
+            hex = text[2..];
+        else if (text.StartsWith("&#x", StringComparison.OrdinalIgnoreCase))
+            hex = text[3..].TrimEnd(';');
+        else if (text.StartsWith('#'))
+            hex = text[1..];
+        else
+            return false;
+
+        if (hex.Length is < 4 or > 6 ||
+            !int.TryParse(hex, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out codepoint))
+            return false;
+
+        return codepoint is > 0 and <= 0x10FFFF && codepoint is not (>= 0xD800 and <= 0xDFFF);
+    }
+
     // ── Resolution ────────────────────────────────────────────────────────
 
-    private static string? Resolve(string iconPath)
+    private static string? Resolve(string iconPath, bool iconOnly)
     {
         // DLL/EXE resource: "shell32.dll,-271"  or  "C:\foo\bar.exe,0"
         var comma = iconPath.LastIndexOf(',');
@@ -73,14 +109,14 @@ public static class IconLoader
 
         // Image formats BitmapImage can load directly
         var ext = Path.GetExtension(expanded).ToLowerInvariant();
-        if (ext is ".ico" or ".png" or ".jpg" or ".jpeg" or ".bmp" && File.Exists(expanded))
+        if (!iconOnly && ext is ".ico" or ".png" or ".jpg" or ".jpeg" or ".bmp" && File.Exists(expanded))
             return expanded;
 
         // For any filesystem path (file or directory) use SHGetFileInfo —
         // it returns the correct shell icon regardless of whether it's a
         // file, folder, drive root, or special shell location.
         if (File.Exists(expanded) || Directory.Exists(expanded))
-            return ShellIcon(expanded);
+            return ShellIcon(expanded, iconOnly);
 
         return null;
     }
@@ -98,11 +134,18 @@ public static class IconLoader
         return null;
     }
 
-    private static string? ShellIcon(string path)
+    private static string? ShellIcon(string path, bool iconOnly)
     {
         var shfi = new SHFILEINFO();
-        var res  = SHGetFileInfo(path, 0, ref shfi, (uint)Marshal.SizeOf(shfi),
-                                 SHGFI_ICON | SHGFI_SMALLICON);
+        uint flags = SHGFI_ICON | SHGFI_SMALLICON;
+        uint attributes = 0;
+        if (iconOnly)
+        {
+            flags |= SHGFI_USEFILEATTRIBUTES;
+            attributes = Directory.Exists(path) ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+        }
+        var res  = SHGetFileInfo(path, attributes, ref shfi, (uint)Marshal.SizeOf(shfi),
+                                 flags);
         if (res == IntPtr.Zero || shfi.hIcon == IntPtr.Zero) return null;
         try   { return HIconToPng(shfi.hIcon); }
         finally { DestroyIcon(shfi.hIcon); }

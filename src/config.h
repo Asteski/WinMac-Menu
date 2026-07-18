@@ -23,8 +23,26 @@ typedef enum {
     CI_POWER_MENU,
     CI_TASKKILL,
     CI_THISPC,
-    CI_HOME
+    CI_HOME,
+    CI_SETTINGS
 } ConfigItemType;
+
+typedef enum {
+    SETTINGS_ITEM_DISABLED = 0,
+    SETTINGS_ITEM_SHIFT,
+    SETTINGS_ITEM_WIN_X,
+    SETTINGS_ITEM_RIGHT_CLICK,
+    SETTINGS_ITEM_MIDDLE_CLICK,
+    SETTINGS_ITEM_ALWAYS
+} SettingsItemMode;
+
+typedef enum {
+    MENU_TRIGGER_OTHER = 0,
+    MENU_TRIGGER_SHIFT,
+    MENU_TRIGGER_WIN_X,
+    MENU_TRIGGER_RIGHT_CLICK,
+    MENU_TRIGGER_MIDDLE_CLICK
+} MenuTriggerType;
 
 typedef enum {
     CA_NOTHING = 0,     // Do nothing
@@ -106,7 +124,8 @@ typedef struct Config {
     BOOL showFileIcons; // [General] ShowFileIcons=true shows file icons for file entries inside folder-style submenus
     BOOL rootMenuLargeIcons; // [Appearance] LargeMenuIcons=true uses larger icons on root menu entries only
     BOOL useWinUI3Menu; // [Appearance] UseWinUI3Menu=true renders the menu through the WinUI 3 helper
-    WCHAR winuiSize[16]; // [Appearance] WinUISize=compact|default
+    WCHAR winuiSize[16]; // [Appearance] WinUISize=default|large
+    BOOL winuiAlwaysShowIcons; // [Appearance] WinUIAlwaysShowIcons=true uses file type icons instead of thumbnails in WinUI submenus
     BOOL keepLargeMenuHighlightTextColor; // [Appearance] KeepLargeMenuHighlightTextColor=true keeps normal font/arrow color on highlighted large-menu items
     BOOL keepMenuOpenAfterContextAction; // [General] KeepMenuOpenAfterContextAction=true keeps WinMac menu visible after running an item from shell context menu
     BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
@@ -156,6 +175,7 @@ typedef struct Config {
     BOOL shiftLeftClickTrigger;            // [Controls] ShiftLeftClick=true enables Shift+left-click trigger on Start button
     BOOL shiftRightClickTrigger;           // [Controls] ShiftRightClick=true enables Shift+right-click trigger on Start button
     BOOL shiftMiddleClickTrigger;          // [Controls] ShiftMiddleClick=true enables Shift+middle-click trigger on Start button
+    SettingsItemMode showSettingsItem;     // [Controls] ShowSettingsItem=disabled|shift|winx|rightclick|middleclick|always
     BOOL ignoreTriggersWhenFullscreen;    // [Controls] IgnoreTriggersWhenFullscreen=true enables fullscreen app detection
     WCHAR fullscreenExclusionList[1024];  // [Controls] FullscreenExclusionList=comma-separated list of excluded apps
     BOOL thisPCItemsAsSubmenus; // [General] ThisPCItemsAsSubmenus=true|false (default true)

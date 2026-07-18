@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 // Execute a control action based on the configured type
-void ExecuteControlAction(ControlActionType action, const WCHAR* customCommand, HWND hWnd);
+void ExecuteControlAction(ControlActionType action, const WCHAR* customCommand, HWND hWnd, MenuTriggerType trigger);
 
 // Show the Windows Start Menu (Win+X menu equivalent)
 void ShowWindowsStartMenu(void);

@@ -28,6 +28,7 @@
 #define IDC_WINUI_SIZE_COMBO        1060
 #define IDC_RENDERER_LABEL          1061
 #define IDC_WINUI_SIZE_LABEL        1062
+#define IDC_WINUI_ALWAYS_SHOW_ICONS 1063
 #pragma once
 // Resource identifiers
 #define IDI_APPICON 101
@@ -158,6 +159,8 @@
 #define IDC_IGNORE_FULLSCREEN_CHECK  1608
 #define IDC_FULLSCREEN_EXCLUSION_EDIT 1609
 #define IDC_CTRL_WINDOWS_KEY_X       1610
+#define IDC_CTRL_SETTINGS_ITEM_LABEL 1611
+#define IDC_CTRL_SETTINGS_ITEM_COMBO 1612
 
 // Power exclusion checkboxes (Advanced tab)
 

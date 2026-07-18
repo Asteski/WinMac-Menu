@@ -82,8 +82,8 @@ static void write_default_ini(const WCHAR* path) {
         "\r\n"\
         "[Appearance]\r\n"\
         "Renderer=Win32\r\n"\
-        "UseWinUI3Menu=false\r\n"\
-        "WinUISize=compact\r\n"\
+        "WinUISize=default\r\n"\
+        "WinUIAlwaysShowIcons=false\r\n"\
         "KeepLargeMenuHighlightTextColor=false\r\n"\
         "LargeMenuHighlightFrame=background\r\n"\
         "LargeMenuAnimation=bottom\r\n"\
@@ -102,7 +102,8 @@ static void write_default_ini(const WCHAR* path) {
         "MiddleClick=true\r\n"\
         "ShiftLeftClick=false\r\n"\
         "ShiftRightClick=false\r\n"\
-        "ShiftMiddleClick=false\r\n"\
+        "ShiftMiddleClick=true\r\n"\
+        "ShowSettingsItem=shift\r\n"\
         "IgnoreTriggersWhenFullscreen=false\r\n"\
         "FullscreenExclusionList=\r\n"\
         "\r\n"\
@@ -121,13 +122,14 @@ static void write_default_ini(const WCHAR* path) {
         "Item12=Sleep|POWER_SLEEP\r\n"\
         "Item13=Restart|POWER_RESTART\r\n"\
         "Item14=Shut down|POWER_SHUTDOWN\r\n"\
-        "Item15=---\r\n"\
-        "Item16=Event Viewer|URI|eventvwr\r\n"\
-        "Item17=Task Scheduler|URI|taskschd.msc\r\n"\
-        "Item18=Task Manager|URI|taskmgr\r\n"\
-        "Item19=---\r\n"\
-        "Item20=Lock screen|POWER_LOCK\r\n"\
-        "Item21=Sign out %USERNAME%|POWER_LOGOFF\r\n"\
+        "Item15=Hibernate|POWER_HIBERNATE\r\n"\
+        "Item16=---\r\n"\
+        "Item17=Event Viewer|URI|eventvwr\r\n"\
+        "Item18=Task Scheduler|URI|taskschd.msc\r\n"\
+        "Item19=Task Manager|URI|taskmgr\r\n"\
+        "Item20=---\r\n"\
+        "Item21=Lock screen|POWER_LOCK\r\n"\
+        "Item22=Sign out %USERNAME%|POWER_LOGOFF\r\n"\
         "\r\n"\
         "[Icons]\r\n"\
         "Icon1=shell32.dll,-271\r\n"\
@@ -137,9 +139,15 @@ static void write_default_ini(const WCHAR* path) {
         "Icon6=imageres.dll,-88\r\n"\
         "Icon8=shell32.dll,-327\r\n"\
         "Icon10=shell32.dll,-200\r\n"\
-        "Icon16=eventvwr.exe,0\r\n"\
-        "Icon17=powercpl.dll,-513\r\n"\
-        "Icon18=taskmgr.exe,0\r\n"\
+        "Icon12=\\uE708\r\n"\
+        "Icon13=\\uE72C\r\n"\
+        "Icon14=\\uE7E8\r\n"\
+        "Icon15=\\uF1B1\r\n"\
+        "Icon17=eventvwr.exe,0\r\n"\
+        "Icon18=powercpl.dll,-513\r\n"\
+        "Icon19=taskmgr.exe,0\r\n"\
+        "Icon21=\\uE72E\r\n"\
+        "Icon22=\\uF3B1\r\n"\
         "\r\n"\
         "[RecentItems]\r\n"\
         "RecentLabel=fullpath\r\n"\
@@ -178,10 +186,29 @@ static void write_default_ini(const WCHAR* path) {
 
 static WCHAR g_defaultIniPath[MAX_PATH];
 
-static void exe_config_path(WCHAR* buf, size_t cch) {
+static void exe_dir_path(WCHAR* buf, size_t cch) {
     GetModuleFileNameW(NULL, buf, (DWORD)cch);
     PathRemoveFileSpecW(buf);
+}
+
+static void exe_config_path(WCHAR* buf, size_t cch) {
+    exe_dir_path(buf, cch);
     PathAppendW(buf, L"config.ini");
+}
+
+static void resolve_config_path(const WCHAR* path, WCHAR* out, size_t cchOut) {
+    if (!out || cchOut == 0) return;
+    out[0] = 0;
+    if (!path || !path[0]) return;
+
+    if (PathIsRelativeW(path)) {
+        WCHAR resolved[MAX_PATH];
+        exe_dir_path(resolved, ARRAYSIZE(resolved));
+        PathAppendW(resolved, path);
+        lstrcpynW(out, resolved, (int)cchOut);
+    } else {
+        lstrcpynW(out, path, (int)cchOut);
+    }
 }
 
 BOOL config_ensure(Config* out) {
@@ -219,7 +246,19 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"TASKKILL")) return CI_TASKKILL;
     if (!lstrcmpiW(s, L"THISPC")) return CI_THISPC;
     if (!lstrcmpiW(s, L"HOME")) return CI_HOME;
+    if (!lstrcmpiW(s, L"SETTINGS") || !lstrcmpiW(s, L"WINMAC_SETTINGS") ||
+        !lstrcmpiW(s, L"WINMACMENU_SETTINGS")) return CI_SETTINGS;
     return CI_SEPARATOR;
+}
+
+static SettingsItemMode parse_settings_item_mode(const WCHAR* s) {
+    if (!s) return SETTINGS_ITEM_DISABLED;
+    if (!lstrcmpiW(s, L"shift") || !lstrcmpiW(s, L"with shift")) return SETTINGS_ITEM_SHIFT;
+    if (!lstrcmpiW(s, L"winx") || !lstrcmpiW(s, L"win+x") || !lstrcmpiW(s, L"win + x")) return SETTINGS_ITEM_WIN_X;
+    if (!lstrcmpiW(s, L"rightclick") || !lstrcmpiW(s, L"right click")) return SETTINGS_ITEM_RIGHT_CLICK;
+    if (!lstrcmpiW(s, L"middleclick") || !lstrcmpiW(s, L"middle click")) return SETTINGS_ITEM_MIDDLE_CLICK;
+    if (!lstrcmpiW(s, L"always")) return SETTINGS_ITEM_ALWAYS;
+    return SETTINGS_ITEM_DISABLED;
 }
 
 static ControlActionType parse_control_action(const WCHAR* s) {
@@ -725,11 +764,13 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"Appearance", L"Renderer", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (buf[0]) {
-        if (!lstrcmpiW(buf, L"winui") || !lstrcmpiW(buf, L"winui3")) {
+        if (!lstrcmpiW(buf, L"winui") || !lstrcmpiW(buf, L"winui3") || !lstrcmpiW(buf, L"2")) {
             out->useWinUI3Menu = TRUE;
             out->rootMenuLargeIcons = FALSE;
             out->menuStyle = 0;
-        } else if (!lstrcmpiW(buf, L"large") || !lstrcmpiW(buf, L"custom-drawn") || !lstrcmpiW(buf, L"other") || !lstrcmpiW(buf, L"bigmenu") || !lstrcmpiW(buf, L"big-menu")) {
+        } else if (!lstrcmpiW(buf, L"large") || !lstrcmpiW(buf, L"1") ||
+                   !lstrcmpiW(buf, L"custom-drawn") || !lstrcmpiW(buf, L"other") ||
+                   !lstrcmpiW(buf, L"bigmenu") || !lstrcmpiW(buf, L"big-menu")) {
             out->useWinUI3Menu = FALSE;
             out->rootMenuLargeIcons = TRUE;
             out->menuStyle = 1;
@@ -742,13 +783,18 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"Appearance", L"WinUISize", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0]) {
-        GetPrivateProfileStringW(L"WinUI3", L"Size", L"compact", buf, ARRAYSIZE(buf), out->iniPath);
+        GetPrivateProfileStringW(L"WinUI3", L"Size", L"default", buf, ARRAYSIZE(buf), out->iniPath);
         trim_inplace(buf);
     }
-    if (lstrcmpiW(buf, L"default") && lstrcmpiW(buf, L"compact")) {
-        lstrcpynW(buf, L"compact", ARRAYSIZE(buf));
+    if (!lstrcmpiW(buf, L"compact")) {
+        lstrcpynW(buf, L"default", ARRAYSIZE(buf));
+    } else if (lstrcmpiW(buf, L"default") && lstrcmpiW(buf, L"large")) {
+        lstrcpynW(buf, L"default", ARRAYSIZE(buf));
     }
     lstrcpynW(out->winuiSize, buf, ARRAYSIZE(out->winuiSize));
+    GetPrivateProfileStringW(L"Appearance", L"WinUIAlwaysShowIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->winuiAlwaysShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     GetPrivateProfileStringW(L"Appearance", L"KeepLargeMenuHighlightTextColor", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0]) {
@@ -763,7 +809,7 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"Appearance", L"LargeMenuHighlightFrame", L"background", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!lstrcmpiW(buf, L"border")) out->largeMenuHighlightFrame = HIGHLIGHT_BORDER;
-    else if (!lstrcmpiW(buf, L"background-border") || !lstrcmpiW(buf, L"background+border") || !lstrcmpiW(buf, L"both")) out->largeMenuHighlightFrame = HIGHLIGHT_BACKGROUND_BORDER;
+    else if (!lstrcmpiW(buf, L"background-border") || !lstrcmpiW(buf, L"background+border") || !lstrcmpiW(buf, L"both")) out->largeMenuHighlightFrame = HIGHLIGHT_BACKGROUND;
     else out->largeMenuHighlightFrame = HIGHLIGHT_BACKGROUND;
     // KeepMenuOpenAfterContextAction (default false)
     GetPrivateProfileStringW(L"General", L"KeepMenuOpenAfterContextAction", L"false", buf, ARRAYSIZE(buf), out->iniPath);
@@ -904,6 +950,10 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     out->shiftMiddleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShowSettingsItem", L"disabled", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->showSettingsItem = parse_settings_item_mode(buf);
     
     // Fullscreen app detection
     GetPrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", L"false", buf, ARRAYSIZE(buf), out->iniPath);
@@ -1015,7 +1065,7 @@ BOOL config_load(Config* out) {
 
 void config_set_path(Config* out, const WCHAR* path) {
     if (!out || !path) return;
-    lstrcpynW(out->iniPath, path, ARRAYSIZE(out->iniPath));
+    resolve_config_path(path, out->iniPath, ARRAYSIZE(out->iniPath));
     if (!PathFileExistsW(out->iniPath)) {
         write_default_ini(out->iniPath);
     }
@@ -1039,5 +1089,5 @@ void config_sync_startup(Config* out, const WCHAR* runValName) {
 
 void config_set_default_path(const WCHAR* path) {
     if (!path) { g_defaultIniPath[0] = 0; return; }
-    lstrcpynW(g_defaultIniPath, path, ARRAYSIZE(g_defaultIniPath));
+    resolve_config_path(path, g_defaultIniPath, ARRAYSIZE(g_defaultIniPath));
 }

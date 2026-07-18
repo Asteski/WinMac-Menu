@@ -3,8 +3,8 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Foundation;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Windows.Foundation;
 using Windows.Graphics;
 using WinMacMenuWinUI3.Models;
 using WinMacMenuWinUI3.Services;
@@ -16,15 +16,24 @@ public sealed partial class MenuWindow : Window
     private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_TOPMOST    = 0x00000008;
+    private const int WS_EX_LAYERED    = 0x00080000;
+    private const uint LWA_ALPHA       = 0x00000002;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
     private const uint SWP_NOSIZE       = 0x0001;
     private const uint SWP_NOMOVE       = 0x0002;
     private const uint SWP_NOACTIVATE   = 0x0010;
     private const uint SWP_SHOWWINDOW   = 0x0040;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_DONOTROUND = 1;
 
     [DllImport("user32.dll")] private static extern int  GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] private static extern int  SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+    [DllImport("user32.dll")] private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int x1, int y1, int x2, int y2);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
     [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int idHook, MouseHookProc lpfn, IntPtr hMod, uint dwThreadId);
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
@@ -51,6 +60,8 @@ public sealed partial class MenuWindow : Window
 
     private readonly AppConfig _config;
     private readonly string _iniPath;
+    private readonly MenuTriggerType _trigger;
+    private readonly int? _parentPid;
     private readonly MouseHookProc _outsideClickProc;
     private IntPtr _outsideClickHook;
     private MenuFlyout? _flyout;
@@ -62,6 +73,9 @@ public sealed partial class MenuWindow : Window
     private const double DefaultMenuSeparatorHeight = 9;
     private const double CompactMenuItemMinHeight = 32;
     private const double CompactMenuSeparatorHeight = 8;
+    private const double SubmenuMaxWidthScreenFraction = 0.25;
+    private const double SubmenuMinMaxWidth = 280;
+    private const double SubmenuTextReservedWidth = 104;
     private const int FolderCacheLimit = 256;
 
     private static readonly object FolderCacheLock = new();
@@ -72,10 +86,12 @@ public sealed partial class MenuWindow : Window
     private static DateTime TaskKillCacheTimeUtc = DateTime.MinValue;
     private static bool TaskKillRefreshInProgress;
 
-    public MenuWindow(AppConfig config, string iniPath)
+    public MenuWindow(AppConfig config, string iniPath, MenuTriggerType trigger, int? parentPid)
     {
         _config = config;
         _iniPath = iniPath;
+        _trigger = trigger;
+        _parentPid = parentPid;
         _outsideClickProc = OutsideClickProc;
 
         InitializeComponent();
@@ -96,6 +112,16 @@ public sealed partial class MenuWindow : Window
             };
 
             BuildItems(_flyout.Items, _config.Items);
+            if (!_config.Items.Any(i => i.Type == ConfigItemType.Settings) && ShouldShowAutomaticSettingsItem())
+            {
+                if (_flyout.Items.Count > 0 && _flyout.Items[^1] is not MenuFlyoutSeparator)
+                    _flyout.Items.Add(new MenuFlyoutSeparator());
+                AddItem(_flyout.Items, new ConfigItem
+                {
+                    Label = "WinMac Menu Settings",
+                    Type = ConfigItemType.Settings
+                });
+            }
             NormalizeFlyoutMetrics(_flyout.Items);
 
             _flyout.Closed += (_, _) => CloseMenuWindow();
@@ -112,15 +138,28 @@ public sealed partial class MenuWindow : Window
         }
     }
 
-    private void NormalizeFlyoutMetrics(IList<MenuFlyoutItemBase> items)
+    private bool ShouldShowAutomaticSettingsItem() => _config.ShowSettingsItem switch
     {
-        var compact = string.Equals(_config.WinUI3Size, "Compact", StringComparison.OrdinalIgnoreCase);
+        SettingsItemMode.Shift => _trigger == MenuTriggerType.Shift,
+        SettingsItemMode.WinX => _trigger == MenuTriggerType.WinX,
+        SettingsItemMode.RightClick => _trigger == MenuTriggerType.RightClick,
+        SettingsItemMode.MiddleClick => _trigger == MenuTriggerType.MiddleClick,
+        SettingsItemMode.Always => true,
+        _ => false,
+    };
+
+    private void NormalizeFlyoutMetrics(IList<MenuFlyoutItemBase> items, int depth = 0)
+    {
+        var compact = !string.Equals(_config.WinUI3Size, "Large", StringComparison.OrdinalIgnoreCase);
         var separatorHeight = compact ? CompactMenuSeparatorHeight : DefaultMenuSeparatorHeight;
+        var submenuMaxWidth = depth > 0 ? GetSubmenuMaxWidth() : double.PositiveInfinity;
 
         foreach (var item in items)
         {
             if (item is FrameworkElement element)
             {
+                element.MaxWidth = submenuMaxWidth;
+
                 if (item is MenuFlyoutSeparator)
                 {
                     element.Height = separatorHeight;
@@ -150,8 +189,94 @@ public sealed partial class MenuWindow : Window
                 submenuItem.VerticalContentAlignment = VerticalAlignment.Center;
             }
 
+            if (depth > 0 && item is MenuFlyoutItemBase textItem)
+                TrimSubmenuText(textItem, submenuMaxWidth);
+
             if (item is MenuFlyoutSubItem submenu)
-                NormalizeFlyoutMetrics(submenu.Items);
+                NormalizeFlyoutMetrics(submenu.Items, depth + 1);
+        }
+    }
+
+    private static void TrimSubmenuText(MenuFlyoutItemBase item, double maxWidth)
+    {
+        if (double.IsInfinity(maxWidth) || maxWidth <= 0)
+            return;
+
+        var original = item switch
+        {
+            MenuFlyoutItem menuItem => menuItem.Text,
+            MenuFlyoutSubItem submenuItem => submenuItem.Text,
+            _ => null
+        };
+
+        if (string.IsNullOrEmpty(original))
+            return;
+
+        var availableTextWidth = Math.Max(64, maxWidth - SubmenuTextReservedWidth);
+        var trimmed = TrimTextWithEllipsis(original, availableTextWidth);
+        if (trimmed == original)
+            return;
+
+        switch (item)
+        {
+            case MenuFlyoutItem menuItem:
+                menuItem.Text = trimmed;
+                break;
+            case MenuFlyoutSubItem submenuItem:
+                submenuItem.Text = trimmed;
+                break;
+        }
+
+        ToolTipService.SetToolTip(item, original);
+    }
+
+    private static string TrimTextWithEllipsis(string text, double maxWidth)
+    {
+        const string ellipsis = "...";
+        if (MeasureMenuText(text) <= maxWidth)
+            return text;
+
+        var low = 0;
+        var high = text.Length;
+        while (low < high)
+        {
+            var mid = (low + high + 1) / 2;
+            if (MeasureMenuText(text[..mid] + ellipsis) <= maxWidth)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+
+        return low <= 0 ? ellipsis : text[..low].TrimEnd() + ellipsis;
+    }
+
+    private static double MeasureMenuText(string text)
+    {
+        using var bitmap = new System.Drawing.Bitmap(1, 1);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        using var font = new System.Drawing.Font("Segoe UI", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        return graphics.MeasureString(text, font, int.MaxValue, System.Drawing.StringFormat.GenericTypographic).Width;
+    }
+
+    private double GetSubmenuMaxWidth()
+    {
+        try
+        {
+            DisplayArea display;
+            if (_config.PointerRelative && GetCursorPos(out var cursor))
+                display = DisplayArea.GetFromPoint(new PointInt32(cursor.x, cursor.y), DisplayAreaFallback.Nearest);
+            else
+                display = DisplayArea.Primary;
+
+            var dpi = (int)GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+            if (dpi <= 0) dpi = 96;
+
+            var maxWidth = display.WorkArea.Width * SubmenuMaxWidthScreenFraction * 96.0 / dpi;
+            return Math.Max(SubmenuMinMaxWidth, maxWidth);
+        }
+        catch
+        {
+            return SubmenuMinMaxWidth;
         }
     }
 
@@ -298,9 +423,43 @@ public sealed partial class MenuWindow : Window
     {
         foreach (var item in items)
         {
-            try { target.Add(CreateFlyoutItem(item, inSubmenu)); }
+            try { AddItem(target, item, inSubmenu); }
             catch { /* skip broken items so the rest of the menu still shows */ }
         }
+    }
+
+    private void AddItem(IList<MenuFlyoutItemBase> target, ConfigItem item, bool inSubmenu = false)
+    {
+        if ((item.Type == ConfigItemType.Folder || item.Type == ConfigItemType.FolderSubmenu) && item.InlineExpand)
+        {
+            AddInlineFolder(target, item, inSubmenu);
+            return;
+        }
+
+        target.Add(CreateFlyoutItem(item, inSubmenu));
+    }
+
+    private void AddInlineFolder(IList<MenuFlyoutItemBase> target, ConfigItem item, bool inSubmenu)
+    {
+        if (!item.InlineNoHeader)
+        {
+            if (item.InlineOpen)
+            {
+                var header = new MenuFlyoutItem { Text = item.Label };
+                ApplyIcon(header, item, inSubmenu);
+                var path = item.Path;
+                header.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(path); };
+                target.Add(header);
+            }
+            else
+            {
+                var header = new MenuFlyoutItem { Text = item.Label, IsEnabled = false };
+                ApplyIcon(header, item, inSubmenu);
+                target.Add(header);
+            }
+        }
+
+        AddFolderEntries(target, item.Path, depth: 1);
     }
 
     private MenuFlyoutItemBase CreateFlyoutItem(ConfigItem item, bool inSubmenu = false)
@@ -316,7 +475,10 @@ public sealed partial class MenuWindow : Window
             // ── Power menu ───────────────────────────────────────────────
             case ConfigItemType.PowerMenu:
             {
-                var sub = new MenuFlyoutSubItem { Text = item.Label };
+                var sub = new MenuFlyoutSubItem
+                {
+                    Text = string.IsNullOrWhiteSpace(item.Label) ? "Shut down or sign out" : item.Label
+                };
                 ApplyIcon(sub, item, inSubmenu);
                 foreach (var pi in BuildPowerItems()) sub.Items.Add(pi);
                 return sub;
@@ -380,6 +542,18 @@ public sealed partial class MenuWindow : Window
                 ApplyIcon(sub, item, inSubmenu);
                 AddHomeFolderItems(sub.Items, homePath);
                 return sub;
+            }
+
+            case ConfigItemType.Settings:
+            {
+                var settings = new MenuFlyoutItem { Text = string.IsNullOrWhiteSpace(item.Label) ? "WinMac Menu Settings" : item.Label };
+                ApplyIcon(settings, item, inSubmenu);
+                settings.Click += (_, _) =>
+                {
+                    CloseMenuWindow();
+                    CommandExecutor.OpenSettings(_parentPid, _iniPath);
+                };
+                return settings;
             }
 
             // ── Regular item ─────────────────────────────────────────────
@@ -523,7 +697,7 @@ public sealed partial class MenuWindow : Window
                 var fi = new MenuFlyoutItem { Text = e.Name };
                 fi.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(e.FullPath); };
                 if (e.IsDirectory ? _config.ShowFolderIcons : _config.ShowFileIcons)
-                    fi.Icon = IconLoader.Load(e.FullPath);
+                    fi.Icon = LoadSubmenuPathIcon(e.FullPath);
                 target.Add(fi);
             }
 
@@ -537,7 +711,7 @@ public sealed partial class MenuWindow : Window
     private MenuFlyoutSubItem CreateLazyFolderSubmenu(FolderEntry entry, int depth)
     {
         var sub = new MenuFlyoutSubItem { Text = entry.Name };
-        if (_config.ShowFolderIcons) sub.Icon = IconLoader.Load(entry.FullPath);
+        if (_config.ShowFolderIcons) sub.Icon = LoadSubmenuPathIcon(entry.FullPath);
 
         var loaded = false;
         void Populate()
@@ -582,7 +756,7 @@ public sealed partial class MenuWindow : Window
                 var fi = new MenuFlyoutItem { Text = entry.Name };
                 fi.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(entry.FullPath); };
                 if (entry.IsDirectory ? _config.ShowFolderIcons : _config.ShowFileIcons)
-                    fi.Icon = IconLoader.Load(entry.FullPath);
+                    fi.Icon = LoadSubmenuPathIcon(entry.FullPath);
                 target.Add(fi);
             }
 
@@ -783,7 +957,7 @@ public sealed partial class MenuWindow : Window
     {
         var fi = new MenuFlyoutItem { Text = item.DisplayName };
         fi.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(item.Path); };
-        if (_config.RecentShowIcons) fi.Icon = IconLoader.Load(item.Path);
+        if (_config.RecentShowIcons) fi.Icon = LoadSubmenuPathIcon(item.Path);
         return fi;
     }
 
@@ -800,14 +974,14 @@ public sealed partial class MenuWindow : Window
             if (_config.ThisPCItemsAsSubmenus)
             {
                 var sub = new MenuFlyoutSubItem { Text = label };
-                if (_config.ThisPCShowIcons) sub.Icon = IconLoader.Load(root);
+                if (_config.ThisPCShowIcons) sub.Icon = LoadSubmenuPathIcon(root);
                 AddFolderEntries(sub.Items, root, depth: 1);
                 target.Add(sub);
             }
             else
             {
                 var fi = new MenuFlyoutItem { Text = label };
-                if (_config.ThisPCShowIcons) fi.Icon = IconLoader.Load(root);
+                if (_config.ThisPCShowIcons) fi.Icon = LoadSubmenuPathIcon(root);
                 fi.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(root); };
                 target.Add(fi);
             }
@@ -823,19 +997,22 @@ public sealed partial class MenuWindow : Window
             if (_config.HomeItemsAsSubmenus && e.IsDirectory)
             {
                 var sub = new MenuFlyoutSubItem { Text = e.Name };
-                if (_config.HomeShowIcons) sub.Icon = IconLoader.Load(e.FullPath);
+                if (_config.HomeShowIcons) sub.Icon = LoadSubmenuPathIcon(e.FullPath);
                 AddFolderEntries(sub.Items, e.FullPath, depth: 1);
                 target.Add(sub);
             }
             else
             {
                 var fi = new MenuFlyoutItem { Text = e.Name };
-                if (_config.HomeShowIcons) fi.Icon = IconLoader.Load(e.FullPath);
+                if (_config.HomeShowIcons) fi.Icon = LoadSubmenuPathIcon(e.FullPath);
                 fi.Click += (_, _) => { CloseMenuWindow(); CommandExecutor.ShellOpen(e.FullPath); };
                 target.Add(fi);
             }
         }
     }
+
+    private IconElement? LoadSubmenuPathIcon(string path)
+        => IconLoader.Load(path, _config.WinUIAlwaysShowIcons);
 
     /// <summary>
     /// Resolves the best icon for this item and applies it, honouring the
@@ -850,9 +1027,11 @@ public sealed partial class MenuWindow : Window
 
         if (!showIcons) return;
 
-        // Pick theme-aware path if available, fall back to generic then default
+        // Pick theme-aware path if available, fall back to generic then default.
+        // The Settings command intentionally mirrors the tray icon selection.
         var isDark   = Application.Current.RequestedTheme == ApplicationTheme.Dark;
-        var iconPath = isDark && !string.IsNullOrEmpty(item.IconPathDark)  ? item.IconPathDark
+        var iconPath = item.Type == ConfigItemType.Settings ? ResolveSettingsTrayIconPath(isDark)
+                     : isDark && !string.IsNullOrEmpty(item.IconPathDark)  ? item.IconPathDark
                      : !isDark && !string.IsNullOrEmpty(item.IconPathLight) ? item.IconPathLight
                      : !string.IsNullOrEmpty(item.IconPath)                 ? item.IconPath
                      : _config.DefaultIconPath;
@@ -866,6 +1045,38 @@ public sealed partial class MenuWindow : Window
         else if (target is MenuFlyoutSubItem si) si.Icon  = icon;
     }
 
+    private string ResolveSettingsTrayIconPath(bool isDark)
+    {
+        if (_config.MonochromeTrayIcon)
+        {
+            var configured = isDark ? _config.TrayIconPathDark : _config.TrayIconPathLight;
+            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
+            if (!string.IsNullOrWhiteSpace(_config.TrayIconPath) && File.Exists(_config.TrayIconPath))
+                return _config.TrayIconPath;
+        }
+
+        string? nativeExe = null;
+        try
+        {
+            if (_parentPid is > 0)
+            {
+                using var parent = System.Diagnostics.Process.GetProcessById(_parentPid.Value);
+                nativeExe = parent.MainModule?.FileName;
+            }
+        }
+        catch { }
+
+        if (string.IsNullOrWhiteSpace(nativeExe))
+        {
+            var root = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))?.FullName;
+            if (root != null) nativeExe = Path.Combine(root, "WinMacMenu.exe");
+        }
+
+        if (string.IsNullOrWhiteSpace(nativeExe) || !File.Exists(nativeExe)) return "";
+        var resourceId = _config.MonochromeTrayIcon ? (isDark ? 103 : 102) : 105;
+        return $"{nativeExe},-{resourceId}";
+    }
+
     private List<MenuFlyoutItemBase> BuildPowerItems()
     {
         var list = new List<MenuFlyoutItemBase>();
@@ -877,9 +1088,9 @@ public sealed partial class MenuWindow : Window
             list.Add(fi);
         }
         if (_config.PowerSleep)     Add("Sleep",     ConfigItemType.PowerSleep);
-        if (_config.PowerHibernate) Add("Hibernate", ConfigItemType.PowerHibernate);
-        if (_config.PowerShutdown)  Add("Shut Down", ConfigItemType.PowerShutdown);
         if (_config.PowerRestart)   Add("Restart",   ConfigItemType.PowerRestart);
+        if (_config.PowerShutdown)  Add("Shut Down", ConfigItemType.PowerShutdown);
+        if (_config.PowerHibernate) Add("Hibernate", ConfigItemType.PowerHibernate);
         if (_config.PowerLock)      Add("Lock",      ConfigItemType.PowerLock);
         if (_config.PowerLogoff)    Add("Sign Out",  ConfigItemType.PowerLogoff);
         return list;
@@ -895,8 +1106,10 @@ public sealed partial class MenuWindow : Window
         appWindow.IsShownInSwitchers = false;
 
         var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
+        exStyle |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+        SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+        DisableAnchorWindowRoundedCorners(hwnd);
 
         var presenter = OverlappedPresenter.CreateForToolWindow();
         presenter.IsResizable    = false;
@@ -914,10 +1127,30 @@ public sealed partial class MenuWindow : Window
 
         appWindow.MoveAndResize(new RectInt32(anchorPt.X, anchorPt.Y, 1, 1));
         _flyoutAnchorPoint = new Point(0, 0);
+        HideAnchorWindowPixels(hwnd);
 
         // Bring to front so the flyout receives input.
         BringAnchorWindowToTop();
         SetForegroundWindow(hwnd);
+    }
+
+    private static void DisableAnchorWindowRoundedCorners(IntPtr hwnd)
+    {
+        var cornerPreference = DWMWCP_DONOTROUND;
+        _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            ref cornerPreference,
+            Marshal.SizeOf<int>());
+    }
+
+    private static void HideAnchorWindowPixels(IntPtr hwnd)
+    {
+        var emptyRegion = CreateRectRgn(0, 0, 0, 0);
+        if (emptyRegion == IntPtr.Zero) return;
+
+        if (SetWindowRgn(hwnd, emptyRegion, true) == 0)
+            DeleteObject(emptyRegion);
     }
 
     private void BringAnchorWindowToTop()
@@ -951,6 +1184,8 @@ public sealed partial class MenuWindow : Window
     private PointInt32 GetCursorAnchor()
     {
         GetCursorPos(out var pt);
+        if (!_config.IgnoreHOffsetWhenRelative) pt.x += _config.HOffset;
+        if (!_config.IgnoreVOffsetWhenRelative) pt.y += _config.VOffset;
         // Snap to nearest integer logical pixel to avoid sub-pixel layout jitter
         return ToLogical(pt.x, pt.y);
     }

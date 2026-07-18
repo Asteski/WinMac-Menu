@@ -6,7 +6,9 @@
 extern "C" {
 #endif
 
-BOOL LaunchWinUI3Menu(const Config* cfg);
+BOOL LaunchWinUI3Menu(const Config* cfg, MenuTriggerType trigger);
+BOOL PreloadWinUI3Menu(const Config* cfg);
+void ShutdownWinUI3Menu(void);
 
 #ifdef __cplusplus
 }

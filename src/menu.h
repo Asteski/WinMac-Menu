@@ -1,9 +1,11 @@
 #pragma once
 #include <windows.h>
+#include "config.h"
 
 #define IDM_FOLDER_BASE   5000
+#define IDM_WINMAC_SETTINGS 10005
 
-void ShowWinXMenu(HWND owner, POINT screenPt);
+void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger);
 void MenuExecuteCommand(HWND owner, UINT cmd);
 void MenuOnMenuSelect(HWND owner, WPARAM wParam, LPARAM lParam);
 void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu);
