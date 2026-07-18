@@ -1,12 +1,22 @@
-# WinMac Menu
+<h1 align="center">
+  <span>WinMac Menu</span>
+</h1>
 
-Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
+<p align="center">
+  <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-1.0.0-x64.zip"><img alt="Download x64" src="https://img.shields.io/badge/Download-x64-0078D6?style=for-the-badge"></a>
+  <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-arm64.zip"><img alt="Download ARM64" src="https://img.shields.io/badge/Download-ARM64-00A86B?style=for-the-badge"></a>
+</p>
 
-[Discover the range of possible application use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
+<p align="center">
+  <img alt="Latest Release" src="https://img.shields.io/github/v/release/Asteski/WinMac-Menu">
+  <img alt="Release Date" src="https://img.shields.io/github/release-date/Asteski/WinMac-Menu">
+  <img alt="Downloads (all releases)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/total">
+  <img alt="Downloads (latest release)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/latest/total">
+</p>
 
-- Windows 10/11, x86 and ARM64 supported
-- No installer, single EXE
-- Low-latency popup
+---
+
+Windows application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more! [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ### Windows 11:
 ![WinMacMenu screenshot](img/winmacmenu-demo-11.png)
@@ -15,13 +25,14 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 
 ## Features
 
+- Available in both Win32 and WinUI frameworks
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
 - Recent Items - dynamic submenu from *%AppData%\Microsoft\Windows\Recent Items* folder
 - Task Kill - dynamic submenu to forcibly end tasks
 - This PC - dynamic submenu to list This PC content
 - Home - dynamic submenu to show User Profile folder
 - Light/Dark auto-adaptation - immersive dark hint on the invisible owner window
-- Icons - per-item icons, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional folder or files icon retrieval
+- Icons - per-item icons or glyphs, theme-aware overrides (light/dark), optional DefaultIcon + theme variants, and optional folder or files icon retrieval
 - Placement controls (edges, center, or cursor, with offsets + ignore options), per‑monitor DPI aware
 - Folder submenu behaviors: lazy population, max depth, name-only items, optional “Open <folder>” entry
 - Inline folder expansion (inject a folder’s contents directly into the root menu) with optional clickable header
@@ -29,8 +40,7 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 - Granular extension hiding (global + recent-only override)
 - Settings GUI available for those, who do not want to modify INI file directly
 - Enable activation of WinMac Menu using various Start button and Windows key triggers
-- Trigger folder or file context menu directly from WinMac's submenu
-- Large sized menu with large icons
+- Trigger folder or file context menu directly from submenus
 
 ## Run
 
@@ -44,32 +54,23 @@ Win32 application that shows a Windows context-like popup menu. It’s configura
 **Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
 
 ## Sections
-- [General] global behavior and style
-- [Placement] position rules
-- [Menu] menu items Item1..ItemN
-- [Icons] per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
-- [IconsLight] theme-specific per-item icons for light theme (Icon1..IconN)
-- [IconsDark] theme-specific per-item icons for dark theme (Icon1..IconN)
-- [Power] exclude specific power options
-- [Sorting] sort folder content
-- [Appearance] enable and configure large menu
-- [Controls] enable pre-defined triggers
-- [RecentItems] item settings
-- [TaskKill] item settings
-- [ThisPC] item settings
-- [Home] item settings
-- [Logging]
+- *[General]* global behavior and style
+- *[Placement]* position rules
+- *[Menu]* menu items Item1..ItemN
+- *[Icons]* per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
+- *[IconsLight]* theme-specific per-item icons for light theme (Icon1..IconN)
+- *[IconsDark]* theme-specific per-item icons for dark theme (Icon1..IconN)
+- *[Power]* exclude specific power options
+- *[Sorting]* sort folder content
+- *[Appearance]* enable and configure different frameworks
+- *[Controls]* enable pre-defined triggers
+- *[RecentItems]* item settings
+- *[TaskKill]* item settings
+- *[ThisPC]* item settings
+- *[Home]* item settings
+- *[Logging]*
 
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
-
-## Behavior Details
-- Outside click dismisses menu
-- DPI-aware scaling via system menu metrics
-- Icons in legacy mode use MIIM_BITMAP, keeping native look (no custom owner-draw)
-- Recent resolves .lnk targets; missing targets skipped
-- Power actions: consistent markers used internally (POWER_MENU aggregates)
-- Single-instance per INI path
-- Second invocation toggle: launching the executable again (e.g., via a Windows key binding in an external tool) sends a toggle message. If the menu is open it closes; if closed it opens at the configured position. This enables assigning the EXE both to open and to dismiss via the same key.
 
 ## Security & Privacy
 - No telemetry. The app makes no network connections and collects no data.
