@@ -14,8 +14,6 @@
   <img alt="Downloads (latest release)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/latest/total">
 </p>
 
----
-
 Windows application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more! [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ### Windows 11:
