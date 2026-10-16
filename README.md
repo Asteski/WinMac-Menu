@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img/logo.svg" alt="WinMac Dock" width="128">
+</p>
+
 # WinMac Menu
 
 Win32 application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
