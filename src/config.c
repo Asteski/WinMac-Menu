@@ -1,4 +1,5 @@
 #include "config.h"
+#include "start_click.h"
 #include "util.h"
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -43,34 +44,52 @@ static void trim_inplace(WCHAR* s) {
     }
 }
 
+static BOOL parse_bool_default(const WCHAR* value, BOOL fallback) {
+    WCHAR buf[32];
+    if (!value || !value[0]) return fallback;
+    lstrcpynW(buf, value, ARRAYSIZE(buf));
+    WCHAR* comment = wcspbrk(buf, L";#");
+    if (comment) *comment = 0;
+    trim_inplace(buf);
+    if (!buf[0]) return fallback;
+    if (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1") || !lstrcmpiW(buf, L"yes") || !lstrcmpiW(buf, L"on")) return TRUE;
+    if (!lstrcmpiW(buf, L"false") || !lstrcmpiW(buf, L"0") || !lstrcmpiW(buf, L"no") || !lstrcmpiW(buf, L"off")) return FALSE;
+    return fallback;
+}
+
 
 // Write a default config.ini without comments
 static void write_default_ini(const WCHAR* path) {
+    BOOL isWindows11 = is_windows_11_or_greater();
+    const char* appearanceIni = isWindows11
+        ? "[Appearance]\r\n"\
+          "ThemeStyle=1\r\n"\
+          "TouchMode=false\r\n"\
+          "ShowThumbnails=false\r\n"\
+          "\r\n"
+        : "[Appearance]\r\n"\
+          "ThemeStyle=0\r\n"\
+          "TouchMode=false\r\n"\
+          "ShowThumbnails=false\r\n"\
+          "\r\n";
     const char* ini =
         "[General]\r\n"\
-        "FolderSubmenuDepth=4\r\n"\
-        "RunInBackground=true\r\n"\
+        "FolderSubmenuDepth=2\r\n"\
         "ShowDotfiles=false\r\n"\
         "ShowFileExtensions=true\r\n"\
-        "ShowFolderIcons=true\r\n"\
-        "ShowFileIcons=true\r\n"\
-        "KeepMenuOpenAfterContextAction=false\r\n"\
         "ShowHidden=false\r\n"\
-        "ShowIcons=true\r\n"\
+        "ShowIcons=all\r\n"\
+        "HideIconsInRootMenu=false\r\n"\
         "ShowOnLaunch=false\r\n"\
-        "ShowTrayIcon=true\r\n"\
-        "MonochromeTrayIcon=true\r\n"\
         "StartOnLogin=false\r\n"\
+        "ShowTrayIcon=true\r\n"\
+        "MonochromeTrayIcon=false\r\n"\
         "\r\n"\
         "[Placement]\r\n"\
         "PointerRelative=true\r\n"\
-        "HOffset=0\r\n"\
-        "VOffset=0\r\n"\
-        "\r\n"\
-        "[Appearance]\r\n"\
-        "LargeMenuIcons=false\r\n"\
-        "KeepLargeMenuHighlightTextColor=false\r\n"\
-        "LargeMenuAnimation=bottom\r\n"\
+        "HOffset=13\r\n"\
+        "VOffset=13\r\n"\
+        "IgnoreOffsetWhenRelative=true\r\n"\
         "\r\n"\
         "[Sorting]\r\n"\
         "SortBy=name\r\n"\
@@ -80,12 +99,14 @@ static void write_default_ini(const WCHAR* path) {
         "[Controls]\r\n"\
         "WindowsKey=false\r\n"\
         "ShiftWindowsKey=false\r\n"\
+        "WindowsKeyX=false\r\n"\
         "LeftClick=false\r\n"\
         "RightClick=false\r\n"\
         "MiddleClick=true\r\n"\
         "ShiftLeftClick=false\r\n"\
         "ShiftRightClick=false\r\n"\
-        "ShiftMiddleClick=false\r\n"\
+        "ShiftMiddleClick=true\r\n"\
+        "ShowSettingsItem=shift\r\n"\
         "IgnoreTriggersWhenFullscreen=false\r\n"\
         "FullscreenExclusionList=\r\n"\
         "\r\n"\
@@ -94,7 +115,7 @@ static void write_default_ini(const WCHAR* path) {
         "Item2=About Windows|URI|winver\r\n"\
         "Item3=---\r\n"\
         "Item4=System Settings|URI|ms-settings:\r\n"\
-        "Item5=File Explorer|THISPC\r\n"\
+        "Item5=This PC|THISPC|\r\n"\
         "Item6=User Profile|HOME\r\n"\
         "Item7=---\r\n"\
         "Item8=Recent Items|RECENT\r\n"\
@@ -116,7 +137,7 @@ static void write_default_ini(const WCHAR* path) {
         "Icon1=shell32.dll,-271\r\n"\
         "Icon2=shell32.dll,-1001\r\n"\
         "Icon4=shell32.dll,-16826\r\n"\
-        "Icon5=imageres.dll,-5325\r\n"\
+        "Icon5=shell32.dll,-16\r\n"\
         "Icon6=imageres.dll,-88\r\n"\
         "Icon8=shell32.dll,-327\r\n"\
         "Icon10=shell32.dll,-200\r\n"\
@@ -128,42 +149,63 @@ static void write_default_ini(const WCHAR* path) {
         "RecentLabel=fullpath\r\n"\
         "RecentMax=12\r\n"\
         "RecentShowCleanItems=true\r\n"\
-        "RecentShowExtensions=true\r\n"\
-        "RecentShowIcons=true\r\n"\
+        "SeparateItems=true\r\n"\
+        "RecentHideProtocolShortcuts=true\r\n"\
         "\r\n"\
         "[TaskKill]\r\n"\
         "TaskKillAllDesktops=true\r\n"\
         "TaskKillExcludes=\r\n"\
         "TaskKillIgnoreSystem=true\r\n"\
         "TaskKillListWindows=false\r\n"\
+        "TaskKillShowProcessIds=true\r\n"\
         "TaskKillMax=24\r\n"\
-        "TaskKillShowIcons=true\r\n"\
+        "\r\n"\
+        "[Power]\r\n"\
+        "AskForConfirmation=false\r\n"\
         "\r\n"\
         "[ThisPC]\r\n"\
         "ThisPCAsSubmenu=true\r\n"\
-        "ThisPCItemsAsSubmenus=true\r\n"\
-        "ThisPCShowIcons=true\r\n"\
+        "ThisPCItemsAsSubmenus=false\r\n"\
         "\r\n"\
         "[Home]\r\n"\
         "HomeAsSubmenu=true\r\n"\
-        "HomeItemsAsSubmenus=true\r\n"\
-        "HomeShowIcons=true\r\n";
+        "HomeItemsAsSubmenus=false\r\n";
 
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hf != INVALID_HANDLE_VALUE) {
-        DWORD toWrite = (DWORD)lstrlenA(ini);
         DWORD written = 0;
-        WriteFile(hf, ini, toWrite, &written, NULL);
+        WriteFile(hf, appearanceIni, (DWORD)lstrlenA(appearanceIni), &written, NULL);
+        WriteFile(hf, ini, (DWORD)lstrlenA(ini), &written, NULL);
         CloseHandle(hf);
+        WritePrivateProfileStringW(L"Controls", L"LegacyStartButtonDetection", isWindows11 ? L"false" : L"true", path);
     }
 }
 
 static WCHAR g_defaultIniPath[MAX_PATH];
 
-static void exe_config_path(WCHAR* buf, size_t cch) {
+static void exe_dir_path(WCHAR* buf, size_t cch) {
     GetModuleFileNameW(NULL, buf, (DWORD)cch);
     PathRemoveFileSpecW(buf);
+}
+
+static void exe_config_path(WCHAR* buf, size_t cch) {
+    exe_dir_path(buf, cch);
     PathAppendW(buf, L"config.ini");
+}
+
+static void resolve_config_path(const WCHAR* path, WCHAR* out, size_t cchOut) {
+    if (!out || cchOut == 0) return;
+    out[0] = 0;
+    if (!path || !path[0]) return;
+
+    if (PathIsRelativeW(path)) {
+        WCHAR resolved[MAX_PATH];
+        exe_dir_path(resolved, ARRAYSIZE(resolved));
+        PathAppendW(resolved, path);
+        lstrcpynW(out, resolved, (int)cchOut);
+    } else {
+        lstrcpynW(out, path, (int)cchOut);
+    }
 }
 
 BOOL config_ensure(Config* out) {
@@ -201,7 +243,19 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"TASKKILL")) return CI_TASKKILL;
     if (!lstrcmpiW(s, L"THISPC")) return CI_THISPC;
     if (!lstrcmpiW(s, L"HOME")) return CI_HOME;
+    if (!lstrcmpiW(s, L"SETTINGS") || !lstrcmpiW(s, L"WINMAC_SETTINGS") ||
+        !lstrcmpiW(s, L"WINMACMENU_SETTINGS")) return CI_SETTINGS;
     return CI_SEPARATOR;
+}
+
+static SettingsItemMode parse_settings_item_mode(const WCHAR* s) {
+    if (!s) return SETTINGS_ITEM_DISABLED;
+    if (!lstrcmpiW(s, L"shift") || !lstrcmpiW(s, L"with shift")) return SETTINGS_ITEM_SHIFT;
+    if (!lstrcmpiW(s, L"winx") || !lstrcmpiW(s, L"win+x") || !lstrcmpiW(s, L"win + x")) return SETTINGS_ITEM_WIN_X;
+    if (!lstrcmpiW(s, L"rightclick") || !lstrcmpiW(s, L"right click")) return SETTINGS_ITEM_RIGHT_CLICK;
+    if (!lstrcmpiW(s, L"middleclick") || !lstrcmpiW(s, L"middle click")) return SETTINGS_ITEM_MIDDLE_CLICK;
+    if (!lstrcmpiW(s, L"always")) return SETTINGS_ITEM_ALWAYS;
+    return SETTINGS_ITEM_DISABLED;
 }
 
 static ControlActionType parse_control_action(const WCHAR* s) {
@@ -247,6 +301,7 @@ static int parse_menu(Config* cfg) {
             p = bar+1;
         }
         ConfigItem* it = &cfg->items[cfg->count++];
+        it->sourceIndex = i;
         // Expand environment variables in label
         expand_env(label, it->label, ARRAYSIZE(it->label));
         it->type = parse_type(type);
@@ -260,8 +315,9 @@ static int parse_menu(Config* cfg) {
         if (it->type == CI_THISPC && cfg->thisPCAsSubmenu) it->submenu = TRUE;
         if (it->type == CI_HOME && cfg->homeAsSubmenu) it->submenu = TRUE;
 
-        // Allow FOLDER items to set mode via 4th field: "submenu" or "link"
-        if ((it->type == CI_FOLDER || it->type == CI_THISPC || it->type == CI_HOME) && it->params[0]) {
+        // Folder parameters control how the configured item expands. Both
+        // FOLDER variants can render inline folder objects at the root.
+        if ((it->type == CI_FOLDER || it->type == CI_FOLDER_SUBMENU || it->type == CI_THISPC || it->type == CI_HOME) && it->params[0]) {
             WCHAR pLower[256]; lstrcpynW(pLower, it->params, ARRAYSIZE(pLower));
             for (WCHAR* q=pLower; *q; ++q) *q = (WCHAR)towlower(*q);
             if (wcsstr(pLower, L"submenu")) it->submenu = TRUE;
@@ -311,7 +367,7 @@ static void parse_icons(Config* cfg) {
     // Optional [Icons] section: Icon1..IconN map to Item1..ItemN
     WCHAR section[] = L"Icons";
     for (int i = 1; i <= cfg->count; ++i) {
-        WCHAR key[32]; wsprintfW(key, L"Icon%d", i);
+        WCHAR key[32]; wsprintfW(key, L"Icon%d", cfg->items[i-1].sourceIndex);
         WCHAR path[MAX_PATH] = {0};
         GetPrivateProfileStringW(section, key, L"", path, ARRAYSIZE(path), cfg->iniPath);
         if (path[0]) {
@@ -325,7 +381,7 @@ static void parse_icons(Config* cfg) {
     WCHAR sectionL[] = L"IconsLight";
     WCHAR sectionD[] = L"IconsDark";
     for (int i = 1; i <= cfg->count; ++i) {
-        WCHAR key[32]; wsprintfW(key, L"Icon%d", i);
+        WCHAR key[32]; wsprintfW(key, L"Icon%d", cfg->items[i-1].sourceIndex);
         WCHAR pathL[MAX_PATH] = {0};
         WCHAR pathD[MAX_PATH] = {0};
         GetPrivateProfileStringW(sectionL, key, L"", pathL, ARRAYSIZE(pathL), cfg->iniPath);
@@ -348,7 +404,7 @@ BOOL config_load(Config* out) {
     config_ensure(out);
     // Explicit defaults for control flags so missing keys don't inherit prior memory/state
     // Removed resident/trigger controls
-    // RunInBackground and tray icon
+    // RunInBackground and appearance defaults
     WCHAR buf[32];
     GetPrivateProfileStringW(L"General", L"RunInBackground", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -357,7 +413,10 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"ShowOnLaunch", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->showOnLaunch = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
-    GetPrivateProfileStringW(L"General", L"ShowTrayIcon", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"General", L"ShowTrayIcon", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Appearance", L"ShowTrayIcon", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    }
     trim_inplace(buf);
     out->showTrayIcon = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // Start on login (registry Run entry)
@@ -366,9 +425,8 @@ BOOL config_load(Config* out) {
     out->startOnLogin = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     out->recentMax = GetPrivateProfileIntW(L"RecentItems", L"RecentMax", 12, out->iniPath);
-    out->folderMaxDepth = GetPrivateProfileIntW(L"General", L"FolderSubmenuDepth", 4, out->iniPath);
-    if (out->folderMaxDepth < 1) out->folderMaxDepth = 1; if (out->folderMaxDepth > 4) out->folderMaxDepth = 4;
-    
+    out->folderMaxDepth = GetPrivateProfileIntW(L"General", L"FolderSubmenuDepth", 2, out->iniPath);
+    if (out->folderMaxDepth < 0) out->folderMaxDepth = 0; if (out->folderMaxDepth > 4) out->folderMaxDepth = 4;
     // Fallback default now single
     GetPrivateProfileStringW(L"General", L"FolderSubmenuOpen", L"single", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -378,10 +436,17 @@ BOOL config_load(Config* out) {
     trim_inplace(buf);
     out->folderShowOpenEntry = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    // Global toggle for showing icons in Recent submenu (default false)
-    GetPrivateProfileStringW(L"RecentItems", L"RecentShowIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"RecentItems", L"SeparateItems", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    out->recentShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"General", L"SeparateItems", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"RecentItems", L"RecentGroupFoldersFirst", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    out->separateItems = parse_bool_default(buf, TRUE);
     
     // Sorting options
     GetPrivateProfileStringW(L"Sorting", L"SortBy", L"name", buf, ARRAYSIZE(buf), out->iniPath);
@@ -418,9 +483,6 @@ BOOL config_load(Config* out) {
     trim_inplace(buf);
     out->taskKillIgnoreSystem = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"TaskKill", L"TaskKillShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
-    trim_inplace(buf);
-    out->taskKillShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"TaskKill", L"TaskKillListWindows", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -429,6 +491,10 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"TaskKill", L"TaskKillAllDesktops", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->taskKillAllDesktops = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"TaskKill", L"TaskKillShowProcessIds", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->taskKillShowProcessIds = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"TaskKill", L"TaskKillExcludes", L"", out->taskKillExcludes, ARRAYSIZE(out->taskKillExcludes), out->iniPath);
 
@@ -439,26 +505,23 @@ BOOL config_load(Config* out) {
     out->excludeRestart = GetPrivateProfileIntW(L"Power", L"ExcludeRestart", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLock = GetPrivateProfileIntW(L"Power", L"ExcludeLock", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLogoff = GetPrivateProfileIntW(L"Power", L"ExcludeLogoff", 0, out->iniPath) ? TRUE : FALSE;
+    GetPrivateProfileStringW(L"Power", L"AskForConfirmation", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->powerAskConfirmation = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"ThisPC", L"ThisPCItemsAsSubmenus", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"ThisPC", L"ThisPCItemsAsSubmenus", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->thisPCItemsAsSubmenus = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"ThisPC", L"ThisPCShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
-    trim_inplace(buf);
-    out->thisPCShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"ThisPC", L"ThisPCAsSubmenu", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->thisPCAsSubmenu = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"Home", L"HomeItemsAsSubmenus", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    GetPrivateProfileStringW(L"Home", L"HomeItemsAsSubmenus", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->homeItemsAsSubmenus = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
-    GetPrivateProfileStringW(L"Home", L"HomeShowIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
-    trim_inplace(buf);
-    out->homeShowIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"Home", L"HomeAsSubmenu", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -471,11 +534,8 @@ BOOL config_load(Config* out) {
     else if (!lstrcmpiW(buf, L"filesonly") || !lstrcmpiW(buf, L"files-only")) { out->dotMode = 1; out->showDotfiles = TRUE; }
     else if (!lstrcmpiW(buf, L"foldersonly") || !lstrcmpiW(buf, L"folders-only")) { out->dotMode = 2; out->showDotfiles = TRUE; }
     else { out->dotMode = 0; out->showDotfiles = FALSE; }
-    // Default to legacy if missing
-    GetPrivateProfileStringW(L"General", L"MenuStyle", L"legacy", buf, ARRAYSIZE(buf), out->iniPath);
-    trim_inplace(buf);
 #ifdef ENABLE_MODERN_STYLE
-    if (!lstrcmpiW(buf, L"legacy")) out->menuStyle = 0; else out->menuStyle = 1; // only other value treated as modern
+    out->menuStyle = 0;
 #else
     out->menuStyle = 0; // force legacy when modern disabled at build time
 #endif
@@ -504,8 +564,13 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"General", L"ShowIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
     if (!buf[0]) GetPrivateProfileStringW(L"General", L"LegacyIcons", L"false", buf, ARRAYSIZE(buf), out->iniPath); // backward compatibility
     trim_inplace(buf);
-    if (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1")) out->showIcons = 1;
-    else if (!lstrcmpiW(buf, L"other")) out->showIcons = 2;
+    BOOL hasUnifiedIconMode = (!lstrcmpiW(buf, L"all") || !lstrcmpiW(buf, L"files") || !lstrcmpiW(buf, L"folders") ||
+                               !lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1") || !lstrcmpiW(buf, L"false") ||
+                               !lstrcmpiW(buf, L"0") || !lstrcmpiW(buf, L"other"));
+    if (!lstrcmpiW(buf, L"all") || !lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1")) out->showIcons = 1;
+    else if (!lstrcmpiW(buf, L"files") || !lstrcmpiW(buf, L"filesonly") || !lstrcmpiW(buf, L"files-only")) out->showIcons = 2;
+    else if (!lstrcmpiW(buf, L"folders") || !lstrcmpiW(buf, L"foldersonly") || !lstrcmpiW(buf, L"folders-only")) out->showIcons = 3;
+    else if (!lstrcmpiW(buf, L"other")) out->showIcons = 1;
     else out->showIcons = 0;
     // Modern-only options (with [General] fallback) - ignored if modern disabled
 #ifdef ENABLE_MODERN_STYLE
@@ -519,11 +584,11 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"Placement", L"Horizontal", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0] || !lstrcmpiW(buf, L"left")) out->hPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->hPlacement = 1; else out->hPlacement = 2;
-    out->hOffset = GetPrivateProfileIntW(L"Placement", L"HOffset", 0, out->iniPath);
+    out->hOffset = GetPrivateProfileIntW(L"Placement", L"HOffset", 13, out->iniPath);
     GetPrivateProfileStringW(L"Placement", L"Vertical", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0] || !lstrcmpiW(buf, L"top")) out->vPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->vPlacement = 1; else out->vPlacement = 2;
-    out->vOffset = GetPrivateProfileIntW(L"Placement", L"VOffset", 0, out->iniPath);
+    out->vOffset = GetPrivateProfileIntW(L"Placement", L"VOffset", 13, out->iniPath);
     GetPrivateProfileStringW(L"Placement", L"PointerRelative", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->pointerRelative = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
@@ -566,9 +631,9 @@ BOOL config_load(Config* out) {
         out->ignoreVOffsetWhenCentered = TRUE;
     }
     // Optional: IgnoreOffsetWhenRelative = false|true|hoffset|voffset
-    out->ignoreHOffsetWhenRelative = FALSE;
-    out->ignoreVOffsetWhenRelative = FALSE;
-    GetPrivateProfileStringW(L"Placement", L"IgnoreOffsetWhenRelative", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    out->ignoreHOffsetWhenRelative = TRUE;
+    out->ignoreVOffsetWhenRelative = TRUE;
+    GetPrivateProfileStringW(L"Placement", L"IgnoreOffsetWhenRelative", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"both")) {
         out->ignoreHOffsetWhenRelative = TRUE;
@@ -654,20 +719,50 @@ BOOL config_load(Config* out) {
         // Old semantics: HideExtensions=true means do NOT show extensions
         BOOL hideOld = (!lstrcmpiW(tmpOld, L"true") || !lstrcmpiW(tmpOld, L"1"));
         showExt = !hideOld; // override
+        haveShow = TRUE;
     }
     out->showExtensions = showExt;
-    // ShowFolderIcons
-    GetPrivateProfileStringW(L"General", L"ShowFolderIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    // Migrate the previous folder/file icon switches only when the new unified mode is absent.
+    GetPrivateProfileStringW(L"General", L"HideFolderIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    out->showFolderIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
-    // ShowFileIcons (new). Back-compat: ShowSubmenuFileIcons.
-    GetPrivateProfileStringW(L"General", L"ShowFileIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
-    trim_inplace(buf);
-    if (!buf[0]) {
-        GetPrivateProfileStringW(L"General", L"ShowSubmenuFileIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    BOOL legacyShowFolderIcons;
+    if (buf[0]) {
+        legacyShowFolderIcons = !parse_bool_default(buf, FALSE);
+    } else {
+        GetPrivateProfileStringW(L"General", L"ShowFolderIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
         trim_inplace(buf);
+        legacyShowFolderIcons = parse_bool_default(buf, TRUE);
     }
-    out->showFileIcons = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"General", L"HideFileIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    BOOL legacyShowFileIcons;
+    if (buf[0]) {
+        legacyShowFileIcons = !parse_bool_default(buf, FALSE);
+    } else {
+        GetPrivateProfileStringW(L"General", L"ShowFileIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+        if (!buf[0]) {
+            GetPrivateProfileStringW(L"General", L"ShowSubmenuFileIcons", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+            trim_inplace(buf);
+        }
+        legacyShowFileIcons = parse_bool_default(buf, TRUE);
+    }
+    if (!hasUnifiedIconMode) {
+        if (out->showIcons == 0) { /* Legacy disabled remains disabled. */ }
+        else if (legacyShowFolderIcons && legacyShowFileIcons) out->showIcons = 1;
+        else if (!legacyShowFolderIcons && legacyShowFileIcons) out->showIcons = 2;
+        else if (legacyShowFolderIcons && !legacyShowFileIcons) out->showIcons = 3;
+        else out->showIcons = 0;
+    }
+    GetPrivateProfileStringW(L"General", L"HideIconsInRootMenu", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->hideIconsInRootMenu = buf[0] ? parse_bool_default(buf, FALSE) : FALSE;
+    if (!out->hideIconsInRootMenu) {
+        GetPrivateProfileStringW(L"General", L"ShowIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+        if (!lstrcmpiW(buf, L"other")) out->hideIconsInRootMenu = TRUE;
+    }
+    BOOL hasRootMenuLargeIconSetting = FALSE;
     GetPrivateProfileStringW(L"Appearance", L"LargeMenuIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0]) {
@@ -679,9 +774,10 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     if (!buf[0]) {
-        GetPrivateProfileStringW(L"General", L"RootMenuIconSize", L"small", buf, ARRAYSIZE(buf), out->iniPath);
+        GetPrivateProfileStringW(L"General", L"RootMenuIconSize", L"", buf, ARRAYSIZE(buf), out->iniPath);
         trim_inplace(buf);
     }
+    hasRootMenuLargeIconSetting = (buf[0] != 0);
     if (!buf[0]) out->rootMenuLargeIcons = FALSE;
     else if (!lstrcmpiW(buf, L"large") || !lstrcmpiW(buf, L"l") || !lstrcmpiW(buf, L"32") || !lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1")) {
         out->rootMenuLargeIcons = TRUE;
@@ -690,6 +786,61 @@ BOOL config_load(Config* out) {
     } else {
         out->rootMenuLargeIcons = FALSE;
     }
+    GetPrivateProfileStringW(L"Appearance", L"ThemeStyle", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Appearance", L"Style", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    }
+    trim_inplace(buf);
+    if (buf[0]) {
+        if (!lstrcmpiW(buf, L"1")) {
+            out->useWinUI3Menu = TRUE;
+            out->rootMenuLargeIcons = FALSE;
+            out->menuStyle = 0;
+        } else if (!lstrcmpiW(buf, L"0")) {
+            out->useWinUI3Menu = FALSE;
+            out->rootMenuLargeIcons = FALSE;
+            out->menuStyle = 0;
+        } else {
+            out->useWinUI3Menu = is_windows_11_or_greater();
+            out->rootMenuLargeIcons = FALSE;
+            out->menuStyle = 0;
+        }
+    } else if (!hasRootMenuLargeIconSetting) {
+        out->useWinUI3Menu = is_windows_11_or_greater();
+        out->rootMenuLargeIcons = FALSE;
+        out->menuStyle = 0;
+    }
+    GetPrivateProfileStringW(L"Appearance", L"TouchMode", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (buf[0]) {
+        lstrcpynW(buf, parse_bool_default(buf, FALSE) ? L"large" : L"default", ARRAYSIZE(buf));
+    } else {
+        GetPrivateProfileStringW(L"Appearance", L"WinUISize", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"WinUI3", L"Size", L"default", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+    }
+    if (!lstrcmpiW(buf, L"compact")) {
+        lstrcpynW(buf, L"default", ARRAYSIZE(buf));
+    } else if (lstrcmpiW(buf, L"default") && lstrcmpiW(buf, L"large")) {
+        lstrcpynW(buf, L"default", ARRAYSIZE(buf));
+    }
+    lstrcpynW(out->winuiSize, buf, ARRAYSIZE(out->winuiSize));
+    GetPrivateProfileStringW(L"Appearance", L"ShowThumbnails", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (buf[0]) {
+        out->showThumbnails = parse_bool_default(buf, FALSE);
+    } else {
+        GetPrivateProfileStringW(L"Appearance", L"AlwaysShowIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        trim_inplace(buf);
+        if (!buf[0]) {
+            GetPrivateProfileStringW(L"Appearance", L"WinUIAlwaysShowIcons", L"", buf, ARRAYSIZE(buf), out->iniPath);
+        }
+        trim_inplace(buf);
+        out->showThumbnails = buf[0] ? !parse_bool_default(buf, TRUE) : FALSE;
+    }
     GetPrivateProfileStringW(L"Appearance", L"KeepLargeMenuHighlightTextColor", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0]) {
@@ -697,26 +848,30 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     if (!buf[0]) {
-        GetPrivateProfileStringW(L"Advanced", L"RevertBigMenuHighlightTextArrowColor", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+        GetPrivateProfileStringW(L"Advanced", L"RevertCustomThemeHighlightTextArrowColor", L"false", buf, ARRAYSIZE(buf), out->iniPath);
         trim_inplace(buf);
     }
     out->keepLargeMenuHighlightTextColor = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"Appearance", L"LargeMenuHighlightFrame", L"background", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    if (!lstrcmpiW(buf, L"border")) out->largeMenuHighlightFrame = HIGHLIGHT_BORDER;
+    else if (!lstrcmpiW(buf, L"background-border") || !lstrcmpiW(buf, L"background+border") || !lstrcmpiW(buf, L"both")) out->largeMenuHighlightFrame = HIGHLIGHT_BACKGROUND;
+    else out->largeMenuHighlightFrame = HIGHLIGHT_BACKGROUND;
     // KeepMenuOpenAfterContextAction (default false)
     GetPrivateProfileStringW(L"General", L"KeepMenuOpenAfterContextAction", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->keepMenuOpenAfterContextAction = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
-    // RecentShowExtensions (default true). Back compat: RecentHideExtensions overrides if present.
+    // General extension visibility is authoritative. Older INIs without a
+    // General extension setting may still seed it from the old Recent key.
     GetPrivateProfileStringW(L"RecentItems", L"RecentShowExtensions", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
-    BOOL haveRecentShow = buf[0] != 0;
-    BOOL recentShow = TRUE;
-    if (haveRecentShow) {
+    BOOL recentShow = showExt;
+    if (!haveShow && buf[0])
         recentShow = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
-    }
     WCHAR tmpOldR[32]; tmpOldR[0]=0;
     GetPrivateProfileStringW(L"RecentItems", L"RecentHideExtensions", L"", tmpOldR, ARRAYSIZE(tmpOldR), out->iniPath);
     trim_inplace(tmpOldR);
-    if (tmpOldR[0]) {
+    if (!haveShow && tmpOldR[0]) {
         BOOL hideOldR = (!lstrcmpiW(tmpOldR, L"true") || !lstrcmpiW(tmpOldR, L"1"));
         recentShow = !hideOldR;
     }
@@ -725,6 +880,9 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"RecentItems", L"RecentShowCleanItems", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->recentShowCleanItems = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+    GetPrivateProfileStringW(L"RecentItems", L"RecentHideProtocolShortcuts", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->recentHideProtocolShortcuts = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     // Themed tray icon optional paths
     out->trayIconPath[0]=0; out->trayIconPathLight[0]=0; out->trayIconPathDark[0]=0;
     GetPrivateProfileStringW(L"General", L"TrayIcon", L"", out->trayIconPath, ARRAYSIZE(out->trayIconPath), out->iniPath);
@@ -733,8 +891,11 @@ BOOL config_load(Config* out) {
     if (out->trayIconPath[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPath, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPath, ex, ARRAYSIZE(out->trayIconPath)); }
     if (out->trayIconPathLight[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathLight, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathLight, ex, ARRAYSIZE(out->trayIconPathLight)); }
     if (out->trayIconPathDark[0]) { WCHAR ex[MAX_PATH]; expand_env(out->trayIconPathDark, ex, ARRAYSIZE(ex)); lstrcpynW(out->trayIconPathDark, ex, ARRAYSIZE(out->trayIconPathDark)); }
-    // MonochromeTrayIcon (default true) - when true, use the monochrome theme icon paths; false falls back to app.ico
-    GetPrivateProfileStringW(L"General", L"MonochromeTrayIcon", L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    // MonochromeTrayIcon (default false) - when true, use the monochrome theme icon paths; false falls back to app.ico
+    GetPrivateProfileStringW(L"General", L"MonochromeTrayIcon", L"", buf, ARRAYSIZE(buf), out->iniPath);
+    if (!buf[0]) {
+        GetPrivateProfileStringW(L"Appearance", L"MonochromeTrayIcon", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    }
     trim_inplace(buf);
     out->monochromeTrayIcon = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     
@@ -764,6 +925,8 @@ BOOL config_load(Config* out) {
         lstrcpynW(out->windowsKeyCommand, expanded, ARRAYSIZE(out->windowsKeyCommand));
     }
 
+    start_click_load(out->iniPath, &out->startClickWidth, &out->startClickHeight, &out->startClickOffsetX, &out->startClickOffsetY);
+
     // Parse Controls section (Start button triggers; disabled by default)
     GetPrivateProfileStringW(L"Controls", L"WindowsKey", L"false", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -780,6 +943,10 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     out->shiftWindowsKeyTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"WindowsKeyX", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->windowsKeyXTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
 
     GetPrivateProfileStringW(L"Controls", L"LeftClick", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
@@ -836,6 +1003,14 @@ BOOL config_load(Config* out) {
         trim_inplace(buf);
     }
     out->shiftMiddleClickTrigger = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"LegacyStartButtonDetection", is_windows_11_or_greater() ? L"false" : L"true", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->legacyStartButtonDetection = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
+
+    GetPrivateProfileStringW(L"Controls", L"ShowSettingsItem", L"disabled", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->showSettingsItem = parse_settings_item_mode(buf);
     
     // Fullscreen app detection
     GetPrivateProfileStringW(L"Controls", L"IgnoreTriggersWhenFullscreen", L"false", buf, ARRAYSIZE(buf), out->iniPath);
@@ -862,13 +1037,17 @@ BOOL config_load(Config* out) {
     if (GetPrivateProfileIntW(L"Power", L"Restart", 1, out->iniPath) == 0) out->excludeRestart = TRUE;
     if (GetPrivateProfileIntW(L"Power", L"Lock", 1, out->iniPath) == 0) out->excludeLock = TRUE;
     if (GetPrivateProfileIntW(L"Power", L"Logoff", 1, out->iniPath) == 0) out->excludeLogoff = TRUE;
+    GetPrivateProfileStringW(L"Power", L"AskForConfirmation", L"false", buf, ARRAYSIZE(buf), out->iniPath);
+    trim_inplace(buf);
+    out->powerAskConfirmation = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
     if (out->logLevel > 0) {
         WCHAR msg[4096];
         wsprintfW(msg,
-            L"[WinMacMenu Config]\n Level=%d Style=%s ShowIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d ShowFolderIcons=%d ShowFileIcons=%d KeepMenuOpenAfterContextAction=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n ThisPCSubmenus=%d ThisPCAsSubmenu=%d HomeAsSubmenu=%d TaskKillAllDesktops=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
+            L"[WinMacMenu Config]\n Level=%d Style=%s IconMode=%d HideRootIcons=%d MenuWidth=%d Rounded=%d\n Hidden=%d DotMode=%d (showDot=%d) RecentLabel=%s ShowExt=%d RecentShowExt=%d KeepMenuOpenAfterContextAction=%d\n FolderDepth=%d SingleClickOpen=%d ShowOpenEntry=%d RecentShowCleanItems=%d SeparateItems=%d\n RecentMax=%d Items=%d PointerRel=%d HPlacement=%d VPlacement=%d HOffset=%d VOffset=%d\n ThisPCSubmenus=%d ThisPCAsSubmenu=%d HomeAsSubmenu=%d TaskKillAllDesktops=%d\n IniPath=%s\n LogFolder=%s\n LogFile=%s\n",
             out->logLevel,
             out->menuStyle==0?L"legacy":L"modern",
             out->showIcons,
+            out->hideIconsInRootMenu,
 #ifdef ENABLE_MODERN_STYLE
             out->menuWidth,
             out->roundedCorners,
@@ -882,13 +1061,12 @@ BOOL config_load(Config* out) {
             out->recentLabelMode==1?L"name":L"fullpath",
             out->showExtensions,
             out->recentShowExtensions,
-            out->showFolderIcons,
-            out->showFileIcons,
             out->keepMenuOpenAfterContextAction,
             out->folderMaxDepth,
             out->folderSingleClickOpen,
             out->folderShowOpenEntry,
             out->recentShowCleanItems,
+            out->separateItems,
             out->recentMax,
             out->count,
             out->pointerRelative,
@@ -946,7 +1124,7 @@ BOOL config_load(Config* out) {
 
 void config_set_path(Config* out, const WCHAR* path) {
     if (!out || !path) return;
-    lstrcpynW(out->iniPath, path, ARRAYSIZE(out->iniPath));
+    resolve_config_path(path, out->iniPath, ARRAYSIZE(out->iniPath));
     if (!PathFileExistsW(out->iniPath)) {
         write_default_ini(out->iniPath);
     }
@@ -970,5 +1148,5 @@ void config_sync_startup(Config* out, const WCHAR* runValName) {
 
 void config_set_default_path(const WCHAR* path) {
     if (!path) { g_defaultIniPath[0] = 0; return; }
-    lstrcpynW(g_defaultIniPath, path, ARRAYSIZE(g_defaultIniPath));
+    resolve_config_path(path, g_defaultIniPath, ARRAYSIZE(g_defaultIniPath));
 }

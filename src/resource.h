@@ -1,12 +1,10 @@
-// Folder submenu depth controls
-#define IDC_FOLDERDEPTH_EDIT     1030
-#define IDC_FOLDERDEPTH_SPIN     1031
 #define IDC_POWER_HIBERNATE  3010
 #define IDC_POWER_LOCK       3011
 #define IDC_POWER_LOGOFF     3012
 #define IDC_POWER_RESTART    3013
 #define IDC_POWER_SHUTDOWN   3014
 #define IDC_POWER_SLEEP      3015
+#define IDC_POWER_CONFIRM    3016
 #define IDC_HOME_ITEMS_AS_SUBMENUS  3003
 #define IDC_HOME_SHOW_ICONS         3004
 // Task Kill (Advanced tab)
@@ -21,6 +19,16 @@
 #define IDC_ANIMATION_LABEL         1053
 #define IDC_KEEP_LARGE_MENU_HIGHLIGHT_TEXT_COLOR 1054
 #define IDC_IGNORE_RELATIVE_LABEL   1055
+#define IDC_HIGHLIGHT_FRAME_COMBO   1056
+#define IDC_HIGHLIGHT_FRAME_LABEL   1057
+#define IDC_USE_WINUI3_MENU         1058
+#define IDC_RENDERER_COMBO          1059
+#define IDC_WINUI_SIZE_COMBO        1060
+#define IDC_RENDERER_LABEL          1061
+#define IDC_WINUI_SIZE_LABEL        1062
+#define IDC_WINUI_ALWAYS_SHOW_ICONS 1063
+#define IDC_FOLDERDEPTH_EDIT        1064
+#define IDC_FOLDERDEPTH_SPIN        1065
 #pragma once
 // Resource identifiers
 #define IDI_APPICON 101
@@ -43,7 +51,6 @@
 #define IDC_SHOWTRAYICON       1002
 #define IDC_STARTONLOGIN       1003
 #define IDC_SHOWICONS          1004
-#define IDC_SHOWFOLDERICONS    1005
 #define IDC_SHOWEXTENSIONS     1006
 #define IDC_RECENTSHOWEXT      1007
 #define IDC_RECENTMAX_EDIT     1008
@@ -53,6 +60,8 @@
 #define IDC_VPLACEMENT_COMBO   1014
 #define IDC_HOFFSET_EDIT       1015
 #define IDC_VOFFSET_EDIT       1016
+#define IDC_HOFFSET_SPIN       1025
+#define IDC_VOFFSET_SPIN       1026
 #define IDC_APPLY              1017
 #define IDC_SAVEEXIT           1018
 #define IDC_CANCEL             1019
@@ -66,6 +75,7 @@
 #define IDC_SHOWDOTFILES       1027
 #define IDC_MONOTRAYICON       1028
 #define IDC_EXIT               1029
+#define IDC_CHECK_UPDATES      1031
 // Sorting controls
 #define IDC_SORT_FIELD        1100
 #define IDC_SORT_DIRECTION    1101
@@ -73,7 +83,7 @@
 #define IDC_MAXITEMS_EDIT     1103
 #define IDC_MAXITEMS_SPIN     1104
 #define IDC_CONFIG_FILE_LABEL  1025
-#define IDC_SHOWFILEICONS      1032
+#define IDC_HIDEICONSINROOT    1035
 #define IDC_KEEPCTXOPEN        1033
 #define IDC_ROOT_MENU_ICON_SIZE   1034
 
@@ -113,6 +123,8 @@
 #define IDC_ITEM_PATH_LABEL     1806
 #define IDC_ITEM_PARAMS_LABEL   1807
 #define IDC_ITEM_BROWSE         1808
+#define IDC_ITEM_FOLDER_PARAMS  1809
+#define IDC_ITEM_LABEL_LABEL    1814
 
 // About dialog controls
 #define IDC_ABOUT_TEXT          1810
@@ -121,7 +133,6 @@
 #define IDC_ABOUT_LINK          1813
 
 // Advanced page controls
-#define IDC_RECENT_SHOW_EXT     1500
 #define IDC_RECENT_SHOW_CLEAN   1501
 #define IDC_DEFAULT_ICON        1502
 #define IDC_DEFAULT_ICON_LIGHT  1503
@@ -132,6 +143,9 @@
 #define IDC_THISPC_AS_SUBMENU   1508
 #define IDC_HOME_AS_SUBMENU     1509
 #define IDC_TASKKILL_ALL_DESKTOPS 1510
+#define IDC_RECENT_SEPARATE_ITEMS 1511
+#define IDC_RECENT_HIDE_PROTOCOL_SHORTCUTS 1512
+#define IDC_TASKKILL_SHOW_PROCESS_IDS 1513
 #define IDC_THISPC_ITEMS_AS_SUBMENUS  3001
 #define IDC_THISPC_SHOW_ICONS         3002
 // Recent name mode radios
@@ -149,6 +163,10 @@
 #define IDC_CTRL_SHIFT_WINDOWS_KEY   1607
 #define IDC_IGNORE_FULLSCREEN_CHECK  1608
 #define IDC_FULLSCREEN_EXCLUSION_EDIT 1609
+#define IDC_CTRL_WINDOWS_KEY_X       1610
+#define IDC_CTRL_SETTINGS_ITEM_LABEL 1611
+#define IDC_CTRL_SETTINGS_ITEM_COMBO 1612
+#define IDC_CTRL_LEGACY_START_DETECTION 1613
 
 // Power exclusion checkboxes (Advanced tab)
 
