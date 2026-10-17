@@ -23,8 +23,6 @@
   <img alt="Downloads (latest release)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/latest/total">
 </p>
 
-[Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Use-cases)
-
 ### Windows 11:
 ![WinMacMenu screenshot from Windows 11 with WinUI3 menu](https://github.com/Asteski/WinMac-Menu/blob/b728efa7215ddd02b44ca2c5c4874a162f013a55/img/winmacmenu-demo-11.png)
 ### Windows 10:
