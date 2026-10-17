@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-1.0.0-x64.zip"><img alt="Download x64" src="https://img.shields.io/badge/Download-x64-0078D6?style=for-the-badge"></a>
-  <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-arm64.zip"><img alt="Download ARM64" src="https://img.shields.io/badge/Download-ARM64-00A86B?style=for-the-badge"></a>
+  <a href="https://github.com/Asteski/WinMac-Menu/releases/download/v1.0.0/WinMacMenu-1.0.0-arm64.zip"><img alt="Download ARM64" src="https://img.shields.io/badge/Download-ARM64-00A86B?style=for-the-badge"></a>
 </p>
 
 <p align="center">
