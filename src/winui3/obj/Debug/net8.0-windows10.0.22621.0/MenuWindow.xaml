@@ -1,0 +1,13 @@
+﻿<Window
+    x:Class="WinMacMenuWinUI3.MenuWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Transparent fullscreen overlay — the MenuFlyout anchors to this grid
+        and is shown at the cursor position. The window itself is invisible.
+    -->
+    <Grid x:ConnectionId='2' x:Name="RootGrid" Background="Transparent"/>
+
+</Window>
+

@@ -13,11 +13,20 @@ public sealed partial class HostWindow : Window
 {
     private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_LAYERED = 0x00080000;
+    private const uint LWA_ALPHA = 0x00000002;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_DONOTROUND = 1;
     private static readonly UIntPtr SubclassId = new(0x57554933);
 
     [DllImport("user32.dll")] private static extern int  GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] private static extern int  SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint colorKey, byte alpha, uint flags);
+    [DllImport("user32.dll")] private static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr obj);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool SetWindowText(IntPtr hWnd, string text);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(
         IntPtr hWnd, SubclassProc pfnSubclass, UIntPtr uIdSubclass, UIntPtr dwRefData);
@@ -36,6 +45,8 @@ public sealed partial class HostWindow : Window
 
     public IntPtr Hwnd { get; }
     public event Action<MenuTriggerType>? ShowMenuRequested;
+    public event Action? ConfigReloadRequested;
+    public event Action? ShutdownRequested;
 
     public HostWindow(string? title = null, uint showMessage = 0)
     {
@@ -53,7 +64,10 @@ public sealed partial class HostWindow : Window
 
         // No chrome, no taskbar entry
         var exStyle = GetWindowLong(Hwnd, GWL_EXSTYLE);
-        SetWindowLong(Hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
+        SetWindowLong(Hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW | WS_EX_LAYERED);
+        // XAML Transparent alone does not make the top-level HWND invisible.
+        // Apply alpha before activation so even its first frame cannot flash.
+        SetLayeredWindowAttributes(Hwnd, 0, 0, LWA_ALPHA);
 
         var presenter = OverlappedPresenter.CreateForToolWindow();
         presenter.IsResizable   = false;
@@ -62,9 +76,16 @@ public sealed partial class HostWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         appWindow.SetPresenter(presenter);
 
+        var cornerPreference = DWMWCP_DONOTROUND;
+        _ = DwmSetWindowAttribute(Hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                                 ref cornerPreference, Marshal.SizeOf<int>());
+
         // Place it on-screen first (some WinUI3 builds reject off-screen-only windows)
         // then immediately hide it at the Win32 level so nothing is ever visible.
         appWindow.MoveAndResize(new RectInt32(0, 0, 1, 1));
+        var emptyRegion = CreateRectRgn(0, 0, 0, 0);
+        if (emptyRegion != IntPtr.Zero && SetWindowRgn(Hwnd, emptyRegion, true) == 0)
+            DeleteObject(emptyRegion); // Windows owns the region on success.
         if (_showMessage != 0)
             SetWindowSubclass(Hwnd, _subclassProc, SubclassId, UIntPtr.Zero);
         ShowWindow(Hwnd, SW_HIDE);
@@ -94,7 +115,25 @@ public sealed partial class HostWindow : Window
             ShowMenuRequested?.Invoke(trigger);
             return IntPtr.Zero;
         }
+        if (_showMessage != 0 && uMsg == _showMessage + 1)
+        {
+            ConfigReloadRequested?.Invoke();
+            return IntPtr.Zero;
+        }
 
+        if (_showMessage != 0 && uMsg == _showMessage + 2)
+        {
+            ShutdownRequested?.Invoke();
+            return IntPtr.Zero;
+        }
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    public void ActivateHidden()
+    {
+        // Activation initializes WinUI's lifetime, but also undoes constructor SW_HIDE.
+        // This HWND only receives bridge/tray messages; it never hosts the menu flyout.
+        Activate();
+        ShowWindow(Hwnd, SW_HIDE);
     }
 }

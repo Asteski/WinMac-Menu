@@ -105,6 +105,8 @@ static void release_suppressed_win_keys(void) {
     g_winKeyXReleaseVk = 0;
 }
 
+#define WMM_DISPLAY_VERSION L"1.0.0"
+
 // Retrieve FileVersion (e.g., "1.0.0-beta") from the executable's VERSIONINFO.
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
@@ -134,6 +136,9 @@ static void get_file_version_string(wchar_t* out, size_t cchOut) {
         WORD build = HIWORD(fixed->dwFileVersionLS);
         // WORD rev = LOWORD(fixed->dwFileVersionLS);
         wsprintfW(out, L"%u.%u.%u", (unsigned)major, (unsigned)minor, (unsigned)build);
+    }
+    if (!out[0] || !lstrcmpW(out, L"1.0.0") || !lstrcmpW(out, L"1.0.0.0")) {
+        lstrcpynW(out, WMM_DISPLAY_VERSION, (int)cchOut);
     }
     LocalFree(data);
 }
@@ -537,11 +542,7 @@ static void tray_show_balloon(HWND hWnd, const WCHAR* title, const WCHAR* text) 
 }
 
 static void open_settings_app(HWND hWnd) {
-    // Check if running on Windows 10 (major=10, minor=0, build<22000)
-    OSVERSIONINFOEXW osvi = {0};
-    osvi.dwOSVersionInfoSize = sizeof(osvi);
-    GetVersionExW((OSVERSIONINFOW*)&osvi);
-    BOOL isWin10 = (osvi.dwMajorVersion == 10 && osvi.dwMinorVersion == 0 && osvi.dwBuildNumber < 22000);
+    BOOL isWin10 = !is_windows_11_or_greater();
 
     WCHAR exeDir[MAX_PATH];
     if (!GetModuleFileNameW(NULL, exeDir, ARRAYSIZE(exeDir))) {
@@ -612,31 +613,31 @@ static LRESULT CALLBACK lowlevel_kb_proc(int nCode, WPARAM wParam, LPARAM lParam
     return CallNextHookEx(g_hKbHook, nCode, wParam, lParam);
 }
 
-static const WCHAR kBigMenuClassName[] = L"WinMacMenu.BigMenuWindow";
+static const WCHAR kCustomThemeClassName[] = L"WinMacMenu.CustomThemeWindow";
 
-static BOOL is_big_menu_window(HWND hwnd) {
+static BOOL is_custom_theme_window(HWND hwnd) {
     WCHAR cls[64];
     if (!hwnd) return FALSE;
     if (!GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) return FALSE;
-    return (lstrcmpW(cls, kBigMenuClassName) == 0);
+    return (lstrcmpW(cls, kCustomThemeClassName) == 0);
 }
 
-static HWND find_big_menu_window(void) {
-    HWND hwnd = FindWindowW(kBigMenuClassName, NULL);
+static HWND find_custom_theme_window(void) {
+    HWND hwnd = FindWindowW(kCustomThemeClassName, NULL);
     DWORD pid = 0;
     while (hwnd) {
         GetWindowThreadProcessId(hwnd, &pid);
         if (pid == GetCurrentProcessId()) return hwnd;
-        hwnd = FindWindowExW(NULL, hwnd, kBigMenuClassName, NULL);
+        hwnd = FindWindowExW(NULL, hwnd, kCustomThemeClassName, NULL);
     }
     return NULL;
 }
 
-static BOOL try_close_big_menu(void) {
-    HWND bigMenu = find_big_menu_window();
-    if (!bigMenu) return FALSE;
+static BOOL try_close_custom_theme(void) {
+    HWND CustomTheme = find_custom_theme_window();
+    if (!CustomTheme) return FALSE;
     release_suppressed_win_keys();
-    PostMessageW(bigMenu, WM_CANCELMODE, 0, 0);
+    PostMessageW(CustomTheme, WM_CANCELMODE, 0, 0);
     g_skipNextOpenUntil = GetTickCount() + 250;
     return TRUE;
 }
@@ -647,7 +648,7 @@ static BOOL is_point_in_menu_window(POINT pt) {
     WCHAR cls[64];
     if (GetClassNameW(hw, cls, ARRAYSIZE(cls))) {
         if (!lstrcmpW(cls, L"#32768")) return TRUE; // menu window class
-        if (!lstrcmpW(cls, kBigMenuClassName)) return TRUE;
+        if (!lstrcmpW(cls, kCustomThemeClassName)) return TRUE;
     }
     return FALSE;
 }
@@ -728,7 +729,7 @@ static LRESULT CALLBACK lowlevel_mouse_proc(int nCode, WPARAM wParam, LPARAM lPa
 
         if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN || wParam == WM_MOUSEWHEEL) {
             if (!is_point_in_menu_window(ms->pt)) {
-                if (!try_close_big_menu()) {
+                if (!try_close_custom_theme()) {
                     PostMessageW(g_hHookTargetWnd, WM_APP, 0, 0);
                 }
             }
@@ -876,6 +877,7 @@ static void uninstall_menu_hooks(void) {
     g_hHookTargetWnd = NULL;
 }
 
+static void show_native_menu(HWND hWnd, POINT pt, MenuTriggerType trigger);
 static void show_configured_menu(HWND hWnd, POINT pt, MenuTriggerType trigger) {
     BOOL oldWinUI = g_cfg.useWinUI3Menu;
     BOOL oldLarge = g_cfg.rootMenuLargeIcons;
@@ -888,6 +890,10 @@ static void show_configured_menu(HWND hWnd, POINT pt, MenuTriggerType trigger) {
         return;
     }
 
+    show_native_menu(hWnd, pt, trigger);
+}
+
+static void show_native_menu(HWND hWnd, POINT pt, MenuTriggerType trigger) {
     g_menuActive = TRUE;
     g_menuShowingNow = TRUE;
     install_menu_hooks(hWnd);
@@ -1046,12 +1052,11 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
         HICON hAboutArt = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_ABOUT_ICON), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
         if (hAboutArt) SendDlgItemMessageW(dlg, IDC_ABOUT_ART_ICON, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hAboutArt);
 
-        WCHAR ver[64]; ver[0] = 0; get_file_version_string(ver, ARRAYSIZE(ver));
         WCHAR aboutText[512];
         wsprintfW(
             aboutText,
             L"WinMac Menu\r\nVersion: v%ls\r\nCreated by Adam Kamie\u0144ski\r\n\r\n\u00A9 2026 Asteski",
-            (ver[0] ? ver : L"1.0.0-beta4")
+            WMM_DISPLAY_VERSION
         );
         SetDlgItemTextW(dlg, IDC_ABOUT_TEXT, aboutText);
 
@@ -1110,12 +1115,14 @@ static INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM l
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
+        SetWinUI3OwnerWindow(hWnd);
         InitCommonControls();
         theme_apply_to_window(hWnd);
         g_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
         if (g_runInBackground && g_cfg.showTrayIcon) tray_add(hWnd);
         return 0;
     case WM_DESTROY:
+        ShutdownWinUI3Menu();
         if (g_trayAdded) tray_remove(hWnd);
         PostQuitMessage(0);
         return 0;
@@ -1135,7 +1142,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     case WM_ACTIVATEAPP:
         if (g_menuShowingNow && wParam == FALSE) {
-            if (!try_close_big_menu()) {
+            if (!try_close_custom_theme()) {
                 release_suppressed_win_keys();
                 EndMenu();
             }
@@ -1144,7 +1151,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     case WM_CANCELMODE:
         if (g_menuShowingNow) {
-            if (!try_close_big_menu()) {
+            if (!try_close_custom_theme()) {
                 release_suppressed_win_keys();
                 EndMenu();
             }
@@ -1192,17 +1199,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 AppendMenuW(m, MF_STRING, 10004, L"Elevate");
             }
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-            // Insert Reload option (restart the application) before Start on login per request
+            // Insert Reload option (restart the application) before Run at startup per request
             AppendMenuW(m, MF_STRING, 10010, L"Reload");
             // Sync StartOnLogin setting with actual registry state before showing the menu
             config_sync_startup(&g_cfg, L"WinMac Menu");
             // Toggles with check marks
             UINT fSOL = (g_cfg.startOnLogin ? MF_CHECKED : MF_UNCHECKED);
-            AppendMenuW(m, MF_STRING | fSOL, 10008, L"Start on login");
-            // ShowIcons toggle with dynamic label
-            WCHAR iconsLabel[64];
-            lstrcpynW(iconsLabel, g_cfg.showIcons ? L"Hide menu icons" : L"Show menu icons", ARRAYSIZE(iconsLabel));
-            AppendMenuW(m, MF_STRING, 10009, iconsLabel);
+            AppendMenuW(m, MF_STRING | fSOL, 10008, L"Run at startup");
             AppendMenuW(m, MF_SEPARATOR, 0, NULL);
             AppendMenuW(m, MF_STRING, 10005, L"Settings");
             AppendMenuW(m, MF_STRING, 10011, L"Open ini file");
@@ -1219,6 +1222,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             } else if (cmd == 10003) {
                 // Hide tray: update INI and remove icon
                 WritePrivateProfileStringW(L"General", L"ShowTrayIcon", L"false", g_cfg.iniPath);
+                WritePrivateProfileStringW(L"Appearance", L"ShowTrayIcon", NULL, g_cfg.iniPath);
                 g_cfg.showTrayIcon = FALSE;
                 tray_remove(hWnd);
             } else if (cmd == 10004) {
@@ -1257,10 +1261,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 WCHAR runValName[64]; lstrcpynW(runValName, L"WinMac Menu", ARRAYSIZE(runValName));
                 if (g_cfg.startOnLogin) set_run_at_login(runValName, cmdline); else remove_run_at_login(runValName);
-            } else if (cmd == 10009) {
-                // Toggle ShowIcons (legacy icons in menu)
-                g_cfg.showIcons = !g_cfg.showIcons;
-                WritePrivateProfileStringW(L"General", L"ShowIcons", g_cfg.showIcons ? L"true" : L"false", g_cfg.iniPath);
             } else if (cmd == 10005) {
                 open_settings_app(hWnd);
             } else if (cmd == 10011) {
@@ -1329,6 +1329,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_COMMAND:
         // Handle CLI commands
         if (LOWORD(wParam) == 10010) {
+            ShutdownWinUI3Menu();
             if (restart_current_instance()) {
                 PostMessageW(hWnd, WM_CLOSE, 0, 0);
             }
@@ -1346,7 +1347,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_APP:
         // Toggle behavior: if menu visible, close it; else open it.
         if (g_menuShowingNow) {
-            if (!try_close_big_menu()) {
+            if (!try_close_custom_theme()) {
                 release_suppressed_win_keys();
                 EndMenu(); // dismiss current popup
             }
@@ -1363,6 +1364,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
         return 0;
+    case WM_APP + 0x61:
+        ExecuteControlAction(g_cfg.leftClickAction, g_cfg.leftClickCommand, hWnd, (MenuTriggerType)wParam);
+        return 0;
+    case WM_APP + 0x60:
+        if (!g_menuActive) show_native_menu(hWnd, (POINT){0, 0}, (MenuTriggerType)wParam);
+        return 0;
     case WM_MENUSELECT:
         MenuOnMenuSelect(hWnd, wParam, lParam);
         return 0;
@@ -1370,6 +1377,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         MenuOnInitMenuPopup(hWnd, (HMENU)wParam, LOWORD(lParam), HIWORD(lParam));
         return 0;
     case WM_TIMER:
+        if (PollWinUI3Menu((UINT_PTR)wParam)) return 0;
         if (wParam == 0x5A11) {
             MenuRefreshVisibleMenuWindows();
             return 0;
@@ -1675,7 +1683,16 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR lpCmdLine, in
         // Optionally show menu on first launch (skip when started with --reload)
         if (g_cfg.showOnLaunch && !g_reloadMode) {
             POINT pt = {0,0};
-            show_configured_menu(hWnd, pt, MENU_TRIGGER_OTHER);
+            if (g_cfg.useWinUI3Menu) {
+                // The helper is preloaded above, but WinUI can need more than the
+                // normal trigger timeout during cold startup. Wait for its bridge
+                // instead of briefly displaying the native fallback menu.
+                if (!LaunchWinUI3MenuAndWait(&g_cfg, MENU_TRIGGER_OTHER, 15000)) {
+                    show_configured_menu(hWnd, pt, MENU_TRIGGER_OTHER);
+                }
+            } else {
+                show_configured_menu(hWnd, pt, MENU_TRIGGER_OTHER);
+            }
         }
         // Message loop
         MSG msg;

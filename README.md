@@ -1,6 +1,15 @@
+<p align="center">
+  <img src="img/logo.svg" alt="WinMac Dock" width="128">
+</p>
+
 <h1 align="center">
   <span>WinMac Menu</span>
 </h1>
+
+<p align="center">
+  <span align="center">Windows application that shows a Windows context-like popup menu. It’s available in both Win32 and WinUI frameworks, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
+  </span>
+</p>
 
 <p align="center">
   <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-1.0.0-x64.zip"><img alt="Download x64" src="https://img.shields.io/badge/Download-x64-0078D6?style=for-the-badge"></a>
@@ -14,18 +23,18 @@
   <img alt="Downloads (latest release)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/latest/total">
 </p>
 
-Windows application that shows a Windows context-like popup menu. It’s configurable via an INI file, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more! [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
-
 ### Windows 11:
-![WinMacMenu screenshot](img/winmacmenu-demo-11.png)
+![WinMacMenu screenshot from Windows 11 with WinUI3 menu](img/winmacmenu-demo-11.png)
 ### Windows 10:
-![WinMacMenu screenshot](img/winmacmenu-demo-10.png)
+![WinMacMenu screenshot from Windows 10 with Win32 menu](img/winmacmenu-demo-10.png)
 
 ## Features
 
 - Available in both Win32 and WinUI frameworks
+- WinUI 3 menu renderer with configurable menu appearance
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
 - Recent Items - dynamic submenu from *%AppData%\Microsoft\Windows\Recent Items* folder
+- Recent Items grouping for folders and files
 - Task Kill - dynamic submenu to forcibly end tasks
 - This PC - dynamic submenu to list This PC content
 - Home - dynamic submenu to show User Profile folder
@@ -38,7 +47,15 @@ Windows application that shows a Windows context-like popup menu. It’s configu
 - Granular extension hiding (global + recent-only override)
 - Settings GUI available for those, who do not want to modify INI file directly
 - Enable activation of WinMac Menu using various Start button and Windows key triggers
+- Win + X activation trigger
+- Large-menu highlight frame styles: background, border, or both
+- Optional file-type icons instead of thumbnails in generated submenus
+- Custom INI filenames displayed in the Settings window title
+- ARM64 builds in addition to x64
+- Configurable Hibernate power action
+- DPI-aware root menu and submenu sizing
 - Trigger folder or file context menu directly from submenus
+- [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ## Run
 
@@ -58,7 +75,7 @@ Windows application that shows a Windows context-like popup menu. It’s configu
 - *[Icons]* per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
 - *[IconsLight]* theme-specific per-item icons for light theme (Icon1..IconN)
 - *[IconsDark]* theme-specific per-item icons for dark theme (Icon1..IconN)
-- *[Power]* exclude specific power options
+- *[Power]* include or disable specific power actions
 - *[Sorting]* sort folder content
 - *[Appearance]* enable and configure different frameworks
 - *[Controls]* enable pre-defined triggers
@@ -71,24 +88,20 @@ Windows application that shows a Windows context-like popup menu. It’s configu
 You can find more details about each section in [Wiki](https://github.com/Asteski/WinMac-Menu/wiki) page.
 
 ## Security & Privacy
-- No telemetry. The app makes no network connections and collects no data.
+- No telemetry. The app does not collect personal data. Network access is only used when the user starts the update check.
 - Registry usage: optional HKCU\Software\Microsoft\Windows\CurrentVersion\Run entry when you enable “Start on login” from the tray. It’s off by default and only changed when you toggle it. There is no service or scheduled task.
 - Keyboard/mouse hooks: installed only while the popup menu is visible to allow outside‑click/escape dismissal; they are immediately removed when the menu closes.
 - Recent cleanup: choosing “Clear Recent Items list” deletes shortcut (.lnk) files from your user Recent folder. It doesn’t touch actual documents or programs. There’s no confirmation.
 - Filesystem: reads your config.ini and enumerates folders you explicitly reference in the menu.
-
-## Troubleshooting
-- Empty folder submenu: check path, permissions, filters (ShowHidden / ShowDotfiles)
-- No icons: ensure ShowIcons=true (or LegacyIcons=true for backward compatibility) and paths are correct
-- Folder icons not appearing: set ShowFolderIcons=true; the system folder icon only shows when no per-item icon exists
 
 ## Notes
 - WinMacMenu reads an INI. If missing, a default (config.ini) is created.
 - Environment variables expand in labels, paths, params, and icon paths (e.g., %USERNAME%).
 - Indices N in [Icons]/[IconsLight]/[IconsDark] map to ItemN in [Menu].
 - Generated default INI contains no comments (to keep the file minimal). Comments are still supported by the parser if you add them manually: lines beginning with `;` or `#` are ignored.
-- Built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
-- This app uses legacy popup menus; so no parity with Windows 11 Fluent Design System
+- The Win32 renderer is built with standard Win32 APIs: user32, shell32, shlwapi, comctl32, uxtheme, dwmapi, powrprof, advapi32.
+- The Win32 renderer uses legacy popup menus. The optional WinUI renderer provides a more modern Windows-style menu appearance.
+- The root menu can use up to 50% of the monitor work area, while submenus can use up to 33%.
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different ini file names.
 - INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
 - You can reference either *.dll or *.exe file in [Icons] section as path or just a file name (if the file resides in directory defined in %PATH%).

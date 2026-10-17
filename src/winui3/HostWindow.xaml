@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!--
         Invisible keepalive window. WinUI3 exits when all windows are closed,
-        so this 1×1 off-screen window keeps the process alive while RunInBackground=true.
+        so this hidden, zero-opacity 1×1 window keeps the process alive while RunInBackground=true.
         It also owns the HWND that Shell_NotifyIcon uses for tray callbacks.
     -->
     <Grid Background="Transparent"/>

@@ -52,6 +52,7 @@ typedef enum {
 } ControlActionType;
 
 typedef struct ConfigItem {
+    int sourceIndex; // Original ItemN number, retained when INI numbering has gaps.
     WCHAR name[64];
     WCHAR label[128];
     ConfigItemType type;
@@ -69,8 +70,7 @@ typedef struct ConfigItem {
 typedef struct Config {
     WCHAR iniPath[MAX_PATH];
     int recentMax;
-    int folderMaxDepth; // 1..4 depth for nested folder submenus
-    // When true, keep the app running in background mode with a hidden window and message loop
+    int folderMaxDepth; // 0..4 depth for nested folder submenus    // When true, keep the app running in background mode with a hidden window and message loop
     BOOL runInBackground;
     // Whether folder submenus should offer single-click open of the folder itself
     BOOL folderSingleClickOpen; // General: FolderSubmenuOpen = single|double
@@ -98,7 +98,9 @@ typedef struct Config {
     WCHAR defaultIconPath[MAX_PATH]; // optional default icon for items without explicit icon
     WCHAR defaultIconPathLight[MAX_PATH]; // optional default icon for light theme
     WCHAR defaultIconPathDark[MAX_PATH];  // optional default icon for dark theme
-    int showIcons; // show icons in legacy style (0=false, 1=true, 2=other/mixed)
+    // 0 = disabled, 1 = all items, 2 = files only, 3 = folders only.
+    int showIcons;
+    BOOL hideIconsInRootMenu; // [General] HideIconsInRootMenu=true suppresses every root-menu icon.
     // Appearance
     BOOL roundedCorners; // (modern only when enabled) selection corner styling
     // Placement settings
@@ -120,25 +122,23 @@ typedef struct Config {
     WCHAR logFilePath[MAX_PATH];   // Resolved dynamic log file full path (WinMacMenu_<configBase>_<yyMMdd-HHmm>.log)
     int recentLabelMode; // [General] RecentLabel=fullpath|name (0=full path, 1=file name)
     BOOL showExtensions; // [General] ShowFileExtensions=true keeps file extensions visible (back-compat: ShowExtensions, inverse of deprecated HideExtensions)
-    BOOL showFolderIcons; // [General] ShowFolderIcons=true shows system folder icon for folder entries in legacy mode when legacyIcons enabled
-    BOOL showFileIcons; // [General] ShowFileIcons=true shows file icons for file entries inside folder-style submenus
     BOOL rootMenuLargeIcons; // [Appearance] LargeMenuIcons=true uses larger icons on root menu entries only
-    BOOL useWinUI3Menu; // [Appearance] UseWinUI3Menu=true renders the menu through the WinUI 3 helper
-    WCHAR winuiSize[16]; // [Appearance] WinUISize=default|large
-    BOOL winuiAlwaysShowIcons; // [Appearance] WinUIAlwaysShowIcons=true uses file type icons instead of thumbnails in WinUI submenus
+    BOOL useWinUI3Menu; // [Appearance] ThemeStyle=1 (alias Style=1) renders the menu through the WinUI 3 helper
+    WCHAR winuiSize[16]; // [Appearance] TouchMode=false|true maps to default|large
+    BOOL showThumbnails; // [Appearance] ShowThumbnails=true uses thumbnails in WinUI submenus; false keeps file type icons
     BOOL keepLargeMenuHighlightTextColor; // [Appearance] KeepLargeMenuHighlightTextColor=true keeps normal font/arrow color on highlighted large-menu items
     BOOL keepMenuOpenAfterContextAction; // [General] KeepMenuOpenAfterContextAction=true keeps WinMac menu visible after running an item from shell context menu
-    BOOL recentShowExtensions; // [General] RecentShowExtensions=true keeps extensions in recent submenu (inverse of deprecated RecentHideExtensions)
+    BOOL recentShowExtensions; // Effective Recent extension setting; General.ShowFileExtensions is authoritative, with old Recent keys as fallback only.
     BOOL recentShowCleanItems; // [General] RecentShowCleanItems=true (default true) adds a "Clear Recent Items" action at bottom of recent submenu
-    BOOL recentShowIcons;      // [General] RecentShowIcons=true shows file icons in recent submenu
+    BOOL recentHideProtocolShortcuts; // [RecentItems] RecentHideProtocolShortcuts=true hides shortcuts to URL/app protocols
     BOOL separateItems; // [RecentItems] SeparateItems=true separates recent files and folders
     
     // TaskKill defaults
     int taskKillMax;
     BOOL taskKillIgnoreSystem;
-    BOOL taskKillShowIcons;
     BOOL taskKillListWindows;
     BOOL taskKillAllDesktops;
+    BOOL taskKillShowProcessIds;
     WCHAR taskKillExcludes[512];
 
     // When PointerRelative = true, optionally ignore H/V offsets
@@ -161,6 +161,7 @@ typedef struct Config {
     BOOL excludeLock;
     BOOL excludeLogoff;
     BOOL excludeHibernate;
+    BOOL powerAskConfirmation;
     // Control actions configuration (based on Open-Shell-Menu controls)
     ControlActionType leftClickAction;     // Left click action
     WCHAR leftClickCommand[MAX_PATH];      // Custom command for left click (when action = CA_CUSTOM_COMMAND)
@@ -175,14 +176,15 @@ typedef struct Config {
     BOOL shiftLeftClickTrigger;            // [Controls] ShiftLeftClick=true enables Shift+left-click trigger on Start button
     BOOL shiftRightClickTrigger;           // [Controls] ShiftRightClick=true enables Shift+right-click trigger on Start button
     BOOL shiftMiddleClickTrigger;          // [Controls] ShiftMiddleClick=true enables Shift+middle-click trigger on Start button
+    int startClickWidth, startClickHeight; // Hidden [Controls] physical-pixel override; zero disables.
+    int startClickOffsetX, startClickOffsetY; // Relative to detected Start top-left.
+    BOOL legacyStartButtonDetection;       // [Controls] LegacyStartButtonDetection=true uses window-handle based Start button detection
     SettingsItemMode showSettingsItem;     // [Controls] ShowSettingsItem=disabled|shift|winx|rightclick|middleclick|always
     BOOL ignoreTriggersWhenFullscreen;    // [Controls] IgnoreTriggersWhenFullscreen=true enables fullscreen app detection
     WCHAR fullscreenExclusionList[1024];  // [Controls] FullscreenExclusionList=comma-separated list of excluded apps
-    BOOL thisPCItemsAsSubmenus; // [General] ThisPCItemsAsSubmenus=true|false (default true)
-    BOOL thisPCShowIcons;       // [General] ThisPCShowIcons=true|false (default true)
+    BOOL thisPCItemsAsSubmenus; // [ThisPC] ThisPCItemsAsSubmenus=true|false (default false)
     BOOL thisPCAsSubmenu;       // [ThisPC] ThisPCAsSubmenu=true|false (default false)
-    BOOL homeItemsAsSubmenus;   // [General] HomeItemsAsSubmenus=true|false (default true)
-    BOOL homeShowIcons;         // [General] HomeShowIcons=true|false (default true)
+    BOOL homeItemsAsSubmenus;   // [Home] HomeItemsAsSubmenus=true|false (default false)
     BOOL homeAsSubmenu;         // [Home] HomeAsSubmenu=true|false (default false)
     ConfigItem items[64];
     int count;

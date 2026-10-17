@@ -4,6 +4,10 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
+#include <propsys.h>
+#include <propkey.h>
+#include <commoncontrols.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <vsstyle.h>
@@ -12,12 +16,14 @@
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "UxTheme.lib")
 #include "menu.h"
-#include "big_menu_bridge.h"
+#include "custom_theme_bridge.h"
 #include "config.h"
 #include "recent.h"
 #include "util.h"
 #include "theme.h"
 #include "resource.h"
+#include "menu_resources.h"
+#include <strsafe.h>
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(a) (sizeof(a)/sizeof((a)[0]))
@@ -28,6 +34,7 @@
 #define IDM_TASKKILL_BASE 3000
 #define IDM_SIZER         9000
 #define IDT_MENU_WINDOW_REFRESH 0x5A11
+#define FOLDER_ENUM_BUDGET_MS 800
 
 BOOL g_shouldReopenMenu = FALSE;
 
@@ -59,9 +66,13 @@ static UINT g_nextFolderId = IDM_FOLDER_BASE;
 typedef struct ItemIcon { UINT id; HICON h; } ItemIcon;
 static ItemIcon g_itemIcons[256];
 static UINT g_itemIconCount = 0;
+typedef struct ItemPosIcon { HMENU menu; int pos; HICON h; } ItemPosIcon;
+static ItemPosIcon g_itemPosIcons[1024];
+static UINT g_itemPosIconCount = 0;
 typedef struct ItemBmp { UINT id; HBITMAP hbmp; } ItemBmp;
 static ItemBmp g_itemBmps[256];
 static UINT g_itemBmpCount = 0;
+static HICON hFolderSmall, hFolderLarge;
 static UINT g_suppressCmd = 0;
 static DWORD g_suppressCmdTick = 0;
 static HMENU g_rootMenuHandle = NULL;
@@ -70,6 +81,7 @@ static UINT g_legacyRootMenuItemHeight = 0;
 static HHOOK g_menuCornerHook = NULL;
 static HWND g_rootMenuWindow = NULL;
 // Forward declarations for legacy icon helpers
+static HBITMAP create_opaque_icon_mask(int cx, int cy);
 static HBITMAP icon_to_hbmp(HICON hico, int cx, int cy);
 static void assign_legacy_item_bitmap(HMENU hMenu, UINT id, HICON hico);
 static void assign_menu_item_bitmap_sized(HMENU hMenu, UINT id, HICON hico, int size);
@@ -78,15 +90,18 @@ static HFONT get_menu_font(void);
 static BOOL measure_legacy_root_menu_item(HWND owner, MEASUREITEMSTRUCT* mis);
 static BOOL draw_legacy_root_menu_item(HWND owner, const DRAWITEMSTRUCT* dis);
 static void set_legacy_root_owner_draw(HMENU hMenu);
-static UINT build_big_menu_snapshot(HMENU hMenu, WMM_BIG_MENU_ITEM* items, UINT maxItems);
-static BOOL WINAPI big_menu_init_native_submenu_callback(HWND owner, HMENU hMenu, UINT itemIndex);
-static UINT WINAPI big_menu_show_native_submenu_callback(HWND owner, HMENU hMenu, POINT screenPt, UINT itemIndex);
+static UINT build_custom_theme_snapshot(HMENU hMenu, WMM_CUSTOM_THEME_ITEM* items, UINT maxItems);
+static BOOL WINAPI custom_theme_init_native_submenu_callback(HWND owner, HMENU hMenu, UINT itemIndex);
+static UINT WINAPI custom_theme_show_native_submenu_callback(HWND owner, HMENU hMenu, POINT screenPt, UINT itemIndex);
 static void begin_menu_corner_hook(void);
 static void end_menu_corner_hook(void);
 static void draw_fake_rounded_highlight(HDC hdc, const RECT* rc, int radius, COLORREF fillColor, COLORREF backgroundColor);
 static void draw_highlight_border(HDC hdc, const RECT* rc, int radius, COLORREF borderColor);
 static COLORREF blend_colors(COLORREF base, COLORREF top, int alpha);
 static void draw_root_menu_submenu_arrow(HDC hdc, const RECT* rc, COLORREF color);
+#ifdef ENABLE_MODERN_STYLE
+void Menu_SetOwnerDrawRecursive(HMENU m);
+#endif
 static void add_item_icon(UINT id, HICON h) {
     if (!h) return;
     for (UINT i=0;i<g_itemIconCount;i++) if (g_itemIcons[i].id==id) { g_itemIcons[i].h=h; return; }
@@ -94,6 +109,24 @@ static void add_item_icon(UINT id, HICON h) {
 }
 static HICON get_item_icon(UINT id) {
     for (UINT i=0;i<g_itemIconCount;i++) if (g_itemIcons[i].id==id) return g_itemIcons[i].h;
+    return NULL;
+}
+static void add_item_pos_icon(HMENU menu, int pos, HICON h) {
+    if (!menu || pos < 0 || !h) return;
+    for (UINT i=0;i<g_itemPosIconCount;i++) {
+        if (g_itemPosIcons[i].menu==menu && g_itemPosIcons[i].pos==pos) {
+            g_itemPosIcons[i].h=h;
+            return;
+        }
+    }
+    if (g_itemPosIconCount < ARRAYSIZE(g_itemPosIcons)) {
+        g_itemPosIcons[g_itemPosIconCount++] = (ItemPosIcon){ menu, pos, h };
+    }
+}
+static HICON get_item_pos_icon(HMENU menu, int pos) {
+    for (UINT i=0;i<g_itemPosIconCount;i++) {
+        if (g_itemPosIcons[i].menu==menu && g_itemPosIcons[i].pos==pos) return g_itemPosIcons[i].h;
+    }
     return NULL;
 }
 
@@ -112,15 +145,47 @@ static int get_root_icon_size() {
 }
 
 static BOOL use_legacy_root_large_icon_layout(void) {
-    return (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1 && g_cfg.rootMenuLargeIcons);
+    return (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons != 0 && !g_cfg.hideIconsInRootMenu && g_cfg.rootMenuLargeIcons);
 }
 
-static BOOL WINAPI big_menu_init_native_submenu_callback(HWND owner, HMENU hMenu, UINT itemIndex) {
+static BOOL should_show_item_icon(BOOL isFolder, BOOL isRoot) {
+    if (g_cfg.showIcons == 0) return FALSE;
+    if (isRoot && g_cfg.hideIconsInRootMenu) return FALSE;
+    // Root entries use only the master toggle and root-hide setting. The
+    // file/folder modes are deliberately limited to submenu content.
+    if (isRoot) return TRUE;
+    if (g_cfg.showIcons == 2) return !isFolder;
+    if (g_cfg.showIcons == 3) return isFolder;
+    return TRUE;
+}
+
+// A configured FOLDER/FOLDER_SUBMENU heading is a menu command, not one of
+// the folder objects it may render inline. Its root icon follows the master
+// toggle and HIR, but not Files-only/Folders-only.
+static BOOL should_show_configured_folder_menu_icon(BOOL isRoot) {
+    if (isRoot) return g_cfg.showIcons != 0 && !g_cfg.hideIconsInRootMenu;
+    return should_show_item_icon(TRUE, FALSE);
+}
+
+static BOOL should_show_inline_folder_content_icon(BOOL isFolder) {
+    if (g_cfg.showIcons == 0 || g_cfg.hideIconsInRootMenu) return FALSE;
+    if (g_cfg.showIcons == 2) return !isFolder;
+    if (g_cfg.showIcons == 3) return isFolder;
+    return TRUE;
+}
+
+static BOOL configured_item_is_folder(const ConfigItem* item) {
+    if (!item) return FALSE;
+    return item->type == CI_FOLDER || item->type == CI_FOLDER_SUBMENU ||
+           item->type == CI_THISPC || item->type == CI_HOME;
+}
+
+static BOOL WINAPI custom_theme_init_native_submenu_callback(HWND owner, HMENU hMenu, UINT itemIndex) {
     MenuOnInitMenuPopup(owner, hMenu, itemIndex, FALSE);
     return TRUE;
 }
 
-static UINT WINAPI big_menu_show_native_submenu_callback(HWND owner, HMENU hMenu, POINT screenPt, UINT itemIndex) {
+static UINT WINAPI custom_theme_show_native_submenu_callback(HWND owner, HMENU hMenu, POINT screenPt, UINT itemIndex) {
     UINT cmd;
 
     MenuOnInitMenuPopup(owner, hMenu, itemIndex, FALSE);
@@ -136,7 +201,7 @@ static UINT WINAPI big_menu_show_native_submenu_callback(HWND owner, HMENU hMenu
     return cmd;
 }
 
-static UINT build_big_menu_snapshot(HMENU hMenu, WMM_BIG_MENU_ITEM* items, UINT maxItems) {
+static UINT build_custom_theme_snapshot(HMENU hMenu, WMM_CUSTOM_THEME_ITEM* items, UINT maxItems) {
     int count;
     UINT written = 0;
 
@@ -147,7 +212,7 @@ static UINT build_big_menu_snapshot(HMENU hMenu, WMM_BIG_MENU_ITEM* items, UINT 
 
     for (int i = 0; i < count && written < maxItems; ++i) {
         MENUITEMINFOW mii = { sizeof(mii) };
-        WMM_BIG_MENU_ITEM* item = &items[written];
+        WMM_CUSTOM_THEME_ITEM* item = &items[written];
 
         ZeroMemory(item, sizeof(*item));
         item->cbSize = sizeof(*item);
@@ -158,21 +223,22 @@ static UINT build_big_menu_snapshot(HMENU hMenu, WMM_BIG_MENU_ITEM* items, UINT 
         }
 
         if (mii.fType & MFT_SEPARATOR) {
-            item->kind = WMM_BIG_MENU_ITEM_SEPARATOR;
+            item->kind = WMM_CUSTOM_THEME_ITEM_SEPARATOR;
         } else if (mii.hSubMenu) {
-            item->kind = WMM_BIG_MENU_ITEM_SUBMENU;
+            item->kind = WMM_CUSTOM_THEME_ITEM_SUBMENU;
         } else if (mii.wID == 0 || (mii.fState & (MFS_DISABLED | MFS_GRAYED))) {
-            item->kind = WMM_BIG_MENU_ITEM_PLACEHOLDER;
+            item->kind = WMM_CUSTOM_THEME_ITEM_PLACEHOLDER;
         } else {
-            item->kind = WMM_BIG_MENU_ITEM_COMMAND;
+            item->kind = WMM_CUSTOM_THEME_ITEM_COMMAND;
         }
 
-        if (mii.fState & (MFS_DISABLED | MFS_GRAYED)) item->flags |= WMM_BIG_MENU_ITEM_FLAG_DISABLED;
-        if (mii.fState & MFS_DEFAULT) item->flags |= WMM_BIG_MENU_ITEM_FLAG_DEFAULT;
+        if (mii.fState & (MFS_DISABLED | MFS_GRAYED)) item->flags |= WMM_CUSTOM_THEME_ITEM_FLAG_DISABLED;
+        if (mii.fState & MFS_DEFAULT) item->flags |= WMM_CUSTOM_THEME_ITEM_FLAG_DEFAULT;
 
         item->commandId = mii.wID;
         item->nativeSubmenu = mii.hSubMenu;
-        item->icon = get_item_icon(mii.wID);
+        item->icon = get_item_pos_icon(hMenu, i);
+        if (!item->icon) item->icon = get_item_icon(mii.wID);
         if (!(mii.fType & MFT_SEPARATOR)) {
             GetMenuStringW(hMenu, i, item->text, ARRAYSIZE(item->text), MF_BYPOSITION);
         }
@@ -465,6 +531,7 @@ static void assign_icon_to_last_popup(HMENU hMenu, HICON hico) {
     if (!hico) return;
     int count = GetMenuItemCount(hMenu);
     if (count <= 0) return;
+    add_item_pos_icon(hMenu, count - 1, hico);
     assign_menu_pos_bitmap_sized(hMenu, count - 1, hico, get_root_icon_size());
 }
 
@@ -520,8 +587,11 @@ static HICON render_fluent_glyph_icon(UINT codepoint, int size) {
     RECT rc;
     ICONINFO info;
     HICON icon = NULL;
+    int fontSize;
 
     if (size <= 0) return NULL;
+    fontSize = (size <= 20) ? MulDiv(size, 90, 100) : MulDiv(size, 70, 100);
+    fontSize = max(8, min(size, fontSize));
     ZeroMemory(&bi, sizeof(bi));
     bi.bV5Size = sizeof(bi);
     bi.bV5Width = size;
@@ -540,7 +610,7 @@ static HICON render_fluent_glyph_icon(UINT codepoint, int size) {
     if (!colorBitmap || !pixels) goto cleanup;
     ZeroMemory(pixels, (SIZE_T)size * (SIZE_T)size * sizeof(DWORD));
     oldBitmap = (HBITMAP)SelectObject(hdc, colorBitmap);
-    font = CreateFontW(-size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    font = CreateFontW(-fontSize, 0, 0, 0, FW_LIGHT, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
                        DEFAULT_PITCH, L"Segoe Fluent Icons");
     if (!font) goto cleanup;
@@ -565,13 +635,14 @@ static HICON render_fluent_glyph_icon(UINT codepoint, int size) {
             BYTE green = (BYTE)((pixels[i] >> 8) & 0xFF);
             BYTE red = (BYTE)((pixels[i] >> 16) & 0xFF);
             BYTE alpha = max(red, max(green, blue));
+            alpha = (BYTE)MulDiv(alpha, 210, 255);
             BYTE color = dark ? alpha : 0;
             pixels[i] = ((DWORD)alpha << 24) | ((DWORD)color << 16) |
                         ((DWORD)color << 8) | color;
         }
     }
 
-    maskBitmap = CreateBitmap(size, size, 1, 1, NULL);
+    maskBitmap = create_opaque_icon_mask(size, size);
     if (!maskBitmap) goto cleanup;
     ZeroMemory(&info, sizeof(info));
     info.fIcon = TRUE;
@@ -586,7 +657,7 @@ cleanup:
     if (maskBitmap) DeleteObject(maskBitmap);
     if (colorBitmap) DeleteObject(colorBitmap);
     if (hdc) DeleteDC(hdc);
-    return icon;
+    return menu_own_icon(icon);
 }
 
 static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
@@ -605,7 +676,7 @@ static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
         return render_fluent_glyph_icon(glyphCodepoint, size);
     comma = wcschr(spec, L',');
     if (!comma) {
-        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE|LR_SHARED);
+        return menu_own_icon((HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE));
     }
     // Copy module portion up to (but not including) comma.
     len = (size_t)(comma - spec);
@@ -634,19 +705,19 @@ static HICON load_icon_path_or_module_sized(const WCHAR* spec, int size) {
     if (size > get_small_icon_size()) {
         UINT extractedPrivate = PrivateExtractIconsW(module, idx, size, size, &hLarge, NULL, 1, 0);
         if (extractedPrivate > 0 && hLarge) {
-            return hLarge;
+            return menu_own_icon(hLarge);
         }
     }
     extracted = ExtractIconExW(module, idx, &hLarge, &hSmall, 1);
     if (extracted == 0) {
-        return (HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE|LR_SHARED);
+        return menu_own_icon((HICON)LoadImageW(NULL, spec, IMAGE_ICON, size, size, LR_LOADFROMFILE));
     }
     if (size > get_small_icon_size()) {
-        if (hSmall) DestroyIcon(hSmall);
-        return hLarge;
+        if (hSmall) menu_release_icon(hSmall);
+        return menu_own_icon(hLarge);
     }
-    if (hLarge) DestroyIcon(hLarge);
-    return hSmall;
+    if (hLarge) menu_release_icon(hLarge);
+    return menu_own_icon(hSmall);
 }
 
 static HICON load_icon_path_or_module(const WCHAR* spec) {
@@ -658,15 +729,13 @@ static HICON load_root_icon_path_or_module(const WCHAR* spec) {
 }
 
 static HICON get_system_folder_icon_sized(BOOL large) {
-    static HICON hFolderSmall = NULL;
-    static HICON hFolderLarge = NULL;
     HICON* cache = large ? &hFolderLarge : &hFolderSmall;
     if (*cache) return *cache;
     // Use a fake folder name to ensure we get the standard folder icon, not drive icon
     SHFILEINFOW sfi = {0};
     UINT flags = SHGFI_ICON | SHGFI_USEFILEATTRIBUTES | (large ? SHGFI_LARGEICON : SHGFI_SMALLICON);
     if (SHGetFileInfoW(L"FakeFolderName", FILE_ATTRIBUTE_DIRECTORY, &sfi, sizeof(sfi), flags)) {
-        *cache = sfi.hIcon;
+        *cache = menu_own_icon(sfi.hIcon);
     }
     return *cache;
 }
@@ -700,18 +769,6 @@ static BOOL resolve_filesystem_path_by_command(UINT cmd, WCHAR* outPath, size_t 
     if (mapped && is_filesystem_target(mapped)) {
         lstrcpynW(outPath, mapped, (int)cchOut);
         return TRUE;
-    }
-
-    if (cmd >= IDM_RECENT_BASE && cmd < IDM_RECENT_BASE + 1000 && cmd != IDM_RECENT_BASE + 900) {
-        RecentItem* items = NULL;
-        int n = recent_get_items(&items, g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
-        int idx = (int)(cmd - IDM_RECENT_BASE);
-        if (idx >= 0 && idx < n && items && is_filesystem_target(items[idx].path)) {
-            lstrcpynW(outPath, items[idx].path, (int)cchOut);
-            LocalFree(items);
-            return TRUE;
-        }
-        if (items) LocalFree(items);
     }
 
     UINT id = IDM_DYNAMIC_BASE;
@@ -828,7 +885,7 @@ cleanup:
 }
 
 static void attach_menu_data(HMENU hMenu, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons) {
-    FolderMenuData* data = (FolderMenuData*)LocalAlloc(LMEM_FIXED|LMEM_ZEROINIT, sizeof(FolderMenuData));
+    FolderMenuData* data = (FolderMenuData*)menu_alloc(LMEM_FIXED|LMEM_ZEROINIT, sizeof(FolderMenuData));
     if (!data) return;
     lstrcpynW(data->path, path, ARRAYSIZE(data->path));
     data->depth = depth;
@@ -845,13 +902,149 @@ static HICON get_file_icon_sized(const WCHAR* path, BOOL large) {
     SHFILEINFOW sfi = {0};
     UINT flags = SHGFI_ICON | (large ? SHGFI_LARGEICON : SHGFI_SMALLICON);
     if (SHGetFileInfoW(path, 0, &sfi, sizeof(sfi), flags)) {
-        return sfi.hIcon;
+        return menu_own_icon(sfi.hIcon);
     }
     return NULL;
 }
 
 static HICON get_file_icon(const WCHAR* path) {
     return get_file_icon_sized(path, FALSE);
+}
+
+static HICON get_shell_image_list_icon(const WCHAR* path) {
+    if (!path || !path[0]) return NULL;
+
+    SHFILEINFOW sfi = {0};
+    if (!SHGetFileInfoW(path, 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_SMALLICON)) {
+        return NULL;
+    }
+
+    IImageList* imageList = NULL;
+    HICON hIcon = NULL;
+    if (SUCCEEDED(SHGetImageList(SHIL_SMALL, &IID_IImageList, (void**)&imageList)) && imageList) {
+        IImageList_GetIcon(imageList, sfi.iIcon, ILD_TRANSPARENT, &hIcon);
+        IImageList_Release(imageList);
+    }
+    return menu_own_icon(hIcon);
+}
+
+static BOOL get_window_app_user_model_id(HWND hwnd, WCHAR* out, int cchOut) {
+    if (!out || cchOut <= 0) return FALSE;
+    out[0] = 0;
+
+    IPropertyStore* store = NULL;
+    HRESULT hr = SHGetPropertyStoreForWindow(hwnd, &IID_IPropertyStore, (void**)&store);
+    if (FAILED(hr) || !store) return FALSE;
+
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    BOOL ok = FALSE;
+    if (SUCCEEDED(IPropertyStore_GetValue(store, &PKEY_AppUserModel_ID, &value)) &&
+        value.vt == VT_LPWSTR && value.pwszVal && value.pwszVal[0]) {
+        lstrcpynW(out, value.pwszVal, cchOut);
+        ok = TRUE;
+    }
+    PropVariantClear(&value);
+    IPropertyStore_Release(store);
+    return ok;
+}
+
+static BOOL get_app_user_model_display_name(const WCHAR* appUserModelId, WCHAR* out, int cchOut) {
+    if (!appUserModelId || !appUserModelId[0] || !out || cchOut <= 0) return FALSE;
+    out[0] = 0;
+
+    IShellItem* item = NULL;
+    HRESULT hr = SHCreateItemInKnownFolder(&FOLDERID_AppsFolder, 0, appUserModelId, &IID_IShellItem, (void**)&item);
+    if (FAILED(hr) || !item) return FALSE;
+
+    PWSTR displayName = NULL;
+    BOOL ok = FALSE;
+    if (SUCCEEDED(IShellItem_GetDisplayName(item, SIGDN_NORMALDISPLAY, &displayName)) && displayName && displayName[0]) {
+        lstrcpynW(out, displayName, cchOut);
+        CoTaskMemFree(displayName);
+        ok = TRUE;
+    }
+    IShellItem_Release(item);
+    return ok;
+}
+
+static HBITMAP create_opaque_icon_mask(int cx, int cy) {
+    if (cx <= 0 || cy <= 0) return NULL;
+    int stride = ((cx + 15) / 16) * 2;
+    SIZE_T cb = (SIZE_T)stride * (SIZE_T)cy;
+    BYTE* bits = (BYTE*)calloc(cb, 1);
+    if (!bits) return NULL;
+    HBITMAP hMask = CreateBitmap(cx, cy, 1, 1, bits);
+    free(bits);
+    return hMask;
+}
+
+static HICON hbitmap_to_icon(HBITMAP hBitmap, int cx, int cy) {
+    if (!hBitmap) return NULL;
+    HBITMAP hMask = create_opaque_icon_mask(cx, cy);
+    if (!hMask) return NULL;
+
+    ICONINFO ii = {0};
+    ii.fIcon = TRUE;
+    ii.hbmColor = hBitmap;
+    ii.hbmMask = hMask;
+    HICON hIcon = CreateIconIndirect(&ii);
+    DeleteObject(hMask);
+    return menu_own_icon(hIcon);
+}
+
+static HICON get_app_user_model_icon(const WCHAR* appUserModelId) {
+    if (!appUserModelId || !appUserModelId[0]) return NULL;
+
+    IShellItemImageFactory* factory = NULL;
+    HRESULT hr = SHCreateItemInKnownFolder(&FOLDERID_AppsFolder, 0, appUserModelId, &IID_IShellItemImageFactory, (void**)&factory);
+    if (FAILED(hr) || !factory) return NULL;
+
+    int size = get_small_icon_size();
+    SIZE sz = { size, size };
+    HBITMAP hBitmap = NULL;
+    HICON hIcon = NULL;
+    if (SUCCEEDED(IShellItemImageFactory_GetImage(factory, sz, SIIGBF_ICONONLY, &hBitmap)) && hBitmap) {
+        hIcon = hbitmap_to_icon(hBitmap, size, size);
+        DeleteObject(hBitmap);
+    }
+    IShellItemImageFactory_Release(factory);
+    return menu_own_icon(hIcon);
+}
+
+static const WCHAR* get_known_task_app_user_model_id(const WCHAR* displayName) {
+    if (!displayName || !displayName[0]) return NULL;
+    if (!lstrcmpiW(displayName, L"About Windows") || !lstrcmpiW(displayName, L"Winver UWP"))
+        return L"2505FireCubeStudios.WinverUWP_k45w5yt88e21j!App";
+    if (!lstrcmpiW(displayName, L"Windows Security"))
+        return L"Microsoft.SecHealthUI_8wekyb3d8bbwe!SecHealthUI";
+    if (!lstrcmpiW(displayName, L"Camera") || !lstrcmpiW(displayName, L"Windows Camera"))
+        return L"Microsoft.WindowsCamera_8wekyb3d8bbwe!App";
+    if (!lstrcmpiW(displayName, L"Photos") ||
+        !lstrcmpiW(displayName, L"Microsoft Photos") ||
+        !lstrcmpiW(displayName, L"Photos.exe") ||
+        !lstrcmpiW(displayName, L"Microsoft.Photos.exe"))
+        return L"Microsoft.Windows.Photos_8wekyb3d8bbwe!App";
+    if (!lstrcmpiW(displayName, L"Sound Recorder") ||
+        !lstrcmpiW(displayName, L"Windows Sound Recorder") ||
+        !lstrcmpiW(displayName, L"Voice Recorder"))
+        return L"Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe!App";
+    if (!lstrcmpiW(displayName, L"Microsoft Store") || !lstrcmpiW(displayName, L"Store"))
+        return L"Microsoft.WindowsStore_8wekyb3d8bbwe!App";
+    if (!lstrcmpiW(displayName, L"Microsoft To Do") || !lstrcmpiW(displayName, L"To Do"))
+        return L"Microsoft.Todos_8wekyb3d8bbwe!App";
+    if (!lstrcmpiW(displayName, L"Settings") || !lstrcmpiW(displayName, L"System Settings"))
+        return L"windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel";
+    if (!lstrcmpiW(displayName, L"XBOX") || !lstrcmpiW(displayName, L"Xbox"))
+        return L"Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App";
+    return NULL;
+}
+
+static void normalize_taskkill_label(WCHAR* label, int cchLabel) {
+    if (!label || cchLabel <= 0) return;
+    if (!lstrcmpiW(label, L"Winver UWP")) {
+        lstrcpynW(label, L"About Windows", cchLabel);
+    }
 }
 
 static BOOL recent_item_is_folder(const RecentItem* item) {
@@ -866,7 +1059,13 @@ static void append_recent_item_to_menu(HMENU sub, const RecentItem* items, int i
     if (g_cfg.recentLabelMode == 1) {
         const WCHAR* p = wcsrchr(items[i].path, L'\\');
         const WCHAR* name = p ? p + 1 : items[i].path;
-        lstrcpynW(text, name, ARRAYSIZE(text));
+        // PathFindFileName-style logic produces an empty leaf for a drive
+        // root. Keep the root itself visible (for example, C:\\).
+        if (!name[0] && p && p > items[i].path && p[-1] == L':') {
+            lstrcpynW(text, items[i].path, ARRAYSIZE(text));
+        } else {
+            lstrcpynW(text, name, ARRAYSIZE(text));
+        }
         BOOL stripExt = FALSE;
         if (!g_cfg.recentShowExtensions) stripExt = TRUE;
         else if (!g_cfg.showExtensions) stripExt = TRUE;
@@ -878,11 +1077,17 @@ static void append_recent_item_to_menu(HMENU sub, const RecentItem* items, int i
         lstrcpynW(text, items[i].path, ARRAYSIZE(text));
     }
     AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + i, text);
-    if (g_cfg.recentShowIcons) {
+    map_add(IDM_RECENT_BASE + i, items[i].path);
+    if (should_show_item_icon(recent_item_is_folder(&items[i]), FALSE)) {
         HICON hIcon = get_file_icon(items[i].path);
         if (hIcon) {
             add_item_icon(IDM_RECENT_BASE + i, hIcon);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+            if (should_show_item_icon(recent_item_is_folder(&items[i]), FALSE) &&
+                (g_cfg.menuStyle == STYLE_LEGACY
+#ifdef ENABLE_MODERN_STYLE
+                 || g_cfg.menuStyle == STYLE_MODERN
+#endif
+                )) {
                 assign_legacy_item_bitmap(sub, IDM_RECENT_BASE + i, hIcon);
             }
         }
@@ -893,10 +1098,10 @@ static HMENU build_recent_submenu(void) {
     HMENU sub = CreatePopupMenu();
     RecentItem* items = NULL;
     int maxItems = (g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
-    int n = recent_get_items(&items, maxItems);
+    int n = recent_get_items(&items, maxItems, g_cfg.recentHideProtocolShortcuts);
     if (n <= 0) {
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
-        if (items) LocalFree(items);
+        if (items) menu_free(items);
         if (g_cfg.recentShowCleanItems) {
             AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
             AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + 900, L"Clear Recent Items list");
@@ -926,7 +1131,7 @@ static HMENU build_recent_submenu(void) {
             append_recent_item_to_menu(sub, items, i);
         }
     }
-    if (items) LocalFree(items);
+    if (items) menu_free(items);
     if (g_cfg.recentShowCleanItems) {
         AppendMenuW(sub, MF_SEPARATOR, 0, NULL);
         AppendMenuW(sub, MF_STRING, IDM_RECENT_BASE + 900, L"Clear Recent Items list");
@@ -956,7 +1161,7 @@ static int compare_files(const void* a, const void* b) {
     const FileItem* fa = (const FileItem*)a;
     const FileItem* fb = (const FileItem*)b;
 
-    // Object type priority logic
+    // Override sort order logic
     if (g_cfg.sortObjectTypePriority == 1) { // Folders first
         if (fa->isDir && !fb->isDir) return -1;
         if (!fa->isDir && fb->isDir) return 1;
@@ -1001,8 +1206,10 @@ static int compare_files(const void* a, const void* b) {
     return res;
 }
 
-static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons, BOOL useLargeRootIcons) {
+static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, int depth, int offset, BOOL forceLinks, BOOL allowMixedIcons, BOOL useLargeRootIcons, BOOL honorFolderModeAtRoot) {
     WIN32_FIND_DATAW fd; WCHAR pattern[MAX_PATH];
+    ULONGLONG deadline = GetTickCount64() + FOLDER_ENUM_BUDGET_MS;
+    BOOL timedOut = FALSE;
     PathCombineW(pattern, path, L"*");
     HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     if (h == INVALID_HANDLE_VALUE) {
@@ -1016,6 +1223,11 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
     int capacity = 0;
 
     do {
+        if (GetTickCount64() > deadline) {
+            timedOut = TRUE;
+            break;
+        }
+
         if (!lstrcmpW(fd.cFileName, L".") || !lstrcmpW(fd.cFileName, L"..")) continue;
         BOOL isDot = (fd.cFileName[0] == L'.');
         if (!g_cfg.showHidden && (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)) {
@@ -1030,10 +1242,11 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
 
         if (count >= capacity) {
             capacity = (capacity == 0) ? 16 : capacity * 2;
-            FileItem* newItems = (FileItem*)LocalAlloc(LMEM_FIXED, capacity * sizeof(FileItem));
+            FileItem* newItems = (FileItem*)menu_alloc(LMEM_FIXED, (SIZE_T)capacity * sizeof(FileItem));
+            if (!newItems) { FindClose(h); menu_free(items); return 0; }
             if (items) {
                 memcpy(newItems, items, count * sizeof(FileItem));
-                LocalFree(items);
+                menu_free(items);
             }
             items = newItems;
         }
@@ -1051,7 +1264,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
 
     if (count == 0) {
         InsertMenuW(hMenu, insertPos, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(Empty)");
-        if (items) LocalFree(items);
+        if (items) menu_free(items);
         return 1;
     }
 
@@ -1084,20 +1297,22 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 mii.dwTypeData = name;
                 mii.hSubMenu = sub;
                 mii.wID = folderId;
-                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+                mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
 
-                if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
+                if (honorFolderModeAtRoot ? should_show_inline_folder_content_icon(TRUE) : should_show_item_icon(TRUE, useLargeRootIcons)) {
                     HICON hFolder = useLargeRootIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     if (hFolder) {
-                        if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY) {
                             if (useLargeRootIcons && use_legacy_root_large_icon_layout()) add_item_icon(folderId, hFolder);
                             else if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, folderId, hFolder, get_root_icon_size());
                             else assign_legacy_item_bitmap(hMenu, folderId, hFolder);
 #ifdef ENABLE_MODERN_STYLE
                         } else if (g_cfg.menuStyle == STYLE_MODERN) {
                             add_item_icon(folderId, hFolder);
+                            if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, folderId, hFolder, get_root_icon_size());
+                            else assign_legacy_item_bitmap(hMenu, folderId, hFolder);
 #endif
                         }
                     }
@@ -1107,21 +1322,23 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
                 mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
                 mii.dwTypeData = name;
                 mii.wID = g_nextFolderId++;
-                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+                mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
                 map_add(mii.wID, items[i].fullPath);
 
-                if (g_cfg.showIcons != 0 && g_cfg.showFolderIcons) {
+                if (honorFolderModeAtRoot ? should_show_inline_folder_content_icon(TRUE) : should_show_item_icon(TRUE, useLargeRootIcons)) {
                     HICON hFolder = useLargeRootIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     if (hFolder) {
-                        if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
+                        if (g_cfg.menuStyle == STYLE_LEGACY) {
                             if (useLargeRootIcons && use_legacy_root_large_icon_layout()) add_item_icon(mii.wID, hFolder);
                             else if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, mii.wID, hFolder, get_root_icon_size());
                             else assign_legacy_item_bitmap(hMenu, mii.wID, hFolder);
 #ifdef ENABLE_MODERN_STYLE
                         } else if (g_cfg.menuStyle == STYLE_MODERN) {
                             add_item_icon(mii.wID, hFolder);
+                            if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, mii.wID, hFolder, get_root_icon_size());
+                            else assign_legacy_item_bitmap(hMenu, mii.wID, hFolder);
 #endif
                         }
                     }
@@ -1133,26 +1350,33 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
             mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
             mii.dwTypeData = name;
             mii.wID = g_nextFolderId++;
-            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
+            mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(items[i].fullPath) + 1) * sizeof(WCHAR));
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, items[i].fullPath);
             InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
             map_add(mii.wID, items[i].fullPath);
 
-            if (g_cfg.showFileIcons && g_cfg.showIcons != 0) {
+            if (honorFolderModeAtRoot ? should_show_inline_folder_content_icon(FALSE) : should_show_item_icon(FALSE, useLargeRootIcons)) {
                 HICON hFile = get_file_icon_sized(items[i].fullPath, useLargeRootIcons);
                 if (hFile) {
-                    if (g_cfg.menuStyle == STYLE_LEGACY && (g_cfg.showIcons == 1 || (g_cfg.showIcons == 2 && allowMixedIcons))) {
+                    if (g_cfg.menuStyle == STYLE_LEGACY) {
                         if (useLargeRootIcons && use_legacy_root_large_icon_layout()) add_item_icon(mii.wID, hFile);
                         else if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, mii.wID, hFile, get_root_icon_size());
                         else assign_legacy_item_bitmap(hMenu, mii.wID, hFile);
 #ifdef ENABLE_MODERN_STYLE
                     } else if (g_cfg.menuStyle == STYLE_MODERN) {
                         add_item_icon(mii.wID, hFile);
+                        if (useLargeRootIcons) assign_menu_item_bitmap_sized(hMenu, mii.wID, hFile, get_root_icon_size());
+                        else assign_legacy_item_bitmap(hMenu, mii.wID, hFile);
 #endif
                     }
                 }
             }
         }
+        added++;
+    }
+
+    if (timedOut) {
+        InsertMenuW(hMenu, insertPos + added, MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, L"(More items unavailable)");
         added++;
     }
 
@@ -1173,7 +1397,7 @@ static int fill_menu_with_folder(HMENU hMenu, int insertPos, const WCHAR* path, 
         added++;
     }
 
-    if (items) LocalFree(items);
+    if (items) menu_free(items);
     return added;
 }
 
@@ -1194,7 +1418,14 @@ static void populate_folder_menu(HMENU parent, const FolderMenuData* data) {
         while (GetMenuItemCount(parent) > 0) DeleteMenu(parent, 0, MF_BYPOSITION);
     }
 
-    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset, data->forceLinks, data->allowMixedIcons, FALSE);
+    fill_menu_with_folder(parent, GetMenuItemCount(parent), data->path, data->depth, data->offset, data->forceLinks, data->allowMixedIcons, FALSE, FALSE);
+}
+
+static HICON get_window_icon_bounded(HWND hwnd, WPARAM kind) {
+    DWORD_PTR result = 0;
+    SendMessageTimeoutW(hwnd, WM_GETICON, kind, 0,
+        SMTO_ABORTIFHUNG | SMTO_BLOCK, 25, &result);
+    return (HICON)result; // borrowed; caller copies it
 }
 
 typedef struct TaskKillData {
@@ -1208,11 +1439,47 @@ typedef struct TaskKillData {
     int excludeCount;
     BOOL listWindows;
     BOOL allDesktops;
+    BOOL showProcessIds;
     WCHAR addedNames[64][64];
     int addedNamesCount;
 } TaskKillData;
 
 static HICON load_icon_path_or_module(const WCHAR* spec);
+
+static WCHAR* find_taskkill_exclude_separator(WCHAR* value) {
+    WCHAR* comma = wcschr(value, L',');
+    WCHAR* semicolon = wcschr(value, L';');
+    if (!comma) return semicolon;
+    if (!semicolon) return comma;
+    return comma < semicolon ? comma : semicolon;
+}
+
+static WCHAR* trim_taskkill_exclude(WCHAR* value) {
+    while (*value == L' ' || *value == L'\t') value++;
+    int length = lstrlenW(value);
+    while (length > 0 && (value[length - 1] == L' ' || value[length - 1] == L'\t')) {
+        value[--length] = 0;
+    }
+    return value;
+}
+
+static BOOL is_taskkill_process_excluded(const TaskKillData* data, const WCHAR* executableName) {
+    if (!data || !executableName || !executableName[0] || !data->excludes) return FALSE;
+
+    WCHAR nameWithoutExtension[MAX_PATH];
+    lstrcpynW(nameWithoutExtension, executableName, ARRAYSIZE(nameWithoutExtension));
+    WCHAR* extension = wcsrchr(nameWithoutExtension, L'.');
+    if (extension && lstrcmpiW(extension, L".exe") == 0) *extension = 0;
+
+    for (int i = 0; i < data->excludeCount; i++) {
+        const WCHAR* excluded = data->excludes[i];
+        if (excluded && (lstrcmpiW(excluded, executableName) == 0 ||
+                         lstrcmpiW(excluded, nameWithoutExtension) == 0)) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
 
 static BOOL is_user_visible_window(HWND hwnd, BOOL allowCloakedShell) {
     if (!IsWindowVisible(hwnd)) return FALSE;
@@ -1270,17 +1537,33 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
             }
         }
 
-        if (data->excludeCount > 0 && data->excludes) {
-            for (int i = 0; i < data->excludeCount; i++) {
-                if (lstrcmpiW(title, data->excludes[i]) == 0) return TRUE;
-            }
-        }
-
         DWORD pid = 0;
         GetWindowThreadProcessId(hwnd, &pid);
+        WCHAR appUserModelId[256] = L"";
+        WCHAR appDisplayName[256] = L"";
+        if (get_window_app_user_model_id(hwnd, appUserModelId, ARRAYSIZE(appUserModelId))) {
+            get_app_user_model_display_name(appUserModelId, appDisplayName, ARRAYSIZE(appDisplayName));
+        }
+        WCHAR exePathForIcon[MAX_PATH] = L"";
+        WCHAR exeNameForIcon[MAX_PATH] = L"";
+        HANDLE hIconProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (hIconProcess) {
+            DWORD iconPathSize = ARRAYSIZE(exePathForIcon);
+            if (QueryFullProcessImageNameW(hIconProcess, 0, exePathForIcon, &iconPathSize)) {
+                lstrcpynW(exeNameForIcon, PathFindFileNameW(exePathForIcon), ARRAYSIZE(exeNameForIcon));
+            }
+            CloseHandle(hIconProcess);
+        }
+        if (is_taskkill_process_excluded(data, exeNameForIcon)) return TRUE;
         
         WCHAR label[256];
         lstrcpynW(label, title, ARRAYSIZE(label));
+        if (appDisplayName[0] &&
+            (lstrcmpiW(label, L"ApplicationFrameHost") == 0 ||
+             lstrcmpiW(label, L"ApplicationFrameWindow") == 0 ||
+             lstrcmpiW(label, cls) == 0)) {
+            lstrcpynW(label, appDisplayName, ARRAYSIZE(label));
+        }
 
         if (!data->listWindows) {
             HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -1307,6 +1590,12 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                     // For ApplicationFrameHost (UWP apps), always use window title - skip FileDescription
                     if (isFrameHost) {
                         lstrcpynW(label, title, ARRAYSIZE(label));
+                        if (appDisplayName[0] &&
+                            (lstrcmpiW(label, L"ApplicationFrameHost") == 0 ||
+                             lstrcmpiW(label, L"ApplicationFrameWindow") == 0 ||
+                             lstrcmpiW(label, cls) == 0)) {
+                            lstrcpynW(label, appDisplayName, ARRAYSIZE(label));
+                        }
                     } else {
                         // Try to get File Description
                         DWORD handle;
@@ -1327,7 +1616,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                                         // Read the file description for each language and code page.
                                         for( unsigned int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
                                             WCHAR subBlock[50];
-                                            wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
+                                            StringCchPrintfW(subBlock, ARRAYSIZE(subBlock), L"\\StringFileInfo\\%04x%04x\\FileDescription", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
                                             
                                             WCHAR* description = NULL;
                                             UINT descLen = 0;
@@ -1378,7 +1667,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         WCHAR cmd[MAX_PATH + 16];
         if (data->listWindows) {
             // Windows mode: kill specific PID
-            wsprintfW(cmd, L"TASKKILL:%u", pid);
+            StringCchPrintfW(cmd, ARRAYSIZE(cmd), L"TASKKILL:%u", pid);
         } else {
             // Apps mode: kill all processes with this executable name
             // Exception: ApplicationFrameHost (UWP container) - kill by PID only
@@ -1390,26 +1679,68 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                     WCHAR* exeName = PathFindFileNameW(exePath);
                     if (lstrcmpiW(exeName, L"ApplicationFrameHost.exe") == 0) {
                         // UWP apps: kill only this specific instance
-                        wsprintfW(cmd, L"TASKKILL:%u", pid);
+                        StringCchPrintfW(cmd, ARRAYSIZE(cmd), L"TASKKILL:%u", pid);
                     } else {
                         // Regular apps: kill all instances with same exe name
-                        wsprintfW(cmd, L"TASKKILL:EXE:%s", exeName);
+                        StringCchPrintfW(cmd, ARRAYSIZE(cmd), L"TASKKILL:EXE:%s", exeName);
                     }
                 } else {
-                    wsprintfW(cmd, L"TASKKILL:%u", pid);
+                    StringCchPrintfW(cmd, ARRAYSIZE(cmd), L"TASKKILL:%u", pid);
                 }
                 CloseHandle(hProc);
             } else {
-                wsprintfW(cmd, L"TASKKILL:%u", pid);
+                StringCchPrintfW(cmd, ARRAYSIZE(cmd), L"TASKKILL:%u", pid);
             }
+        }
+
+        normalize_taskkill_label(label, ARRAYSIZE(label));
+        if (data->showProcessIds) {
+            WCHAR processLabel[ARRAYSIZE(label)];
+            const int suffixCapacity = 20;
+            if (lstrlenW(label) > (int)ARRAYSIZE(label) - suffixCapacity) {
+                label[ARRAYSIZE(label) - suffixCapacity] = 0;
+            }
+            StringCchPrintfW(processLabel, ARRAYSIZE(processLabel), L"%s  (PID %u)", label, pid);
+            lstrcpynW(label, processLabel, ARRAYSIZE(label));
         }
         
         AppendMenuW(data->hMenu, MF_STRING, *data->pId, label);
         
         if (data->showIcons) {
             HICON hIcon = NULL;
+            BOOL destroySourceIcon = FALSE;
+            BOOL isFrameHostForIcon = (lstrcmpiW(exeNameForIcon, L"ApplicationFrameHost.exe") == 0);
             if (isExplorer && !data->listWindows) {
                 hIcon = load_icon_path_or_module(L"imageres.dll,-5325");
+                destroySourceIcon = hIcon != NULL;
+            }
+
+            if (!hIcon) {
+                const WCHAR* knownAppUserModelId = get_known_task_app_user_model_id(label);
+                if (!knownAppUserModelId && appDisplayName[0]) {
+                    knownAppUserModelId = get_known_task_app_user_model_id(appDisplayName);
+                }
+                if (!knownAppUserModelId && title[0]) {
+                    knownAppUserModelId = get_known_task_app_user_model_id(title);
+                }
+                if (!knownAppUserModelId && exeNameForIcon[0]) {
+                    knownAppUserModelId = get_known_task_app_user_model_id(exeNameForIcon);
+                }
+                if (knownAppUserModelId) {
+                    hIcon = get_app_user_model_icon(knownAppUserModelId);
+                    destroySourceIcon = hIcon != NULL;
+                }
+            }
+
+            if (!hIcon && !isFrameHostForIcon && exePathForIcon[0]) {
+                hIcon = get_shell_image_list_icon(exePathForIcon);
+                if (!hIcon) hIcon = get_file_icon(exePathForIcon);
+                destroySourceIcon = hIcon != NULL;
+            }
+
+            if (!hIcon && isFrameHostForIcon && appUserModelId[0]) {
+                hIcon = get_app_user_model_icon(appUserModelId);
+                destroySourceIcon = hIcon != NULL;
             }
 
             if (!hIcon) {
@@ -1420,9 +1751,9 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                         // Try CoreWindow first
                         HWND hChild = FindWindowExW(hwnd, NULL, L"Windows.UI.Core.CoreWindow", NULL);
                         if (hChild) {
-                            hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_SMALL, 0);
+                            hIcon = (HICON)get_window_icon_bounded(hChild, ICON_SMALL);
                             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICONSM);
-                            if (!hIcon) hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_BIG, 0);
+                            if (!hIcon) hIcon = (HICON)get_window_icon_bounded(hChild, ICON_BIG);
                             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICON);
                         }
                         
@@ -1430,7 +1761,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                         if (!hIcon) {
                             hChild = NULL;
                             while ((hChild = FindWindowExW(hwnd, hChild, NULL, NULL)) != NULL) {
-                                hIcon = (HICON)SendMessageW(hChild, WM_GETICON, ICON_SMALL, 0);
+                                hIcon = (HICON)get_window_icon_bounded(hChild, ICON_SMALL);
                                 if (hIcon) break;
                                 hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICONSM);
                                 if (hIcon) break;
@@ -1440,21 +1771,28 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                         // Fallback: extract from imageres.dll for generic app icon
                         if (!hIcon) {
                             hIcon = load_icon_path_or_module(L"imageres.dll,-102");
+                            destroySourceIcon = hIcon != NULL;
                         }
                     }
                 }
             }
 
-            if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
+            if (!hIcon) hIcon = (HICON)get_window_icon_bounded(hwnd, ICON_SMALL);
             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
-            if (!hIcon) hIcon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);
+            if (!hIcon) hIcon = (HICON)get_window_icon_bounded(hwnd, ICON_BIG);
             if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
 
             if (hIcon) {
-                HICON hCopy = CopyIcon(hIcon);
+                HICON hCopy = menu_own_icon(CopyIcon(hIcon));
+                if (destroySourceIcon) menu_release_icon(hIcon);
                 if (hCopy) {
                     add_item_icon(*data->pId, hCopy);
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons) {
+                    if (g_cfg.showIcons &&
+                        (g_cfg.menuStyle == STYLE_LEGACY
+#ifdef ENABLE_MODERN_STYLE
+                         || g_cfg.menuStyle == STYLE_MODERN
+#endif
+                        )) {
                         assign_legacy_item_bitmap(data->hMenu, *data->pId, hCopy);
                     }
                 }
@@ -1469,11 +1807,13 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
-static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows, BOOL allDesktops) {
+static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIcons, WCHAR** excludes, int excludeCount, BOOL listWindows, BOOL allDesktops, BOOL showProcessIds) {
     HMENU sub = CreatePopupMenu();
     UINT id = IDM_TASKKILL_BASE;
-    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, allDesktops, {{0}}, 0 };
+    TaskKillData data = { sub, 0, maxItems, &id, ignoreSystem, showIcons, excludes, excludeCount, listWindows, allDesktops, showProcessIds, {{0}}, 0 };
+    HRESULT hrCo = CoInitialize(NULL);
     EnumWindows(EnumWindowsProc, (LPARAM)&data);
+    if (SUCCEEDED(hrCo)) CoUninitialize();
     if (data.count == 0) {
         AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(None)");
     }
@@ -1482,6 +1822,189 @@ static HMENU build_taskkill_submenu(int maxItems, BOOL ignoreSystem, BOOL showIc
 
 // GUID for shell:UsersFilesFolder {59031a47-3f72-44a7-89c5-5595fe6b30ee}
 static const GUID CLSID_UsersFilesFolder = { 0x59031a47, 0x3f72, 0x44a7, { 0x89, 0xc5, 0x55, 0x95, 0xfe, 0x6b, 0x30, 0xee } };
+
+typedef struct HomeKnownFolderSpec {
+    const KNOWNFOLDERID* id;
+    const WCHAR* fallbackLabel;
+} HomeKnownFolderSpec;
+
+static void home_normalize_compare_path(const WCHAR* input, WCHAR* output, UINT cchOutput) {
+    if (!output || cchOutput == 0) return;
+    output[0] = 0;
+    if (!input || !input[0]) return;
+
+    DWORD n = GetFullPathNameW(input, cchOutput, output, NULL);
+    if (n == 0 || n >= cchOutput) {
+        lstrcpynW(output, input, cchOutput);
+    }
+
+    PathRemoveBackslashW(output);
+}
+
+static BOOL home_path_exists_in_list(const WCHAR existing[][MAX_PATH], int count, const WCHAR* path) {
+    WCHAR normalized[MAX_PATH];
+    home_normalize_compare_path(path, normalized, ARRAYSIZE(normalized));
+    if (!normalized[0]) return FALSE;
+
+    for (int i = 0; i < count; ++i) {
+        if (!lstrcmpiW(existing[i], normalized)) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL home_is_outside_profile_root(const WCHAR* profileRoot, const WCHAR* folderPath) {
+    WCHAR normalizedProfile[MAX_PATH];
+    WCHAR normalizedFolder[MAX_PATH];
+    WCHAR profileWithSlash[MAX_PATH];
+
+    home_normalize_compare_path(profileRoot, normalizedProfile, ARRAYSIZE(normalizedProfile));
+    home_normalize_compare_path(folderPath, normalizedFolder, ARRAYSIZE(normalizedFolder));
+    if (!normalizedProfile[0] || !normalizedFolder[0]) return FALSE;
+    if (!lstrcmpiW(normalizedProfile, normalizedFolder)) return FALSE;
+
+    lstrcpynW(profileWithSlash, normalizedProfile, ARRAYSIZE(profileWithSlash));
+    if (!PathAddBackslashW(profileWithSlash)) return FALSE;
+    return !PathIsPrefixW(profileWithSlash, normalizedFolder);
+}
+
+static BOOL is_visible_dotfile_name(const WCHAR* name, BOOL isFolder) {
+    if (!name || name[0] != L'.') return TRUE;
+    if (g_cfg.dotMode == 0) return FALSE;
+    if (isFolder && g_cfg.dotMode == 1) return FALSE;
+    if (!isFolder && g_cfg.dotMode == 2) return FALSE;
+    return TRUE;
+}
+
+static BOOL home_append_path_item(HMENU hMenu, int insertPos, BOOL isSubmenu, const WCHAR* name, const WCHAR* path, int* pAdded) {
+    if (!hMenu || !name || !name[0] || !path || !path[0] || !pAdded) return FALSE;
+    if (!PathFileExistsW(path)) return FALSE;
+
+    BOOL isFolder = PathIsDirectoryW(path);
+    const WCHAR* leaf = PathFindFileNameW(path);
+    if (!is_visible_dotfile_name(leaf, isFolder)) return FALSE;
+    WCHAR displayName[MAX_PATH];
+    lstrcpynW(displayName, name, ARRAYSIZE(displayName));
+    if (!isFolder && !g_cfg.showExtensions) get_name_from_path(path, displayName, ARRAYSIZE(displayName));
+    BOOL asSubmenu = (g_cfg.homeItemsAsSubmenus && isFolder);
+
+    if (asSubmenu) {
+        HMENU sub = CreatePopupMenu();
+        AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
+        attach_menu_data(sub, path, 1, 0, FALSE, TRUE);
+
+        MENUITEMINFOW mii = { sizeof(mii) };
+        mii.fMask = MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
+        mii.dwTypeData = displayName;
+        mii.hSubMenu = sub;
+        mii.wID = g_nextFolderId++;
+        mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+        if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
+        InsertMenuItemW(hMenu, insertPos + *pAdded, TRUE, &mii);
+    } else {
+        MENUITEMINFOW mii = { sizeof(mii) };
+        mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
+        mii.dwTypeData = displayName;
+        mii.wID = g_nextFolderId++;
+        mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+        if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
+        map_add(mii.wID, path);
+        InsertMenuItemW(hMenu, insertPos + *pAdded, TRUE, &mii);
+    }
+
+    BOOL allowIcons = should_show_item_icon(isFolder, !isSubmenu);
+    if (allowIcons) {
+        HICON hIcon = NULL;
+        SHFILEINFOW sfi = {0};
+        if (SHGetFileInfoW(path, 0, &sfi, sizeof(sfi), SHGFI_ICON | (isSubmenu ? SHGFI_SMALLICON : SHGFI_LARGEICON))) {
+            hIcon = menu_own_icon(sfi.hIcon);
+        }
+        if (!hIcon) {
+            hIcon = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
+        }
+
+        if (hIcon) {
+            add_item_icon(g_nextFolderId - 1, hIcon);
+            if (g_cfg.menuStyle == STYLE_LEGACY) {
+                if (!isSubmenu && use_legacy_root_large_icon_layout()) {
+                    // Owner-drawn root menu reads icon from g_itemIcons.
+                } else if (asSubmenu) {
+                    int pos = insertPos + *pAdded;
+                    assign_menu_pos_bitmap_sized(hMenu, pos, hIcon, isSubmenu ? get_small_icon_size() : get_root_icon_size());
+                } else {
+                    if (isSubmenu) assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                    else assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
+                }
+#ifdef ENABLE_MODERN_STYLE
+            } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                if (asSubmenu) {
+                    int pos = insertPos + *pAdded;
+                    assign_menu_pos_bitmap_sized(hMenu, pos, hIcon, isSubmenu ? get_small_icon_size() : get_root_icon_size());
+                } else if (isSubmenu) {
+                    assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                } else {
+                    assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
+                }
+#endif
+            }
+        }
+    }
+
+    (*pAdded)++;
+    return TRUE;
+}
+
+typedef struct HomeMenuEntry {
+    FileItem file;
+    MENUITEMINFOW menuItem;
+    WCHAR label[MAX_PATH];
+} HomeMenuEntry;
+
+static int compare_home_menu_entries(const void* a, const void* b) {
+    const HomeMenuEntry* left = (const HomeMenuEntry*)a;
+    const HomeMenuEntry* right = (const HomeMenuEntry*)b;
+    return compare_files(&left->file, &right->file);
+}
+
+static void sort_home_menu_items(HMENU hMenu, int insertPos, int count) {
+    if (!hMenu || count < 2) return;
+
+    HomeMenuEntry* entries = (HomeMenuEntry*)menu_alloc(LPTR, sizeof(HomeMenuEntry) * count);
+    if (!entries) return;
+
+    for (int i = 0; i < count; ++i) {
+        MENUITEMINFOW* mii = &entries[i].menuItem;
+        mii->cbSize = sizeof(*mii);
+        mii->fMask = MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_SUBMENU | MIIM_DATA | MIIM_STRING | MIIM_BITMAP | MIIM_CHECKMARKS;
+        mii->dwTypeData = entries[i].label;
+        mii->cch = ARRAYSIZE(entries[i].label);
+        if (!GetMenuItemInfoW(hMenu, insertPos + i, TRUE, mii)) continue;
+
+        lstrcpynW(entries[i].file.name, entries[i].label, ARRAYSIZE(entries[i].file.name));
+        const WCHAR* path = (const WCHAR*)mii->dwItemData;
+        if (path && path[0]) {
+            lstrcpynW(entries[i].file.fullPath, path, ARRAYSIZE(entries[i].file.fullPath));
+            WIN32_FILE_ATTRIBUTE_DATA attributes;
+            if (GetFileAttributesExW(path, GetFileExInfoStandard, &attributes)) {
+                entries[i].file.isDir = (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                entries[i].file.ftLastWrite = attributes.ftLastWriteTime;
+                entries[i].file.ftCreation = attributes.ftCreationTime;
+                entries[i].file.fileSize = ((unsigned long long)attributes.nFileSizeHigh << 32) | attributes.nFileSizeLow;
+            }
+        } else {
+            entries[i].file.isDir = mii->hSubMenu != NULL;
+        }
+    }
+
+    qsort(entries, count, sizeof(HomeMenuEntry), compare_home_menu_entries);
+    for (int i = count - 1; i >= 0; --i) RemoveMenu(hMenu, insertPos + i, MF_BYPOSITION);
+    for (int i = 0; i < count; ++i) {
+        entries[i].menuItem.dwTypeData = entries[i].label;
+        entries[i].menuItem.cch = lstrlenW(entries[i].label);
+        InsertMenuItemW(hMenu, insertPos + i, TRUE, &entries[i].menuItem);
+    }
+
+    menu_free(entries);
+}
 
 static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
     CoInitialize(NULL);
@@ -1523,6 +2046,8 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
     LPITEMIDLIST pidlItem = NULL;
     ULONG fetched = 0;
     int added = 0;
+    WCHAR existingPaths[64][MAX_PATH];
+    int existingPathCount = 0;
 
     while (pEnum->lpVtbl->Next(pEnum, 1, &pidlItem, &fetched) == S_OK && fetched == 1) {
         STRRET str;
@@ -1546,7 +2071,20 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
         pUsersFiles->lpVtbl->GetAttributesOf(pUsersFiles, 1, (LPCITEMIDLIST*)&pidlItem, &attribs);
         BOOL isFolder = (attribs & SFGAO_FOLDER);
 
+        if (!is_visible_dotfile_name(path[0] ? PathFindFileNameW(path) : name, isFolder)) {
+            CoTaskMemFree(pidlItem);
+            pidlItem = NULL;
+            continue;
+        }
+        if (path[0] && !isFolder && !g_cfg.showExtensions) {
+            get_name_from_path(path, name, ARRAYSIZE(name));
+        }
+
         if (name[0]) {
+            if (path[0] && existingPathCount < (int)ARRAYSIZE(existingPaths)) {
+                home_normalize_compare_path(path, existingPaths[existingPathCount], ARRAYSIZE(existingPaths[existingPathCount]));
+                if (existingPaths[existingPathCount][0]) existingPathCount++;
+            }
             // Determine if we should show as submenu
             BOOL asSubmenu = (isFolder && g_cfg.homeItemsAsSubmenus && path[0] && PathFileExistsW(path));
 
@@ -1560,7 +2098,7 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
                 mii.dwTypeData = name;
                 mii.hSubMenu = sub;
                 mii.wID = g_nextFolderId++;
-                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+                mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
             } else {
@@ -1569,34 +2107,36 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
                 mii.dwTypeData = name;
                 mii.wID = g_nextFolderId++;
                 if (path[0]) {
-                    mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
+                    mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(path) + 1) * sizeof(WCHAR));
                     if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, path);
                     map_add(mii.wID, path);
                 }
                 InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
             }
 
-            // Icon
-            // Determine whether icons are allowed for this item:
-            // - If we're populating a submenu (`isSubmenu`==TRUE), allow icons when HomeShowIcons is enabled and ShowIcons != 0.
-            // - If we're populating the root menu, only allow icons when HomeShowIcons is enabled and ShowIcons == 1 (legacy).
-            BOOL allowIcons = FALSE;
-            if (g_cfg.homeShowIcons) {
-                if (isSubmenu) {
-                    if (g_cfg.showIcons != 0) allowIcons = TRUE;
-                } else {
-                    if (g_cfg.showIcons == 1) allowIcons = TRUE;
-                }
-            }
+            // HOME follows the same type-aware policy as normal folder entries.
+            BOOL allowIcons = should_show_item_icon(isFolder, !isSubmenu);
             if (allowIcons) {
                 HICON hIcon = NULL;
-                LPITEMIDLIST pidlAbs = ILCombine(pidlUsersFiles, pidlItem);
-                SHFILEINFOW sfi = {0};
                 UINT flags = SHGFI_PIDL | SHGFI_ICON | (isSubmenu ? SHGFI_SMALLICON : SHGFI_LARGEICON);
-                if (SHGetFileInfoW((LPCWSTR)pidlAbs, 0, &sfi, sizeof(sfi), flags)) {
-                    hIcon = sfi.hIcon;
+                SHFILEINFOW sfi = {0};
+                if (path[0] && PathFileExistsW(path)) {
+                    if (SHGetFileInfoW(path, 0, &sfi, sizeof(sfi), SHGFI_ICON | (isSubmenu ? SHGFI_SMALLICON : SHGFI_LARGEICON))) {
+                        hIcon = menu_own_icon(sfi.hIcon);
+                    }
                 }
-                CoTaskMemFree(pidlAbs);
+                if (!hIcon) {
+                    LPITEMIDLIST pidlAbs = ILCombine(pidlUsersFiles, pidlItem);
+                    if (pidlAbs) {
+                        if (SHGetFileInfoW((LPCWSTR)pidlAbs, 0, &sfi, sizeof(sfi), flags)) {
+                            hIcon = menu_own_icon(sfi.hIcon);
+                        }
+                        CoTaskMemFree(pidlAbs);
+                    }
+                }
+                if (!hIcon && isFolder) {
+                    hIcon = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
+                }
 
                 if (hIcon) {
                     // Register icon for both cases (normal and submenu)
@@ -1612,6 +2152,17 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
                             if (isSubmenu) assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
                             else assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
                         }
+#ifdef ENABLE_MODERN_STYLE
+                    } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                        if (asSubmenu) {
+                            int pos = insertPos + added;
+                            assign_menu_pos_bitmap_sized(hMenu, pos, hIcon, isSubmenu ? get_small_icon_size() : get_root_icon_size());
+                        } else if (isSubmenu) {
+                            assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                        } else {
+                            assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
+                        }
+#endif
                     }
                 }
             }
@@ -1619,6 +2170,59 @@ static int fill_menu_with_home(HMENU hMenu, int insertPos, BOOL isSubmenu) {
         }
         CoTaskMemFree(pidlItem);
     }
+
+    {
+        PWSTR profileRoot = NULL;
+        static const HomeKnownFolderSpec extras[] = {
+            { &FOLDERID_Desktop,   L"Desktop" },
+            { &FOLDERID_Documents, L"Documents" },
+            { &FOLDERID_Downloads, L"Downloads" },
+            { &FOLDERID_Pictures,  L"Pictures" },
+            { &FOLDERID_Music,     L"Music" },
+            { &FOLDERID_Videos,    L"Videos" },
+            { &FOLDERID_Favorites, L"Favorites" },
+            { &FOLDERID_SavedSearches,  L"Searches" },
+            { &FOLDERID_Links,     L"Links" },
+            { &FOLDERID_Contacts,  L"Contacts" },
+            { &FOLDERID_SavedGames, L"Saved Games" }
+        };
+
+        if (SUCCEEDED(SHGetKnownFolderPath(&FOLDERID_Profile, 0, NULL, &profileRoot)) && profileRoot && profileRoot[0]) {
+            for (int i = 0; i < (int)ARRAYSIZE(extras); ++i) {
+                PWSTR knownPath = NULL;
+                if (FAILED(SHGetKnownFolderPath(extras[i].id, KF_FLAG_DONT_VERIFY, NULL, &knownPath)) || !knownPath || !knownPath[0]) {
+                    if (knownPath) CoTaskMemFree(knownPath);
+                    continue;
+                }
+                if (!PathFileExistsW(knownPath) ||
+                    !home_is_outside_profile_root(profileRoot, knownPath) ||
+                    home_path_exists_in_list(existingPaths, existingPathCount, knownPath)) {
+                    CoTaskMemFree(knownPath);
+                    continue;
+                }
+
+                WCHAR label[MAX_PATH];
+                SHFILEINFOW sfi = {0};
+                label[0] = 0;
+                if (SHGetFileInfoW(knownPath, 0, &sfi, sizeof(sfi), SHGFI_DISPLAYNAME) && sfi.szDisplayName[0]) {
+                    lstrcpynW(label, sfi.szDisplayName, ARRAYSIZE(label));
+                } else {
+                    lstrcpynW(label, extras[i].fallbackLabel, ARRAYSIZE(label));
+                }
+
+                if (home_append_path_item(hMenu, insertPos, isSubmenu, label, knownPath, &added) &&
+                    existingPathCount < (int)ARRAYSIZE(existingPaths)) {
+                    home_normalize_compare_path(knownPath, existingPaths[existingPathCount], ARRAYSIZE(existingPaths[existingPathCount]));
+                    if (existingPaths[existingPathCount][0]) existingPathCount++;
+                }
+
+                CoTaskMemFree(knownPath);
+            }
+        }
+        if (profileRoot) CoTaskMemFree(profileRoot);
+    }
+
+    sort_home_menu_items(hMenu, insertPos, added);
 
     pEnum->lpVtbl->Release(pEnum);
     pUsersFiles->lpVtbl->Release(pUsersFiles);
@@ -1646,7 +2250,7 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
         if (volName[0]) {
             size_t len = lstrlenW(p);
             if (len > 0 && p[len-1] == L'\\') p[len-1] = 0;
-            wsprintfW(label, L"%s (%s)", volName, p);
+            StringCchPrintfW(label, ARRAYSIZE(label), L"%s (%s)", volName, p);
             if (len > 0) p[len-1] = L'\\';
         } else {
             UINT type = GetDriveTypeW(p);
@@ -1657,7 +2261,7 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
             
             size_t len = lstrlenW(p);
             if (len > 0 && p[len-1] == L'\\') p[len-1] = 0;
-            wsprintfW(label, L"%s (%s)", typeStr, p);
+            StringCchPrintfW(label, ARRAYSIZE(label), L"%s (%s)", typeStr, p);
             if (len > 0) p[len-1] = L'\\';
         }
 
@@ -1672,36 +2276,26 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
             mii.dwTypeData = label;
             mii.hSubMenu = sub;
             mii.wID = g_nextFolderId++;
-            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
+            mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, p);
             InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
         } else {
             mii.fMask = MIIM_STRING | MIIM_ID | MIIM_DATA;
             mii.dwTypeData = label;
             mii.wID = g_nextFolderId++;
-            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
+            mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(p) + 1) * sizeof(WCHAR));
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, p);
             InsertMenuItemW(hMenu, insertPos + added, TRUE, &mii);
             map_add(mii.wID, p);
         }
         
-        // Determine whether icons are allowed for this drive item:
-        // - If populating a submenu (`isSubmenu`), allow icons when ThisPCShowIcons is enabled and ShowIcons != 0.
-        // - If populating the root menu, only allow icons when ThisPCShowIcons is enabled and ShowIcons == 1 (legacy).
-        BOOL allowIcons = FALSE;
-        if (g_cfg.thisPCShowIcons) {
-            if (isSubmenu) {
-                if (g_cfg.showIcons != 0) allowIcons = TRUE;
-            } else {
-                if (g_cfg.showIcons == 1) allowIcons = TRUE;
-            }
-        }
+        BOOL allowIcons = should_show_item_icon(TRUE, !isSubmenu);
         if (allowIcons) {
             HICON hIcon = NULL;
             SHFILEINFOW sfi = {0};
             UINT flags = SHGFI_ICON | (isSubmenu ? SHGFI_SMALLICON : SHGFI_LARGEICON);
             if (SHGetFileInfoW(p, 0, &sfi, sizeof(sfi), flags)) {
-                hIcon = sfi.hIcon;
+                hIcon = menu_own_icon(sfi.hIcon);
             }
             if (hIcon) {
                 // Register icon for both cases (normal and submenu)
@@ -1718,6 +2312,17 @@ static int fill_menu_with_thispc(HMENU hMenu, int insertPos, BOOL isSubmenu) {
                         if (isSubmenu) assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
                         else assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
                     }
+#ifdef ENABLE_MODERN_STYLE
+                } else if (g_cfg.menuStyle == STYLE_MODERN) {
+                    if (g_cfg.thisPCItemsAsSubmenus) {
+                        int pos = insertPos + added;
+                        assign_menu_pos_bitmap_sized(hMenu, pos, hIcon, isSubmenu ? get_small_icon_size() : get_root_icon_size());
+                    } else if (isSubmenu) {
+                        assign_legacy_item_bitmap(hMenu, g_nextFolderId - 1, hIcon);
+                    } else {
+                        assign_menu_item_bitmap_sized(hMenu, g_nextFolderId - 1, hIcon, get_root_icon_size());
+                    }
+#endif
                 }
             }
         } 
@@ -1741,9 +2346,9 @@ static BOOL should_show_automatic_settings_item(MenuTriggerType trigger) {
 }
 
 static void append_settings_item(HMENU hMenu, const ConfigItem* item) {
-    const WCHAR* label = (item && item->label[0]) ? item->label : L"WinMac Menu Settings";
+    const WCHAR* label = (item && item->label[0]) ? item->label : L"Menu Settings";
     AppendMenuW(hMenu, MF_STRING, IDM_WINMAC_SETTINGS, label);
-    if (g_cfg.showIcons == 1) {
+    if (should_show_item_icon(FALSE, TRUE)) {
         const BOOL dark = theme_is_dark();
         const int size = get_root_icon_size();
         const WCHAR* iconPath = NULL;
@@ -1767,6 +2372,7 @@ static void append_settings_item(HMENU hMenu, const ConfigItem* item) {
                                      IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
         }
         if (icon) {
+            icon = menu_own_icon(icon);
             add_item_icon(IDM_WINMAC_SETTINGS, icon);
             if (g_cfg.menuStyle == STYLE_LEGACY && !use_legacy_root_large_icon_layout())
                 assign_legacy_item_bitmap(hMenu, IDM_WINMAC_SETTINGS, icon);
@@ -1775,7 +2381,7 @@ static void append_settings_item(HMENU hMenu, const ConfigItem* item) {
 }
 
 static void apply_configured_root_item_icon(HMENU hMenu, UINT id, const ConfigItem* item) {
-    if (!item || g_cfg.showIcons != 1) return;
+    if (!item || !should_show_item_icon(configured_item_is_folder(item), TRUE)) return;
 
     const BOOL dark = theme_is_dark();
     const WCHAR* iconPath = NULL;
@@ -1797,11 +2403,20 @@ static void apply_configured_root_item_icon(HMENU hMenu, UINT id, const ConfigIt
         assign_legacy_item_bitmap(hMenu, id, icon);
 }
 
+static BOOL confirm_power_action(HWND owner, const WCHAR* action) {
+    if (!g_cfg.powerAskConfirmation) return TRUE;
+    WCHAR message[256];
+    StringCchPrintfW(message, ARRAYSIZE(message), L"Are you sure you want to %s?", action ? action : L"continue");
+    return MessageBoxW(owner, message, L"Confirm Power Action", MB_ICONQUESTION | MB_YESNO | MB_DEFBUTTON2) == IDYES;
+}
+
 static HMENU build_menu(MenuTriggerType trigger) {
     config_load(&g_cfg);
     HMENU hMenu = CreatePopupMenu();
     g_mapCount = 0; // reset mapping for this menu build
+    g_itemBmpCount = 0;
     g_itemIconCount = 0; // reset icons
+    g_itemPosIconCount = 0; // reset position-based icons
     g_nextFolderId = IDM_FOLDER_BASE;
     UINT id = IDM_DYNAMIC_BASE;
     BOOL hasManualSettingsItem = FALSE;
@@ -1836,9 +2451,8 @@ static HMENU build_menu(MenuTriggerType trigger) {
             else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                 if (ipath) {
                     HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
-                    // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
-                    if (g_cfg.showIcons == 1) add_item_icon(id, hico);
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1 && !use_legacy_root_large_icon_layout()) assign_legacy_item_bitmap(hMenu, id, hico);
+                    if (should_show_item_icon(FALSE, TRUE)) add_item_icon(id, hico);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && should_show_item_icon(FALSE, TRUE) && !use_legacy_root_large_icon_layout()) assign_legacy_item_bitmap(hMenu, id, hico);
                 }
             id++;
             break;
@@ -1846,6 +2460,9 @@ static HMENU build_menu(MenuTriggerType trigger) {
             break;
         case CI_FOLDER:
         {
+            // A plain FOLDER represents its filesystem target at the root,
+            // so Hide icons in root menu applies to its displayed icon.
+            const BOOL allowConfiguredFolderIcon = should_show_item_icon(TRUE, TRUE);
             if (it->submenu) {
                 HMENU sub = CreatePopupMenu();
                 AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
@@ -1855,13 +2472,13 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 MENUITEMINFOW mii = { sizeof(mii) };
                 mii.fMask = MIIM_DATA | MIIM_SUBMENU | MIIM_ID;
                 mii.wID = popupId;
-                mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(it->path) + 1) * sizeof(WCHAR));
+                mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(it->path) + 1) * sizeof(WCHAR));
                 if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, it->path);
                 mii.hSubMenu = sub;
                 int pos = GetMenuItemCount(hMenu) - 1;
                 SetMenuItemInfoW(hMenu, pos, TRUE, &mii);
 
-                if (g_cfg.showIcons == 1) {
+                if (allowConfiguredFolderIcon) {
                     const BOOL dark = theme_is_dark();
                     const WCHAR* ipath = NULL;
                     HICON hicoF = NULL;
@@ -1869,8 +2486,8 @@ static HMENU build_menu(MenuTriggerType trigger) {
                     else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
                     else if (it->iconPath[0]) ipath = it->iconPath;
                     if (!ipath) {
-                        if (g_cfg.showFolderIcons) hicoF = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
-                        else if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
+                        hicoF = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
+                        if (!hicoF && dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
                         else if (!dark && g_cfg.defaultIconPathLight[0]) ipath = g_cfg.defaultIconPathLight;
                         else if (g_cfg.defaultIconPath[0]) ipath = g_cfg.defaultIconPath;
                     }
@@ -1885,7 +2502,6 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 // Optional header (may be suppressed by future flag)
                 if (it->label[0] && !it->inlineNoHeader) {
                     if (it->inlineOpen) {
-                        // Clickable header that opens the folder
                         AppendMenuW(hMenu, MF_STRING, g_nextFolderId, it->label);
                         map_add(g_nextFolderId++, it->path);
                     } else {
@@ -1893,7 +2509,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
                     }
                 }
                 
-                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE, FALSE, TRUE);
+                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE, FALSE, TRUE, TRUE);
                 
                 // No automatic trailing separator; user controls separators explicitly in config.
             } else {
@@ -1906,8 +2522,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
                 else if (it->iconPath[0]) ipath = it->iconPath;
                 if (!ipath) {
-                    if (g_cfg.showFolderIcons) {
-                        // When showing folder icons and no per-item icon, use system folder icon
+                    if (allowConfiguredFolderIcon) {
                         hico = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     } else {
                         // Fall back to defaults
@@ -1920,9 +2535,8 @@ static HMENU build_menu(MenuTriggerType trigger) {
                     hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 }
                 if (hico) {
-                    // Root-level icons: only register item icons for legacy-visible mode (ShowIcons==1).
-                    if (g_cfg.showIcons == 1) add_item_icon(id, hico);
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1 && !use_legacy_root_large_icon_layout()) assign_legacy_item_bitmap(hMenu, id, hico);
+                    if (allowConfiguredFolderIcon) add_item_icon(id, hico);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && allowConfiguredFolderIcon && !use_legacy_root_large_icon_layout()) assign_legacy_item_bitmap(hMenu, id, hico);
                 }
                 id++;
             }
@@ -1951,7 +2565,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 if (ipath) {
                     // Only load/assign popup-root icons when icons are enabled (legacy only).
                     // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
-                    if (g_cfg.showIcons == 1) {
+                    if (should_show_item_icon(TRUE, TRUE)) {
                         HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                         if (hico) {
                             add_item_icon(popupId, hico);
@@ -1995,7 +2609,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 if (ipath) {
                     // Only load/assign popup-root icons when icons are enabled (legacy only).
                     // When ShowIcons is not legacy (==1), do not show icons for submenu roots.
-                    if (g_cfg.showIcons == 1) {
+                    if (should_show_item_icon(TRUE, TRUE)) {
                         HICON hico = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                         if (hico) {
                             add_item_icon(popupId, hico);
@@ -2018,12 +2632,28 @@ static HMENU build_menu(MenuTriggerType trigger) {
         }
         case CI_FOLDER_SUBMENU:
         {
+            if (it->inlineExpand) {
+                if (it->label[0] && !it->inlineNoHeader) {
+                    if (it->inlineOpen) {
+                        AppendMenuW(hMenu, MF_STRING, g_nextFolderId, it->label);
+                        map_add(g_nextFolderId++, it->path);
+                    } else {
+                        AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, it->label);
+                    }
+                }
+                fill_menu_with_folder(hMenu, GetMenuItemCount(hMenu), it->path, 1, 0, FALSE, FALSE, TRUE, TRUE);
+                break;
+            }
+
+            // FOLDER_SUBMENU is a root menu command. Files-only/Folders-only
+            // do not affect its heading, while the master toggle and HIR do.
+            const BOOL allowConfiguredFolderIcon = should_show_configured_folder_menu_icon(TRUE);
             HMENU sub = CreatePopupMenu();
             AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, L"(Loading...)");
             attach_menu_data(sub, it->path, 1, 0, FALSE, TRUE);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : it->path);
             UINT popupId = g_nextFolderId++;
-            if (g_cfg.showIcons != 0) {
+            if (allowConfiguredFolderIcon) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoF = NULL;
                 const WCHAR* ipath = NULL;
@@ -2032,7 +2662,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 else if (!dark && it->iconPathLight[0]) ipath = it->iconPathLight;
                 else if (it->iconPath[0]) ipath = it->iconPath;
                 if (!ipath) {
-                    if (g_cfg.showFolderIcons) {
+                    if (allowConfiguredFolderIcon) {
                         hicoF = g_cfg.rootMenuLargeIcons ? get_system_folder_icon_sized(TRUE) : get_system_folder_icon();
                     } else {
                         if (dark && g_cfg.defaultIconPathDark[0]) ipath = g_cfg.defaultIconPathDark;
@@ -2042,8 +2672,8 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 }
                 if (!hicoF && ipath) hicoF = g_cfg.rootMenuLargeIcons ? load_root_icon_path_or_module(ipath) : load_icon_path_or_module(ipath);
                 if (hicoF) {
-                    if (g_cfg.showIcons == 1) add_item_icon(popupId, hicoF);
-                    if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+                    if (allowConfiguredFolderIcon) add_item_icon(popupId, hicoF);
+                    if (g_cfg.menuStyle == STYLE_LEGACY && allowConfiguredFolderIcon) {
                         if (!use_legacy_root_large_icon_layout()) assign_icon_to_last_popup(hMenu, hicoF);
 #ifdef ENABLE_MODERN_STYLE
                     } else if (g_cfg.menuStyle == STYLE_MODERN) {
@@ -2055,7 +2685,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
             MENUITEMINFOW mii = { sizeof(mii) };
             mii.fMask = MIIM_DATA | MIIM_SUBMENU | MIIM_ID;
             mii.wID = popupId;
-            mii.dwItemData = (ULONG_PTR)LocalAlloc(LMEM_FIXED, (lstrlenW(it->path) + 1) * sizeof(WCHAR));
+            mii.dwItemData = (ULONG_PTR)menu_alloc(LMEM_FIXED, (lstrlenW(it->path) + 1) * sizeof(WCHAR));
             if (mii.dwItemData) lstrcpyW((LPWSTR)mii.dwItemData, it->path);
             mii.hSubMenu = sub;
             int pos = GetMenuItemCount(hMenu) - 1;
@@ -2081,7 +2711,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
             popupMii.fMask = MIIM_ID;
             popupMii.wID = popupId;
             SetMenuItemInfoW(hMenu, GetMenuItemCount(hMenu) - 1, TRUE, &popupMii);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && should_show_item_icon(FALSE, TRUE)) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoR = NULL;
                 const WCHAR* ipath = NULL;
@@ -2126,7 +2756,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
             popupMii.fMask = MIIM_ID;
             popupMii.wID = popupId;
             SetMenuItemInfoW(hMenu, GetMenuItemCount(hMenu) - 1, TRUE, &popupMii);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && should_show_item_icon(FALSE, TRUE)) {
                 const BOOL dark = theme_is_dark();
                 HICON hicoP = NULL;
                 const WCHAR* ipath = NULL;
@@ -2148,7 +2778,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
         {
             int max = g_cfg.taskKillMax;
             BOOL ignoreSystem = g_cfg.taskKillIgnoreSystem;
-            BOOL showIcons = g_cfg.taskKillShowIcons;
+            BOOL showIcons = should_show_item_icon(FALSE, FALSE);
             BOOL listWindows = g_cfg.taskKillListWindows;
             WCHAR* excludes[32];
             int excludeCount = 0;
@@ -2159,9 +2789,10 @@ static HMENU build_menu(MenuTriggerType trigger) {
             
             WCHAR* p = globalBuf;
             while (*p && excludeCount < 32) {
-                WCHAR* next = wcschr(p, L',');
+                WCHAR* next = find_taskkill_exclude_separator(p);
                 if (next) *next = 0;
-                if (*p) excludes[excludeCount++] = p;
+                WCHAR* excluded = trim_taskkill_exclude(p);
+                if (*excluded) excludes[excludeCount++] = excluded;
                 if (!next) break;
                 p = next + 1;
             }
@@ -2247,14 +2878,17 @@ static HMENU build_menu(MenuTriggerType trigger) {
                 }
             }
             if (max <= 0) max = 10;
-            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows, g_cfg.taskKillAllDesktops);
+            // Task-kill item parameters used to contain a per-item icon switch.
+            // The global policy now takes precedence over that retired setting.
+            showIcons = should_show_item_icon(FALSE, FALSE);
+            HMENU sub = build_taskkill_submenu(max, ignoreSystem, showIcons, excludes, excludeCount, listWindows, g_cfg.taskKillAllDesktops, g_cfg.taskKillShowProcessIds);
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)sub, it->label[0] ? it->label : L"Task Kill");
             UINT popupId = g_nextFolderId++;
             MENUITEMINFOW popupMii = { sizeof(popupMii) };
             popupMii.fMask = MIIM_ID;
             popupMii.wID = popupId;
             SetMenuItemInfoW(hMenu, GetMenuItemCount(hMenu) - 1, TRUE, &popupMii);
-            if (g_cfg.menuStyle == STYLE_LEGACY && g_cfg.showIcons == 1) {
+            if (g_cfg.menuStyle == STYLE_LEGACY && should_show_item_icon(FALSE, TRUE)) {
                 const BOOL dark = theme_is_dark();
                 HICON hico = NULL;
                 const WCHAR* ipath = NULL;
@@ -2377,6 +3011,11 @@ void MenuOnInitMenuPopup(HWND owner, HMENU hMenu, UINT item, BOOL isSystemMenu) 
             populate_folder_menu(hMenu, data);
         }
     }
+#ifdef ENABLE_MODERN_STYLE
+    if (g_cfg.menuStyle == STYLE_MODERN) {
+        Menu_SetOwnerDrawRecursive(hMenu);
+    }
+#endif
 }
 
 BOOL MenuOnMenuRButtonUp(HWND owner, UINT itemPos, HMENU hMenu) {
@@ -2418,7 +3057,7 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
     }
 
     wchar_t dbg_buf[256];
-    wsprintfW(dbg_buf, L"[MenuExecuteCommand] Received cmd: %u\n", cmd);
+    StringCchPrintfW(dbg_buf, ARRAYSIZE(dbg_buf), L"[MenuExecuteCommand] Received cmd: %u\n", cmd);
     OutputDebugStringW(dbg_buf);
 
     if (g_suppressCmd) {
@@ -2432,15 +3071,15 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
     for (UINT i = 0; i < g_mapCount; ++i) {
         if (g_map[i].id == (UINT)cmd) {
             found = TRUE;
-            wsprintfW(dbg_buf, L"[MenuExecuteCommand] Found cmd in g_map: %u, path: %s\n", cmd, g_map[i].path);
+            StringCchPrintfW(dbg_buf, ARRAYSIZE(dbg_buf), L"[MenuExecuteCommand] Found cmd in g_map: %u, path: %s\n", cmd, g_map[i].path);
             OutputDebugStringW(dbg_buf);
             // Interpret special power markers
-            if (!lstrcmpiW(g_map[i].path, L"POWER_SLEEP")) { system_sleep(); return; }
-            if (!lstrcmpiW(g_map[i].path, L"POWER_SHUTDOWN")) { system_shutdown(FALSE); return; }
-            if (!lstrcmpiW(g_map[i].path, L"POWER_RESTART")) { system_shutdown(TRUE); return; }
-            if (!lstrcmpiW(g_map[i].path, L"POWER_LOCK")) { LockWorkStation(); return; }
-            if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { ExitWindowsEx(EWX_LOGOFF, 0); return; }
-            if (!lstrcmpiW(g_map[i].path, L"POWER_HIBERNATE")) { system_hibernate(); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_SLEEP")) { if (confirm_power_action(owner, L"sleep")) system_sleep(); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_SHUTDOWN")) { if (confirm_power_action(owner, L"shut down")) system_shutdown(FALSE); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_RESTART")) { if (confirm_power_action(owner, L"restart")) system_shutdown(TRUE); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_LOCK")) { if (confirm_power_action(owner, L"lock")) LockWorkStation(); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { if (confirm_power_action(owner, L"sign out")) ExitWindowsEx(EWX_LOGOFF, 0); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_HIBERNATE")) { if (confirm_power_action(owner, L"hibernate")) system_hibernate(); return; }
             if (wcsncmp(g_map[i].path, L"TASKKILL:", 9) == 0) {
                 const WCHAR* param = g_map[i].path + 9;
                 if (wcsncmp(param, L"EXE:", 4) == 0) {
@@ -2478,7 +3117,7 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             open_shell_item(g_map[i].path); return; }
     }
     if (!found) {
-        wsprintfW(dbg_buf, L"[MenuExecuteCommand] cmd %u NOT FOUND in g_map\n", cmd);
+        StringCchPrintfW(dbg_buf, ARRAYSIZE(dbg_buf), L"[MenuExecuteCommand] cmd %u NOT FOUND in g_map\n", cmd);
         OutputDebugStringW(dbg_buf);
     }
     if (cmd >= IDM_RECENT_BASE && cmd < IDM_RECENT_BASE + 1000) {
@@ -2486,10 +3125,6 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             recent_clear_all();
             return; // no reopen; user can reopen menu manually
         }
-        RecentItem *items = NULL; int n = recent_get_items(&items, g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
-        int idx = cmd - IDM_RECENT_BASE;
-        if (idx >= 0 && idx < n) recent_open_item(&items[idx]);
-        if (items) LocalFree(items);
         return;
     }
     UINT id = IDM_DYNAMIC_BASE;
@@ -2519,17 +3154,17 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
         case CI_FOLDER_SUBMENU:
             break;
         case CI_POWER_SLEEP:
-            if (id == cmd) { system_sleep(); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"sleep")) system_sleep(); return; } id++; break;
         case CI_POWER_SHUTDOWN:
-            if (id == cmd) { system_shutdown(FALSE); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"shut down")) system_shutdown(FALSE); return; } id++; break;
         case CI_POWER_RESTART:
-            if (id == cmd) { system_shutdown(TRUE); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"restart")) system_shutdown(TRUE); return; } id++; break;
         case CI_POWER_LOCK:
-            if (id == cmd) { LockWorkStation(); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"lock")) LockWorkStation(); return; } id++; break;
         case CI_POWER_LOGOFF:
-            if (id == cmd) { ExitWindowsEx(EWX_LOGOFF, 0); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"sign out")) ExitWindowsEx(EWX_LOGOFF, 0); return; } id++; break;
         case CI_POWER_HIBERNATE:
-            if (id == cmd) { system_hibernate(); return; } id++; break;
+            if (id == cmd) { if (confirm_power_action(owner, L"hibernate")) system_hibernate(); return; } id++; break;
         case CI_RECENT_SUBMENU:
         case CI_POWER_MENU:
         case CI_THISPC:
@@ -2552,18 +3187,20 @@ BOOL MenuOpenRecentParentFolder(UINT cmd) {
         return FALSE;
     }
     
-    RecentItem *items = NULL;
-    int n = recent_get_items(&items, g_cfg.recentMax > 0 ? g_cfg.recentMax : 12);
-    int idx = cmd - IDM_RECENT_BASE;
-    
-    BOOL result = FALSE;
-    if (idx >= 0 && idx < n) {
-        recent_open_parent_folder(&items[idx]);
-        result = TRUE;
-    }
-    
-    if (items) LocalFree(items);
-    return result;
+    const WCHAR* path = map_find(cmd);
+    if (!path) return FALSE;
+    RecentItem item = {0};
+    lstrcpynW(item.path, path, ARRAYSIZE(item.path));
+    recent_open_parent_folder(&item);
+    return TRUE;
+}
+
+static void destroy_menu_session(HMENU menu) {
+    if (g_rootMenuHandle == menu) g_rootMenuHandle = NULL;
+    DestroyMenu(menu);
+    menu_resources_clear();
+    hFolderSmall = hFolderLarge = NULL;
+    g_itemIconCount = g_itemPosIconCount = g_itemBmpCount = g_mapCount = 0;
 }
 
 void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
@@ -2579,14 +3216,14 @@ void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
         BOOL handledByDll = FALSE;
         SetForegroundWindow(owner);
         if (g_cfg.rootMenuLargeIcons) {
-            WMM_BIG_MENU_ITEM snapshot[256];
-            WMM_BIG_MENU_SHOW_PARAMS params;
-            WMM_BIG_MENU_RESULT result;
+            WMM_CUSTOM_THEME_ITEM snapshot[256];
+            WMM_CUSTOM_THEME_SHOW_PARAMS params;
+            WMM_CUSTOM_THEME_RESULT result;
 
             ZeroMemory(&params, sizeof(params));
             ZeroMemory(&result, sizeof(result));
             params.cbSize = sizeof(params);
-            params.apiVersion = WMM_BIG_MENU_API_VERSION;
+            params.apiVersion = WMM_CUSTOM_THEME_API_VERSION;
             params.owner = owner;
             params.screenPt = screenPt;
             params.pointerRelative = g_cfg.pointerRelative;
@@ -2595,16 +3232,16 @@ void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
             params.darkMode = theme_is_dark();
             params.largeRootIcons = g_cfg.rootMenuLargeIcons;
             params.nativeRootMenu = hMenu;
-            params.initNativeSubmenu = big_menu_init_native_submenu_callback;
-            params.showNativeSubmenu = big_menu_show_native_submenu_callback;
+            params.initNativeSubmenu = custom_theme_init_native_submenu_callback;
+            params.showNativeSubmenu = custom_theme_show_native_submenu_callback;
             params.items = snapshot;
-            params.itemCount = build_big_menu_snapshot(hMenu, snapshot, ARRAYSIZE(snapshot));
+            params.itemCount = build_custom_theme_snapshot(hMenu, snapshot, ARRAYSIZE(snapshot));
             params.animationDirection = (UINT)g_cfg.animationDirection;
             params.keepLargeMenuHighlightTextColor = g_cfg.keepLargeMenuHighlightTextColor;
             params.highlightFrame = (UINT)g_cfg.largeMenuHighlightFrame;
             result.cbSize = sizeof(result);
 
-            handledByDll = BigMenuBridge_ShowIfAvailable(&params, &result);
+            handledByDll = CustomThemeBridge_ShowIfAvailable(&params, &result);
             dllCommand = result.selectedCommandId;
         }
         if (handledByDll) {
@@ -2612,8 +3249,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
             if (dllCommand != 0) {
                 MenuExecuteCommand(owner, dllCommand);
             }
-            if (g_rootMenuHandle == hMenu) g_rootMenuHandle = NULL;
-            DestroyMenu(hMenu);
+            destroy_menu_session(hMenu);
             return;
         }
         UINT flags = TPM_RIGHTBUTTON | TPM_VERPOSANIMATION | TPM_HORIZONTAL | TPM_RETURNCMD;
@@ -2641,8 +3277,7 @@ void ShowWinXMenu(HWND owner, POINT screenPt, MenuTriggerType trigger) {
         g_rootMenuWindow = NULL;
         PostMessageW(owner, WM_NULL, 0, 0);
         MenuExecuteCommand(owner, (UINT)cmd);
-        if (g_rootMenuHandle == hMenu) g_rootMenuHandle = NULL;
-        DestroyMenu(hMenu);
+        destroy_menu_session(hMenu);
     }
     while (g_shouldReopenMenu);
     // In background mode the window stays alive; WM_CLOSE is posted by caller when needed.
@@ -2854,9 +3489,17 @@ static void draw_chevron(HDC hdc, RECT rc, COLORREF color) {
 static int get_item_index_from_dis(const DRAWITEMSTRUCT* dis) {
     HMENU m = (HMENU)dis->hwndItem;
     int count = GetMenuItemCount(m);
-    // Prefer stored index when provided (non-zero, within range)
+
+    if (dis->itemID != (UINT)-1) {
+        for (int i = 0; i < count; ++i) {
+            if (GetMenuItemID(m, i) == dis->itemID) return i;
+        }
+    }
+
+    // Some items use itemData for filesystem paths, so only accept small values as positions.
     UINT idx = (UINT)dis->itemData;
     if (idx < (UINT)count) return (int)idx;
+
     // Fallback: match rectangle
     for (int i = 0; i < count; ++i) {
         RECT r; if (GetMenuItemRect(NULL, m, i, &r)) {
@@ -3003,12 +3646,14 @@ BOOL MenuOnDrawItem(HWND owner, const DRAWITEMSTRUCT* dis) {
         UINT id = (UINT)-1;
         MENUITEMINFOW miiID = { sizeof(miiID) };
         miiID.fMask = MIIM_ID;
+        icon = get_item_pos_icon(m, idx);
         if (GetMenuItemInfoW(m, idx, TRUE, &miiID)) {
             id = miiID.wID;
         }
         if (id == (UINT)-1) id = GetMenuItemID(m, idx); // Fallback
 
-        if (id != (UINT)-1) icon = get_item_icon(id);
+        if (!icon && id != (UINT)-1) icon = get_item_icon(id);
+        if (!icon && dis->itemID != (UINT)-1) icon = get_item_icon(dis->itemID);
     }
 
     HDC sdc = GetDC(owner);
@@ -3062,7 +3707,7 @@ static HBITMAP icon_to_hbmp(HICON hico, int cx, int cy) {
         DeleteDC(mem);
     }
     ReleaseDC(NULL, hdc);
-    return hbmp;
+    return (HBITMAP)menu_resource_own(hbmp, MENU_BITMAP);
 }
 
 static void assign_menu_item_bitmap_sized(HMENU hMenu, UINT id, HICON hico, int size) {
@@ -3078,6 +3723,7 @@ static void assign_menu_item_bitmap_sized(HMENU hMenu, UINT id, HICON hico, int 
 
 static void assign_menu_pos_bitmap_sized(HMENU hMenu, int pos, HICON hico, int size) {
     if (!hico) return;
+    add_item_pos_icon(hMenu, pos, hico);
     HBITMAP hb = icon_to_hbmp(hico, size, size);
     if (!hb) return;
     MENUITEMINFOW mii = { sizeof(mii) };

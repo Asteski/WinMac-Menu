@@ -35,43 +35,138 @@ public static class IniParser
     {
         var cfg = new AppConfig();
 
-        cfg.FolderSubmenuDepth = GetInt("General", "FolderSubmenuDepth", 4, iniPath);
+        cfg.FolderSubmenuDepth = Math.Clamp(GetInt("General", "FolderSubmenuDepth", 2, iniPath), 0, 4);
         cfg.RunInBackground = GetBool("General", "RunInBackground", true, iniPath);
         cfg.ShowOnLaunch = GetBool("General", "ShowOnLaunch", false, iniPath);
         cfg.ShowTrayIcon = GetBool("General", "ShowTrayIcon", true, iniPath);
-        cfg.ShowIcons = GetBool("General", "ShowIcons", true, iniPath);
-        cfg.ShowFolderIcons = GetBool("General", "ShowFolderIcons", true, iniPath);
-        cfg.ShowFileIcons = GetBool("General", "ShowFileIcons", true, iniPath);
-        cfg.ShowFileExtensions = GetBool("General", "ShowFileExtensions", true, iniPath);
+        var rawIconMode = GetString("General", "ShowIcons", "", iniPath).Trim();
+        var hasUnifiedIconMode = rawIconMode.Equals("all", StringComparison.OrdinalIgnoreCase) ||
+                                  rawIconMode.Equals("files", StringComparison.OrdinalIgnoreCase) ||
+                                  rawIconMode.Equals("folders", StringComparison.OrdinalIgnoreCase) ||
+                                  rawIconMode.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                  rawIconMode == "1" ||
+                                  rawIconMode.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+                                  rawIconMode == "0" ||
+                                  rawIconMode.Equals("other", StringComparison.OrdinalIgnoreCase);
+        cfg.IconMode = rawIconMode.ToLowerInvariant() switch
+        {
+            "all" or "true" or "1" => IconDisplayMode.All,
+            "files" or "filesonly" or "files-only" => IconDisplayMode.FilesOnly,
+            "folders" or "foldersonly" or "folders-only" => IconDisplayMode.FoldersOnly,
+            "other" => IconDisplayMode.All,
+            "" => IconDisplayMode.All,
+            _ => IconDisplayMode.Disabled,
+        };
+        var hideFolderIcons = GetString("General", "HideFolderIcons", "", iniPath);
+        var legacyShowFolderIcons = !string.IsNullOrWhiteSpace(hideFolderIcons)
+            ? !GetBool("General", "HideFolderIcons", false, iniPath)
+            : GetBool("General", "ShowFolderIcons", true, iniPath);
+        var hideFileIcons = GetString("General", "HideFileIcons", "", iniPath);
+        if (!string.IsNullOrWhiteSpace(hideFileIcons))
+        {
+            var legacyShowFileIcons = !GetBool("General", "HideFileIcons", false, iniPath);
+            if (!hasUnifiedIconMode)
+                cfg.IconMode = legacyShowFolderIcons == legacyShowFileIcons ? (legacyShowFolderIcons ? IconDisplayMode.All : IconDisplayMode.Disabled) : (legacyShowFolderIcons ? IconDisplayMode.FoldersOnly : IconDisplayMode.FilesOnly);
+        }
+        else
+        {
+            var showFileIcons = GetString("General", "ShowFileIcons", "", iniPath);
+            var legacyShowFileIcons = !string.IsNullOrWhiteSpace(showFileIcons)
+                ? GetBool("General", "ShowFileIcons", true, iniPath)
+                : GetBool("General", "ShowSubmenuFileIcons", true, iniPath);
+            if (!hasUnifiedIconMode)
+                cfg.IconMode = legacyShowFolderIcons == legacyShowFileIcons ? (legacyShowFolderIcons ? IconDisplayMode.All : IconDisplayMode.Disabled) : (legacyShowFolderIcons ? IconDisplayMode.FoldersOnly : IconDisplayMode.FilesOnly);
+        }
+        cfg.HideIconsInRootMenu = GetBool("General", "HideIconsInRootMenu", false, iniPath) || rawIconMode.Equals("other", StringComparison.OrdinalIgnoreCase);
+        var rawShowFileExtensions = GetString("General", "ShowFileExtensions", "", iniPath).Trim();
+        var hasGeneralExtensionSetting = !string.IsNullOrWhiteSpace(rawShowFileExtensions);
+        if (hasGeneralExtensionSetting)
+        {
+            cfg.ShowFileExtensions = rawShowFileExtensions is "true" or "1" or "yes";
+        }
+        else
+        {
+            var rawLegacyShowExtensions = GetString("General", "ShowExtensions", "", iniPath).Trim();
+            if (!string.IsNullOrWhiteSpace(rawLegacyShowExtensions))
+            {
+                cfg.ShowFileExtensions = rawLegacyShowExtensions is "true" or "1" or "yes";
+                hasGeneralExtensionSetting = true;
+            }
+            else
+            {
+                var rawLegacyHideExtensions = GetString("General", "HideExtensions", "", iniPath).Trim();
+                if (!string.IsNullOrWhiteSpace(rawLegacyHideExtensions))
+                {
+                    cfg.ShowFileExtensions = !(rawLegacyHideExtensions is "true" or "1" or "yes");
+                    hasGeneralExtensionSetting = true;
+                }
+            }
+        }
+        if (!hasGeneralExtensionSetting)
+        {
+            var rawRecentExtensions = GetString("RecentItems", "RecentShowExtensions", "", iniPath).Trim();
+            if (!string.IsNullOrWhiteSpace(rawRecentExtensions))
+                cfg.ShowFileExtensions = rawRecentExtensions is "true" or "1" or "yes";
+            else
+            {
+                var rawRecentHideExtensions = GetString("RecentItems", "RecentHideExtensions", "", iniPath).Trim();
+                if (!string.IsNullOrWhiteSpace(rawRecentHideExtensions))
+                    cfg.ShowFileExtensions = !(rawRecentHideExtensions is "true" or "1" or "yes");
+            }
+        }
         cfg.ShowHidden = GetBool("General", "ShowHidden", false, iniPath);
+        cfg.ShowDotfiles = GetBool("General", "ShowDotfiles", false, iniPath);
+        cfg.KeepMenuOpenAfterContextAction = GetBool("General", "KeepMenuOpenAfterContextAction", false, iniPath);
         cfg.MaxItems = GetInt("General", "MaxItems", 0, iniPath);
-        cfg.DefaultIconPath = GetString("General", "DefaultIcon", "", iniPath);
+        cfg.SubmenuMetadataThreshold = GetString("General", "SubmenuMetadataThreshold", "4", iniPath).Trim();
+        if (string.IsNullOrWhiteSpace(cfg.SubmenuMetadataThreshold))
+            cfg.SubmenuMetadataThreshold = "4";
+        cfg.DefaultIconPath = GetString("General", "DefaultIcon", GetString("Icons", "DefaultIcon", "", iniPath), iniPath);
+        cfg.DefaultIconPathLight = GetString("General", "DefaultIconLight", GetString("Icons", "DefaultIconLight", "", iniPath), iniPath);
+        cfg.DefaultIconPathDark = GetString("General", "DefaultIconDark", GetString("Icons", "DefaultIconDark", "", iniPath), iniPath);
         cfg.TrayIconPath    = GetString("General", "TrayIcon",   "", iniPath);
         cfg.TrayIconPathLight = GetString("General", "TrayIconLight", "", iniPath);
         cfg.TrayIconPathDark = GetString("General", "TrayIconDark", "", iniPath);
         cfg.MonochromeTrayIcon = GetBool("General", "MonochromeTrayIcon", false, iniPath);
-        cfg.MenuStyle = GetString("General", "MenuStyle", "modern", iniPath);
-
         cfg.PointerRelative = GetBool("Placement", "PointerRelative", true, iniPath);
         cfg.Horizontal = GetString("Placement", "Horizontal", "left", iniPath);
-        cfg.HOffset = GetInt("Placement", "HOffset", 0, iniPath);
+        cfg.HOffset = GetInt("Placement", "HOffset", 13, iniPath);
         cfg.Vertical = GetString("Placement", "Vertical", "top", iniPath);
-        cfg.VOffset = GetInt("Placement", "VOffset", 0, iniPath);
-        var ignoreRelative = GetString("Placement", "IgnoreOffsetWhenRelative", "false", iniPath).ToLowerInvariant();
+        cfg.VOffset = GetInt("Placement", "VOffset", 13, iniPath);
+        var ignoreRelative = GetString("Placement", "IgnoreOffsetWhenRelative", "true", iniPath).ToLowerInvariant();
         cfg.IgnoreHOffsetWhenRelative = ignoreRelative is "true" or "1" or "yes" or "hoffset" or "h" or "horizontal";
         cfg.IgnoreVOffsetWhenRelative = ignoreRelative is "true" or "1" or "yes" or "voffset" or "v" or "vertical";
 
         cfg.Corners = GetString("Appearance", "Corners", "rounded", iniPath);
 
-        cfg.WinUI3Size = GetString("Appearance", "WinUISize", "", iniPath);
-        if (string.IsNullOrWhiteSpace(cfg.WinUI3Size))
-            cfg.WinUI3Size = GetString("WinUI3", "Size", "default", iniPath);
+        var touchMode = GetString("Appearance", "TouchMode", "", iniPath);
+        if (!string.IsNullOrWhiteSpace(touchMode))
+        {
+            cfg.WinUI3Size = GetBool("Appearance", "TouchMode", false, iniPath) ? "large" : "default";
+        }
+        else
+        {
+            cfg.WinUI3Size = GetString("Appearance", "WinUISize", "", iniPath);
+            if (string.IsNullOrWhiteSpace(cfg.WinUI3Size))
+                cfg.WinUI3Size = GetString("WinUI3", "Size", "default", iniPath);
+        }
         if (cfg.WinUI3Size.Equals("compact", StringComparison.OrdinalIgnoreCase))
             cfg.WinUI3Size = "default";
         else if (!cfg.WinUI3Size.Equals("default", StringComparison.OrdinalIgnoreCase) &&
                  !cfg.WinUI3Size.Equals("large", StringComparison.OrdinalIgnoreCase))
             cfg.WinUI3Size = "default";
-        cfg.WinUIAlwaysShowIcons = GetBool("Appearance", "WinUIAlwaysShowIcons", false, iniPath);
+        var showThumbnails = GetString("Appearance", "ShowThumbnails", "", iniPath);
+        if (!string.IsNullOrWhiteSpace(showThumbnails))
+        {
+            cfg.WinUIAlwaysShowIcons = !GetBool("Appearance", "ShowThumbnails", true, iniPath);
+        }
+        else
+        {
+            var alwaysShowIcons = GetString("Appearance", "AlwaysShowIcons", "", iniPath);
+            cfg.WinUIAlwaysShowIcons = !string.IsNullOrWhiteSpace(alwaysShowIcons)
+                ? GetBool("Appearance", "AlwaysShowIcons", false, iniPath)
+                : GetBool("Appearance", "WinUIAlwaysShowIcons", false, iniPath);
+        }
 
         cfg.WindowsKey      = GetBool("Controls", "WindowsKey",      false, iniPath);
         cfg.ShiftWindowsKey = GetBool("Controls", "ShiftWindowsKey", false, iniPath);
@@ -100,25 +195,22 @@ public static class IniParser
 
         cfg.RecentMax = GetInt("RecentItems", "RecentMax", 12, iniPath);
         cfg.RecentLabel = GetString("RecentItems", "RecentLabel", "fullpath", iniPath);
-        cfg.RecentShowExtensions = GetBool("RecentItems", "RecentShowExtensions", true, iniPath);
-        cfg.RecentShowIcons = GetBool("RecentItems", "RecentShowIcons", true, iniPath);
         cfg.RecentShowCleanItems = GetBool("RecentItems", "RecentShowCleanItems", true, iniPath);
+        cfg.RecentHideProtocolShortcuts = GetBool("RecentItems", "RecentHideProtocolShortcuts", true, iniPath);
         cfg.RecentSeparateItems = GetBool("RecentItems", "SeparateItems", false, iniPath);
 
         cfg.TaskKillMax = GetInt("TaskKill", "TaskKillMax", 24, iniPath);
         cfg.TaskKillIgnoreSystem = GetBool("TaskKill", "TaskKillIgnoreSystem", true, iniPath);
-        cfg.TaskKillShowIcons = GetBool("TaskKill", "TaskKillShowIcons", true, iniPath);
         cfg.TaskKillListWindows = GetBool("TaskKill", "TaskKillListWindows", false, iniPath);
         cfg.TaskKillAllDesktops = GetBool("TaskKill", "TaskKillAllDesktops", true, iniPath);
+        cfg.TaskKillShowProcessIds = GetBool("TaskKill", "TaskKillShowProcessIds", true, iniPath);
         cfg.TaskKillExcludes = GetString("TaskKill", "TaskKillExcludes", "", iniPath);
 
         cfg.ThisPCAsSubmenu      = GetBool("ThisPC", "ThisPCAsSubmenu",      true,  iniPath);
         cfg.ThisPCItemsAsSubmenus = GetBool("ThisPC", "ThisPCItemsAsSubmenus", false, iniPath);
-        cfg.ThisPCShowIcons       = GetBool("ThisPC", "ThisPCShowIcons",       true,  iniPath);
 
         cfg.HomeAsSubmenu      = GetBool("Home", "HomeAsSubmenu",      true,  iniPath);
         cfg.HomeItemsAsSubmenus = GetBool("Home", "HomeItemsAsSubmenus", false, iniPath);
-        cfg.HomeShowIcons       = GetBool("Home", "HomeShowIcons",       true,  iniPath);
 
         cfg.PowerSleep = GetInt("Power", "Sleep", 1, iniPath) != 0;
         cfg.PowerHibernate = GetInt("Power", "Hibernate", 1, iniPath) != 0;
@@ -126,6 +218,7 @@ public static class IniParser
         cfg.PowerRestart = GetInt("Power", "Restart", 1, iniPath) != 0;
         cfg.PowerLock = GetInt("Power", "Lock", 1, iniPath) != 0;
         cfg.PowerLogoff = GetInt("Power", "Logoff", 1, iniPath) != 0;
+        cfg.PowerAskForConfirmation = GetBool("Power", "AskForConfirmation", false, iniPath);
 
         // Read icons
         var icons = new Dictionary<int, string>();
@@ -202,13 +295,33 @@ public static class IniParser
             _                => ConfigItemType.Uri,
         };
 
+        if (string.IsNullOrWhiteSpace(item.Label))
+        {
+            item.Label = item.Type switch
+            {
+                ConfigItemType.Recent or ConfigItemType.RecentSubmenu => "Recent Items",
+                ConfigItemType.ThisPC => "This PC",
+                ConfigItemType.Home => "Home",
+                _ => item.Label,
+            };
+        }
+
         if (parts.Length > 2)
             item.Path = Environment.ExpandEnvironmentVariables(parts[2].Trim());
 
         if (parts.Length > 3)
         {
             item.Params = parts[3].Trim().ToLowerInvariant();
-            ParseFolderParams(item, item.Params);
+            // Both folder item types can use inline parameters to emit the
+            // folder's objects directly into the root menu.
+            if (item.Type is ConfigItemType.Folder or ConfigItemType.FolderSubmenu or ConfigItemType.ThisPC or ConfigItemType.Home)
+                ParseFolderParams(item, item.Params);
+        }
+
+        if ((item.Type is ConfigItemType.ThisPC or ConfigItemType.Home) && !item.InlineExpand && !item.Submenu)
+        {
+            item.InlineExpand = true;
+            item.InlineNoHeader = true;
         }
 
         if (parts.Length > 4)
@@ -226,6 +339,12 @@ public static class IniParser
         if (paramsLower.Contains("notitle") || paramsLower.Contains("noheader"))
             item.InlineNoHeader = true;
         if (paramsLower == "title")            item.InlineNoHeader = false;
+
+        if ((item.Type is ConfigItemType.ThisPC or ConfigItemType.Home) && !item.Submenu && !item.InlineExpand)
+            item.InlineExpand = true;
+        if ((item.Type is ConfigItemType.ThisPC or ConfigItemType.Home) && item.InlineExpand &&
+            !paramsLower.Contains("notitle") && !paramsLower.Contains("noheader") && paramsLower != "title")
+            item.InlineNoHeader = true;
     }
 
     public static string? FindConfigFile(string? exeDir = null)
