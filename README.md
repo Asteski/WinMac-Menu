@@ -32,6 +32,8 @@
 
 ## Features
 
+_[Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)_
+
 - Win32 and WinUI3 menu renderer with configurable menu appearance
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
 - Recent Items - dynamic submenu from *%AppData%\Microsoft\Windows\Recent Items* folder
@@ -51,24 +53,25 @@
 - Win + X activation trigger
 - Large-menu highlight frame styles: background, border, or both
 - Optional file-type icons instead of thumbnails in generated submenus
-- ARM64 builds in addition to x64
-- Custom INI filenames displayed in the Settings window title
-- [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ## Run
 
-**Quick Start**: By default, it runs in background mode with a system tray icon.
+**Quick Start**: By default, it's assigned to be triggered by clicking Start Menu button with middle-mouse or by clicking tray icon. [Discover different use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
-**Modes**:
-- **Background Mode (default)** - App stays running in background. Launch again to toggle/show menu.
-- **Single Run** - Set `RunInBackground=false` in config to exit after menu closes (legacy behavior).
-  - To start silently in background, without showing the menu on first launch, set `ShowOnLaunch=false`.
 
-**Custom config**: Use `--config <path>` to point at a custom INI (single instance per INI path applies).
+**Custom config**: Create a shortcut of `WinMacMenu.exe`, and use `--config <path>` in shortcut's _target_ property to point at a custom INI (single instance per INI path applies).
+
+Examples:
+
+`C:\(...)\WinMac\Menu\WinMacMenu.exe --config custom.ini`
+
+`C:\(...)\WinMac\Menu\WinMacMenu.exe --config "C:\Full\Path\custom.ini"`
+
+Custom INI filenames displayed in the Settings window title. Multiple configuration can be run by the same executable at the same time.
 
 ## Sections
 - *[General]* global behavior and style
-- *[Placement]* position rules
+- *[Placement]* positioning and monitor display rules
 - *[Menu]* menu items Item1..ItemN
 - *[Icons]* per-item icon mapping Icon1..IconN and optional DefaultIcon/DefaultIconLight/DefaultIconDark
 - *[IconsLight]* theme-specific per-item icons for light theme (Icon1..IconN)
@@ -102,4 +105,4 @@ You can find more details about each section in [Wiki](https://github.com/Astesk
 - The root menu can use up to 50% of the monitor work area, while submenus can use up to 33%.
 - You can also pin shortcuts to taskbar, or add to custom toolbar. Each shortcut can refer to different config.ini files with different ini file names.
 - INI file used in current session will be highlighted in tooptip of tray icon, if file name is different than default (config.ini).
-- You can reference either *.dll or *.exe file in [Icons] section as path or just a file name (if the file resides in directory defined in %PATH%).
+- You can reference either *.dll or *.exe file in [Icons] section as path or just a file name (if the file resides in directory defined in %PATH%)
