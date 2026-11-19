@@ -24,7 +24,8 @@ typedef enum {
     CI_TASKKILL,
     CI_THISPC,
     CI_HOME,
-    CI_SETTINGS
+    CI_SETTINGS,
+    CI_POWER_BOOT_MENU
 } ConfigItemType;
 
 typedef enum {
@@ -114,6 +115,7 @@ typedef struct Config {
     BOOL ignoreHOffsetWhenCentered; // [Placement] IgnoreOffsetWhenCentered=true|hoffset|voffset|false
     BOOL ignoreVOffsetWhenCentered; // derived from the same key
     // Optional: pointer-relative positioning and menu width (modern-only override)
+    WCHAR monitorDevice[32];
     BOOL pointerRelative; // Position near mouse pointer instead of edges
     int menuWidth; // (modern only) [General] MenuWidth=226..255 (0 = auto). Ignored when modern disabled.
     BOOL folderShowOpenEntry; // [General] FolderShowOpenEntry=true|false (default true) controls showing "Open <folder>" in submenus when single-click open mode is enabled
@@ -158,6 +160,7 @@ typedef struct Config {
     BOOL excludeSleep;
     BOOL excludeShutdown;
     BOOL excludeRestart;
+    BOOL excludeBootMenu;
     BOOL excludeLock;
     BOOL excludeLogoff;
     BOOL excludeHibernate;

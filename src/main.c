@@ -73,6 +73,7 @@ static BOOL g_reloadMode = FALSE; // when launched with --reload, suppress show-
 static UINT g_trayMsg = WM_APP + 1; // tray callback message id for Shell_NotifyIcon
 static BOOL g_trayAdded = FALSE;
 static HICON g_hTrayIcon = NULL;
+static HICON g_hDisplayedTrayIcon = NULL; // Owns the one-pixel-lowered tray copy.
 static HICON g_hTrayIconLight = NULL; // cached themed variants
 static HICON g_hTrayIconDark = NULL;
 static HHOOK g_hKbHook = NULL;
@@ -105,7 +106,7 @@ static void release_suppressed_win_keys(void) {
     g_winKeyXReleaseVk = 0;
 }
 
-#define WMM_DISPLAY_VERSION L"1.0.0"
+#define WMM_DISPLAY_VERSION L"1.1.0"
 
 // Retrieve FileVersion (e.g., "1.0.0-beta") from the executable's VERSIONINFO.
 static void get_file_version_string(wchar_t* out, size_t cchOut) {
@@ -423,6 +424,41 @@ static void cli_show_help(void) {
 #endif
 
 // Tray helpers
+// Shift both color/alpha pixels and the legacy AND mask; keep the tray slot size.
+static HICON tray_lower_icon(HICON source) {
+    ICONINFO info = {0}; BITMAP bitmap = {0};
+    HICON result = NULL;
+    HDC dc = GetDC(NULL), sourceDC = NULL, targetDC = NULL;
+    HBITMAP color = NULL, mask = NULL;
+    BYTE* pixels = NULL; void* targetPixels = NULL;
+    if (!dc || !GetIconInfo(source, &info) || !info.hbmColor ||
+        !GetObjectW(info.hbmColor, sizeof(bitmap), &bitmap) || bitmap.bmWidth <= 0 || bitmap.bmHeight <= 1) goto done;
+    BITMAPINFO bi = {0};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = bitmap.bmWidth; bi.bmiHeader.biHeight = -bitmap.bmHeight;
+    bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+    SIZE_T stride = (SIZE_T)bitmap.bmWidth * 4;
+    pixels = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, stride * bitmap.bmHeight);
+    if (!pixels || GetDIBits(dc, info.hbmColor, 0, bitmap.bmHeight, pixels, &bi, DIB_RGB_COLORS) != bitmap.bmHeight) goto done;
+    color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &targetPixels, NULL, 0);
+    mask = CreateBitmap(bitmap.bmWidth, bitmap.bmHeight, 1, 1, NULL);
+    sourceDC = CreateCompatibleDC(dc); targetDC = CreateCompatibleDC(dc);
+    if (!color || !mask || !sourceDC || !targetDC) goto done;
+    ZeroMemory(targetPixels, stride * bitmap.bmHeight);
+    CopyMemory((BYTE*)targetPixels + stride, pixels, stride * (bitmap.bmHeight - 1));
+    HGDIOBJ oldSource = SelectObject(sourceDC, info.hbmMask);
+    HGDIOBJ oldTarget = SelectObject(targetDC, mask);
+    PatBlt(targetDC, 0, 0, bitmap.bmWidth, bitmap.bmHeight, WHITENESS);
+    BOOL copied = BitBlt(targetDC, 0, 1, bitmap.bmWidth, bitmap.bmHeight - 1, sourceDC, 0, 0, SRCCOPY);
+    SelectObject(sourceDC, oldSource); SelectObject(targetDC, oldTarget);
+    if (copied) { ICONINFO shifted = {0}; shifted.fIcon = TRUE; shifted.hbmColor = color; shifted.hbmMask = mask; result = CreateIconIndirect(&shifted); }
+done:
+    if (sourceDC) DeleteDC(sourceDC); if (targetDC) DeleteDC(targetDC);
+    if (color) DeleteObject(color); if (mask) DeleteObject(mask);
+    if (info.hbmColor) DeleteObject(info.hbmColor); if (info.hbmMask) DeleteObject(info.hbmMask);
+    if (pixels) HeapFree(GetProcessHeap(), 0, pixels); if (dc) ReleaseDC(NULL, dc);
+    return result;
+}
 static void tray_add(HWND hWnd) {
     if (!g_cfg.showTrayIcon || g_trayAdded) return;
     BOOL dark = theme_is_dark();
@@ -481,7 +517,9 @@ static void tray_add(HWND hWnd) {
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = g_trayMsg;
-    nid.hIcon = g_hTrayIcon;
+    if (g_hDisplayedTrayIcon) DestroyIcon(g_hDisplayedTrayIcon);
+    g_hDisplayedTrayIcon = tray_lower_icon(g_hTrayIcon);
+    nid.hIcon = g_hDisplayedTrayIcon ? g_hDisplayedTrayIcon : g_hTrayIcon;
     // New tooltip rules:
     // 1. If ini file name is exactly config.ini -> "WinMac Menu"
     // 2. Else -> "WinMac Menu (<filename_without_extension_truncated>)"
@@ -518,6 +556,7 @@ static void tray_remove(HWND hWnd) {
     nid.uID = 1;
     Shell_NotifyIconW(NIM_DELETE, &nid);
     g_trayAdded = FALSE;
+    if (g_hDisplayedTrayIcon) { DestroyIcon(g_hDisplayedTrayIcon); g_hDisplayedTrayIcon = NULL; }
 }
 
 static void tray_reload(HWND hWnd) {

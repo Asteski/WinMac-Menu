@@ -809,6 +809,7 @@ static BOOL resolve_filesystem_path_by_command(UINT cmd, WCHAR* outPath, size_t 
             break;
         case CI_POWER_SLEEP:
         case CI_POWER_SHUTDOWN:
+        case CI_POWER_BOOT_MENU:
         case CI_POWER_RESTART:
         case CI_POWER_LOCK:
         case CI_POWER_LOGOFF:
@@ -2694,6 +2695,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
         }
         case CI_POWER_SLEEP:
         case CI_POWER_SHUTDOWN:
+        case CI_POWER_BOOT_MENU:
         case CI_POWER_RESTART:
         case CI_POWER_LOCK:
         case CI_POWER_LOGOFF:
@@ -2735,6 +2737,7 @@ static HMENU build_menu(MenuTriggerType trigger) {
             // Order: Sleep, Restart, Shutdown, Hibernate, Lock, Log off (group with separator before lock group)
             BOOL firstGroupAdded = FALSE;
             if (!g_cfg.excludeSleep) { AppendMenuW(sub, MF_STRING, id, L"Sleep"); map_add(id++, L"POWER_SLEEP"); firstGroupAdded=TRUE; }
+            if (!g_cfg.excludeBootMenu) { AppendMenuW(sub, MF_STRING, id, L"Boot menu"); map_add(id++, L"POWER_BOOT_MENU"); firstGroupAdded=TRUE; }
             if (!g_cfg.excludeRestart) { AppendMenuW(sub, MF_STRING, id, L"Restart"); map_add(id++, L"POWER_RESTART"); firstGroupAdded=TRUE; }
             if (!g_cfg.excludeShutdown) { AppendMenuW(sub, MF_STRING, id, L"Shut down"); map_add(id++, L"POWER_SHUTDOWN"); firstGroupAdded=TRUE; }
             if (!g_cfg.excludeHibernate) { AppendMenuW(sub, MF_STRING, id, L"Hibernate"); map_add(id++, L"POWER_HIBERNATE"); firstGroupAdded=TRUE; }
@@ -2929,9 +2932,15 @@ static HMENU build_menu(MenuTriggerType trigger) {
     return hMenu;
 }
 
+static BOOL CALLBACK find_configured_monitor(HMONITOR mon, HDC dc, LPRECT rect, LPARAM data) {
+    MONITORINFOEXW mi = { sizeof(mi) };
+    if (GetMonitorInfoW(mon, (MONITORINFO*)&mi) && !lstrcmpiW(mi.szDevice, g_cfg.monitorDevice)) { *(HMONITOR*)data = mon; return FALSE; }
+    return TRUE;
+}
 static POINT compute_menu_pos(HWND owner) {
     POINT cursor; GetCursorPos(&cursor);
     HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+    if (g_cfg.monitorDevice[0]) EnumDisplayMonitors(NULL, NULL, find_configured_monitor, (LPARAM)&mon);
     MONITORINFO mi = { sizeof(mi) };
     GetMonitorInfoW(mon, &mi);
 
@@ -3076,6 +3085,7 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             // Interpret special power markers
             if (!lstrcmpiW(g_map[i].path, L"POWER_SLEEP")) { if (confirm_power_action(owner, L"sleep")) system_sleep(); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_SHUTDOWN")) { if (confirm_power_action(owner, L"shut down")) system_shutdown(FALSE); return; }
+            if (!lstrcmpiW(g_map[i].path, L"POWER_BOOT_MENU")) { if (confirm_power_action(owner, L"restart to the boot menu")) open_shell_known(L"open", L"shutdown.exe", L"/r /o /t 0"); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_RESTART")) { if (confirm_power_action(owner, L"restart")) system_shutdown(TRUE); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOCK")) { if (confirm_power_action(owner, L"lock")) LockWorkStation(); return; }
             if (!lstrcmpiW(g_map[i].path, L"POWER_LOGOFF")) { if (confirm_power_action(owner, L"sign out")) ExitWindowsEx(EWX_LOGOFF, 0); return; }
@@ -3157,6 +3167,8 @@ void MenuExecuteCommand(HWND owner, UINT cmd) {
             if (id == cmd) { if (confirm_power_action(owner, L"sleep")) system_sleep(); return; } id++; break;
         case CI_POWER_SHUTDOWN:
             if (id == cmd) { if (confirm_power_action(owner, L"shut down")) system_shutdown(FALSE); return; } id++; break;
+        case CI_POWER_BOOT_MENU:
+            if (id == cmd) { if (confirm_power_action(owner, L"restart to the boot menu")) open_shell_known(L"open", L"shutdown.exe", L"/r /o /t 0"); return; } id++; break;
         case CI_POWER_RESTART:
             if (id == cmd) { if (confirm_power_action(owner, L"restart")) system_shutdown(TRUE); return; } id++; break;
         case CI_POWER_LOCK:

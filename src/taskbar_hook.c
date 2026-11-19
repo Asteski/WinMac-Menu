@@ -20,13 +20,13 @@ static BOOL g_suppressNextLeftUp = FALSE;
 static BOOL g_suppressNextMiddleUp = FALSE;
 static BOOL g_suppressNextRightUp = FALSE;
 static SRWLOCK g_startCacheLock = SRWLOCK_INIT;
-static RECT g_cachedStart, g_cachedTaskbar;
-static HWND g_cachedTaskbarWindow;
+typedef struct { RECT start, taskbar; HWND window; } StartSnapshot;
+static StartSnapshot g_startSnapshots[32];
+static int g_startSnapshotCount;
 static ULONGLONG g_cachedAt;
 static LONG g_detectorStarted, g_detectorLegacy;
 static BOOL g_cachedLegacy;
 
-static BOOL RefreshTaskbarHandles(void);
 
 static BOOL IsReasonableStartRect(const RECT* rect, const RECT* taskbar) {
     RECT intersection;
@@ -152,31 +152,34 @@ static BOOL StartRectWindow(const RECT* taskbar, RECT* rect) {
            GetWindowRect(g_hStartButton, rect) && IsReasonableStartRect(rect, taskbar);
 }
 
-static BOOL RefreshTaskbarHandles(void) {
-    g_hTaskbar = FindTaskbarWindow();
-    g_hStartButton = g_hTaskbar ? FindStartButton(g_hTaskbar) : NULL;
-    return g_hTaskbar != NULL;
-}
-
 // One detector thread for the process lifetime. Explorer/UIA may be slow; the
 // input hook only reads the last published snapshot and never waits for it.
 static DWORD WINAPI DetectStartRects(void* unused) {
     UNREFERENCED_PARAMETER(unused);
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
     for (;;) {
-        RECT taskbar = {0}, start = {0};
+        StartSnapshot snapshots[32] = {0};
+        int count = 0;
         BOOL legacy = InterlockedCompareExchange(&g_detectorLegacy, 0, 0) != 0;
-        BOOL found = FALSE;
-        if (RefreshTaskbarHandles() && IsWindowVisible(g_hTaskbar) &&
-            GetWindowRect(g_hTaskbar, &taskbar)) {
-            if (!legacy && (SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE))
-                found = StartRectUIA(&taskbar, &start) || StartRectMSAA(&taskbar, &start);
-            if (!found) found = StartRectWindow(&taskbar, &start);
+        HWND taskbars[32]; int taskbarCount = 0;
+        HWND primary = FindTaskbarWindow();
+        if (primary) taskbars[taskbarCount++] = primary;
+        HWND secondary = NULL;
+        while (taskbarCount < 32 && (secondary = FindWindowExW(NULL, secondary, L"Shell_SecondaryTrayWnd", NULL)))
+            taskbars[taskbarCount++] = secondary;
+        for (int i = 0; i < taskbarCount; ++i) {
+            RECT taskbar = {0}, start = {0}; BOOL found = FALSE;
+            g_hTaskbar = taskbars[i]; g_hStartButton = FindStartButton(g_hTaskbar);
+            if (IsWindowVisible(g_hTaskbar) && GetWindowRect(g_hTaskbar, &taskbar)) {
+                if (!legacy && (SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE))
+                    found = StartRectUIA(&taskbar, &start) || StartRectMSAA(&taskbar, &start);
+                if (!found) found = StartRectWindow(&taskbar, &start);
+            }
+            if (found) { snapshots[count].start = start; snapshots[count].taskbar = taskbar; snapshots[count++].window = g_hTaskbar; }
         }
         AcquireSRWLockExclusive(&g_startCacheLock);
-        g_cachedStart = start;
-        g_cachedTaskbar = taskbar;
-        g_cachedTaskbarWindow = found ? g_hTaskbar : NULL;
+        memcpy(g_startSnapshots, snapshots, sizeof(snapshots));
+        g_startSnapshotCount = count;
         g_cachedLegacy = legacy;
         g_cachedAt = GetTickCount64();
         ReleaseSRWLockExclusive(&g_startCacheLock);
@@ -185,18 +188,29 @@ static DWORD WINAPI DetectStartRects(void* unused) {
 }
 
 static BOOL IsStartButtonClickPoint(POINT pt) {
-    RECT taskbar, detected, final;
+    RECT taskbar = {0}, detected = {0}, final;
     HWND taskbarWindow;
     BOOL legacy;
     ULONGLONG stamp;
     InterlockedExchange(&g_detectorLegacy, g_cfg.legacyStartButtonDetection);
     if (!TryAcquireSRWLockShared(&g_startCacheLock)) return FALSE;
-    taskbar = g_cachedTaskbar;
-    detected = g_cachedStart;
-    taskbarWindow = g_cachedTaskbarWindow;
+    taskbarWindow = NULL;
+    for (int i = 0; i < g_startSnapshotCount; ++i) {
+        if (PtInRect(&g_startSnapshots[i].taskbar, pt)) {
+            taskbar = g_startSnapshots[i].taskbar;
+            detected = g_startSnapshots[i].start;
+            taskbarWindow = g_startSnapshots[i].window;
+            break;
+        }
+    }
     legacy = g_cachedLegacy;
     stamp = g_cachedAt;
     ReleaseSRWLockShared(&g_startCacheLock);
+    if (g_cfg.monitorDevice[0]) {
+        MONITORINFOEXW monitor = { sizeof(monitor) };
+        if (!GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), (MONITORINFO*)&monitor) ||
+            lstrcmpiW(monitor.szDevice, g_cfg.monitorDevice)) return FALSE;
+    }
     if (!taskbarWindow || legacy != g_cfg.legacyStartButtonDetection ||
         GetTickCount64() - stamp > 2000 || !PtInRect(&taskbar, pt)) return FALSE;
     HWND hit = WindowFromPoint(pt);
@@ -362,7 +376,7 @@ void ShutdownTaskbarHook(void) {
     }
     
     AcquireSRWLockExclusive(&g_startCacheLock);
-    g_cachedTaskbarWindow = NULL;
+    g_startSnapshotCount = 0;
     ReleaseSRWLockExclusive(&g_startCacheLock);
     g_hOwnerWnd = NULL;
     g_suppressNextLeftUp = FALSE;

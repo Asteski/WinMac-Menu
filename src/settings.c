@@ -146,10 +146,15 @@ static void settings_redraw_checkbox(HWND hwnd){
     if(!settings_is_button_type(hwnd, BS_AUTOCHECKBOX)) return;
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
 }
+static void clear_monitor_choices(HWND combo);
+
 // Generic child page dialog procedure: forward button commands to main dialog
 static INT_PTR CALLBACK PageDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam){
     // All custom groupbox drawing and coloring reverted
     switch(msg){
+    case WM_DESTROY:
+        clear_monitor_choices(GetDlgItem(dlg, IDC_MONITOR_COMBO));
+        break;
     case WM_NOTIFY: {
         // Forward notifications (e.g., list view selection changes) to main dialog
         HWND parent = GetParent(dlg);
@@ -245,7 +250,38 @@ static void General_Capture(HWND pg, Config* c){
     lstrcpynW(c->winuiSize, b ? L"large" : L"default", ARRAYSIZE(c->winuiSize));
 }
 
+static void clear_monitor_choices(HWND combo) {
+    if (!combo) return;
+    int count = (int)SendMessageW(combo, CB_GETCOUNT, 0, 0);
+    for (int i = 0; i < count; ++i) {
+        WCHAR* device = (WCHAR*)SendMessageW(combo, CB_GETITEMDATA, i, 0);
+        if (device && device != (WCHAR*)CB_ERR) HeapFree(GetProcessHeap(), 0, device);
+    }
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+}
+static int add_monitor_choice(HWND combo, const WCHAR* label, const WCHAR* device) {
+    WCHAR* copy = NULL;
+    if (device && device[0]) {
+        copy = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(device) + 1) * sizeof(WCHAR));
+        if (!copy) return CB_ERRSPACE;
+        lstrcpyW(copy, device);
+    }
+    int index = (int)SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)label);
+    if (index < 0) { if (copy) HeapFree(GetProcessHeap(), 0, copy); return index; }
+    SendMessageW(combo, CB_SETITEMDATA, index, (LPARAM)copy);
+    return index;
+}
+static void capture_monitor(HWND pg, WCHAR* value, int size) {
+    HWND combo = GetDlgItem(pg, IDC_MONITOR_COMBO);
+    int index = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
+    value[0] = 0;
+    if (index > 0) {
+        const WCHAR* device = (const WCHAR*)SendMessageW(combo, CB_GETITEMDATA, index, 0);
+        if (device && device != (const WCHAR*)CB_ERR) lstrcpynW(value, device, size);
+    }
+}
 static void Placement_Capture(HWND pg, Config* c){
+    if (pg && c) capture_monitor(pg, c->monitorDevice, ARRAYSIZE(c->monitorDevice));
     if(!pg || !c) return;
     c->pointerRelative = get_check(pg, IDC_POINTERRELATIVE);
     int v = (int)SendDlgItemMessageW(pg, IDC_HPLACEMENT_COMBO, CB_GETCURSEL, 0, 0);
@@ -338,6 +374,7 @@ static void Advanced_Capture(HWND pg, Config* c){
     c->excludeHibernate = !get_check(pg, IDC_POWER_HIBERNATE);
     c->excludeLock = !get_check(pg, IDC_POWER_LOCK);
     c->excludeLogoff = !get_check(pg, IDC_POWER_LOGOFF);
+    c->excludeBootMenu = !get_check(pg, IDC_POWER_BOOT_MENU);
     c->excludeRestart = !get_check(pg, IDC_POWER_RESTART);
     c->excludeShutdown = !get_check(pg, IDC_POWER_SHUTDOWN);
     c->excludeSleep = !get_check(pg, IDC_POWER_SLEEP);
@@ -930,6 +967,60 @@ static void apply_saved_runtime_settings(const Config* before, Config* c) {
 
 // -------- Placement Page --------
 static void Placement_Load(HWND pg, Config* c){
+    HWND monitors = GetDlgItem(pg, IDC_MONITOR_COMBO);
+    clear_monitor_choices(monitors);
+    add_monitor_choice(monitors, L"All displays", NULL);
+    int selected = 0;
+    // GDI's DISPLAYn suffix is an adapter/source name, not the Settings display number.
+    // Use active display paths for numbering and the target's EDID name for the label.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        UINT32 pathCount = 0, modeCount = 0;
+        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) break;
+        DISPLAYCONFIG_PATH_INFO* paths = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, max(1, pathCount) * sizeof(*paths));
+        DISPLAYCONFIG_MODE_INFO* modes = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, max(1, modeCount) * sizeof(*modes));
+        if (!paths || !modes) { if (paths) HeapFree(GetProcessHeap(), 0, paths); if (modes) HeapFree(GetProcessHeap(), 0, modes); break; }
+        LONG result = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths, &modeCount, modes, NULL);
+        if (result == ERROR_SUCCESS) {
+            for (UINT32 i = 0; i < pathCount; ++i) {
+                DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {0};
+                source.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+                source.header.size = sizeof(source); source.header.adapterId = paths[i].sourceInfo.adapterId; source.header.id = paths[i].sourceInfo.id;
+                if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS) continue;
+                DISPLAYCONFIG_TARGET_DEVICE_NAME target = {0};
+                target.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+                target.header.size = sizeof(target); target.header.adapterId = paths[i].targetInfo.adapterId; target.header.id = paths[i].targetInfo.id;
+                DisplayConfigGetDeviceInfo(&target.header);
+                BOOL primary = FALSE;
+                DISPLAY_DEVICEW adapter = { sizeof(adapter) };
+                for (DWORD n = 0; EnumDisplayDevicesW(NULL, n, &adapter, 0); ++n) {
+                    if (!lstrcmpiW(adapter.DeviceName, source.viewGdiDeviceName)) { primary = (adapter.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0; break; }
+                }
+                WCHAR label[256];
+                StringCchPrintfW(label, ARRAYSIZE(label), L"Display %u - %s%s", i + 1,
+                    target.monitorFriendlyDeviceName[0] ? target.monitorFriendlyDeviceName : L"Monitor", primary ? L" (Primary)" : L"");
+                int index = add_monitor_choice(monitors, label, source.viewGdiDeviceName);
+                if (index >= 0 && !lstrcmpiW(c->monitorDevice, source.viewGdiDeviceName)) selected = index;
+            }
+        }
+        HeapFree(GetProcessHeap(), 0, paths); HeapFree(GetProcessHeap(), 0, modes);
+        if (result != ERROR_INSUFFICIENT_BUFFER) break;
+    }
+    // Remote/legacy display drivers can lack display-configuration support.
+    if (SendMessageW(monitors, CB_GETCOUNT, 0, 0) == 1) {
+        DISPLAY_DEVICEW adapter = { sizeof(adapter) };
+        for (DWORD i = 0; EnumDisplayDevicesW(NULL, i, &adapter, 0); ++i) {
+            if (!(adapter.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)) continue;
+            DISPLAY_DEVICEW monitor = { sizeof(monitor) };
+            EnumDisplayDevicesW(adapter.DeviceName, 0, &monitor, 0);
+            WCHAR label[256];
+            StringCchPrintfW(label, ARRAYSIZE(label), L"%s%s", monitor.DeviceString[0] ? monitor.DeviceString : L"Monitor",
+                adapter.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE ? L" (Primary)" : L"");
+            int index = add_monitor_choice(monitors, label, adapter.DeviceName);
+            if (index >= 0 && !lstrcmpiW(c->monitorDevice, adapter.DeviceName)) selected = index;
+        }
+    }
+    if (c->monitorDevice[0] && !selected) selected = add_monitor_choice(monitors, L"Unavailable display", c->monitorDevice);
+    SendMessageW(monitors, CB_SETCURSEL, selected, 0);
     set_check(pg,IDC_POINTERRELATIVE,c->pointerRelative);
     HWND hH=GetDlgItem(pg,IDC_HPLACEMENT_COMBO), hV=GetDlgItem(pg,IDC_VPLACEMENT_COMBO);
     const WCHAR* Hs[]={L"Left",L"Center",L"Right"};
@@ -990,6 +1081,8 @@ static void Placement_Load(HWND pg, Config* c){
 }
 static BOOL Placement_Save(HWND pg, Config* c){
     BOOL ch=FALSE; BOOL b;
+    WCHAR monitor[32]; capture_monitor(pg, monitor, ARRAYSIZE(monitor));
+    if (lstrcmpiW(monitor, c->monitorDevice)) { lstrcpynW(c->monitorDevice, monitor, ARRAYSIZE(c->monitorDevice)); ch=TRUE; }
     b=get_check(pg,IDC_POINTERRELATIVE); if(c->pointerRelative!=b){c->pointerRelative=b;ch=TRUE;}
     int v;
     v=(int)SendDlgItemMessageW(pg,IDC_HPLACEMENT_COMBO,CB_GETCURSEL,0,0); if(v>=0 && v!=c->hPlacement){c->hPlacement=v;ch=TRUE;}
@@ -1020,6 +1113,7 @@ static BOOL Placement_Save(HWND pg, Config* c){
     if(!ch) return FALSE;
     if(c->iniPath[0]){
         WCHAR buf[32];
+        settings_write(L"Placement",L"Monitor",c->monitorDevice,c->iniPath);
         settings_write(L"Placement",L"PointerRelative",c->pointerRelative?L"true":L"false",c->iniPath);
         const WCHAR* hp=L"right"; if(c->hPlacement==0) hp=L"left"; else if(c->hPlacement==1) hp=L"center";
         const WCHAR* vp=L"bottom"; if(c->vPlacement==0) vp=L"top"; else if(c->vPlacement==1) vp=L"center";
@@ -1196,6 +1290,7 @@ static void Advanced_Load(HWND pg, Config* c){
     set_check(pg, IDC_POWER_HIBERNATE, !c->excludeHibernate);
     set_check(pg, IDC_POWER_LOCK,      !c->excludeLock);
     set_check(pg, IDC_POWER_LOGOFF,    !c->excludeLogoff);
+    set_check(pg, IDC_POWER_BOOT_MENU, !c->excludeBootMenu);
     set_check(pg, IDC_POWER_RESTART,   !c->excludeRestart);
     set_check(pg, IDC_POWER_SHUTDOWN,  !c->excludeShutdown);
     set_check(pg, IDC_POWER_SLEEP,     !c->excludeSleep);
@@ -1259,6 +1354,7 @@ static BOOL Advanced_Save(HWND pg, Config* c){
         BOOL oldHibernate = c->excludeHibernate;
         BOOL oldLock = c->excludeLock;
         BOOL oldLogoff = c->excludeLogoff;
+        BOOL oldBootMenu = c->excludeBootMenu;
         BOOL oldRestart = c->excludeRestart;
         BOOL oldShutdown = c->excludeShutdown;
         BOOL oldSleep = c->excludeSleep;
@@ -1266,6 +1362,7 @@ static BOOL Advanced_Save(HWND pg, Config* c){
         c->excludeHibernate = !get_check(pg, IDC_POWER_HIBERNATE);
         c->excludeLock      = !get_check(pg, IDC_POWER_LOCK);
         c->excludeLogoff    = !get_check(pg, IDC_POWER_LOGOFF);
+        c->excludeBootMenu = !get_check(pg, IDC_POWER_BOOT_MENU);
         c->excludeRestart   = !get_check(pg, IDC_POWER_RESTART);
         c->excludeShutdown  = !get_check(pg, IDC_POWER_SHUTDOWN);
         c->excludeSleep     = !get_check(pg, IDC_POWER_SLEEP);
@@ -1273,7 +1370,7 @@ static BOOL Advanced_Save(HWND pg, Config* c){
         if (oldHibernate != c->excludeHibernate || oldLock != c->excludeLock ||
             oldLogoff != c->excludeLogoff || oldRestart != c->excludeRestart ||
             oldShutdown != c->excludeShutdown || oldSleep != c->excludeSleep ||
-            oldConfirm != c->powerAskConfirmation) ch = TRUE;
+            oldBootMenu != c->excludeBootMenu || oldConfirm != c->powerAskConfirmation) ch = TRUE;
     }
     HWND hCombo=GetDlgItem(pg,1702);
     if(hCombo){
@@ -1310,6 +1407,7 @@ static BOOL Advanced_Save(HWND pg, Config* c){
         if(c->excludeSleep) settings_write(L"Power",L"Sleep",L"0",c->iniPath); else settings_write(L"Power",L"Sleep",NULL,c->iniPath);
         if(c->excludeHibernate) settings_write(L"Power",L"Hibernate",L"0",c->iniPath); else settings_write(L"Power",L"Hibernate",NULL,c->iniPath);
         if(c->excludeShutdown) settings_write(L"Power",L"Shutdown",L"0",c->iniPath); else settings_write(L"Power",L"Shutdown",NULL,c->iniPath);
+        settings_write(L"Power", L"BootMenu", c->excludeBootMenu ? L"0" : NULL, c->iniPath);
         if(c->excludeRestart) settings_write(L"Power",L"Restart",L"0",c->iniPath); else settings_write(L"Power",L"Restart",NULL,c->iniPath);
         if(c->excludeLock) settings_write(L"Power",L"Lock",L"0",c->iniPath); else settings_write(L"Power",L"Lock",NULL,c->iniPath);
         if(c->excludeLogoff) settings_write(L"Power",L"Logoff",L"0",c->iniPath); else settings_write(L"Power",L"Logoff",NULL,c->iniPath);
@@ -1330,6 +1428,7 @@ static const WCHAR* item_type_name(ConfigItemType t){
         case CI_POWER_SLEEP: return L"Sleep";
         case CI_POWER_HIBERNATE: return L"Hibernate";
         case CI_POWER_SHUTDOWN: return L"Shut down";
+        case CI_POWER_BOOT_MENU: return L"Boot menu";
         case CI_POWER_RESTART: return L"Restart";
         case CI_POWER_LOCK: return L"Lock";
         case CI_POWER_LOGOFF: return L"Sign out";
@@ -1434,6 +1533,7 @@ static const WCHAR* item_type_token(ConfigItemType t){
         case CI_POWER_SLEEP: return L"POWER_SLEEP";
         case CI_POWER_HIBERNATE: return L"POWER_HIBERNATE";
         case CI_POWER_SHUTDOWN: return L"POWER_SHUTDOWN";
+        case CI_POWER_BOOT_MENU: return L"POWER_BOOT_MENU";
         case CI_POWER_RESTART: return L"POWER_RESTART";
         case CI_POWER_LOCK: return L"POWER_LOCK";
         case CI_POWER_LOGOFF: return L"POWER_LOGOFF";
@@ -1576,15 +1676,15 @@ typedef struct ItemEditCtx {
     BOOL editing;
     ConfigItemType displayedType;
     ConfigItemType originalType;
-    BOOL labelCached[CI_SETTINGS + 1];
-    WCHAR labelByType[CI_SETTINGS + 1][128];
-    BOOL pathCached[CI_SETTINGS + 1];
-    WCHAR pathByType[CI_SETTINGS + 1][MAX_PATH];
-    BOOL paramsCached[CI_SETTINGS + 1];
-    WCHAR paramsByType[CI_SETTINGS + 1][256];
+    BOOL labelCached[CI_POWER_BOOT_MENU + 1];
+    WCHAR labelByType[CI_POWER_BOOT_MENU + 1][128];
+    BOOL pathCached[CI_POWER_BOOT_MENU + 1];
+    WCHAR pathByType[CI_POWER_BOOT_MENU + 1][MAX_PATH];
+    BOOL paramsCached[CI_POWER_BOOT_MENU + 1];
+    WCHAR paramsByType[CI_POWER_BOOT_MENU + 1][256];
 } ItemEditCtx;
 static BOOL item_type_cache_index(ConfigItemType t, int* index){
-    if (t < CI_SEPARATOR || t > CI_SETTINGS) return FALSE;
+    if (t < CI_SEPARATOR || t > CI_POWER_BOOT_MENU) return FALSE;
     if (index) *index = (int)t;
     return TRUE;
 }
@@ -1611,6 +1711,7 @@ static void item_type_visible_fields(ConfigItemType t, BOOL* showLabel, BOOL* sh
         case CI_HOME:
         case CI_SETTINGS:
         case CI_TASKKILL:
+        case CI_POWER_BOOT_MENU:
             label = TRUE;
             break;
         default:
@@ -1803,6 +1904,7 @@ static void item_fill_type_combo(HWND h){
         {CI_POWER_MENU,L"Power Menu"},
         {CI_POWER_HIBERNATE,L"Hibernate"},
         {CI_POWER_LOCK,L"Lock"},
+        {CI_POWER_BOOT_MENU,L"Boot menu"},
         {CI_POWER_RESTART,L"Restart"},
         {CI_POWER_SHUTDOWN,L"Shut down"},
         {CI_POWER_LOGOFF,L"Sign out"},
@@ -1892,6 +1994,10 @@ static INT_PTR CALLBACK ItemEditDlg(HWND dlg, UINT msg, WPARAM wParam, LPARAM lP
                 lstrcpynW(ctx->tmp.params, item_cached_params_for_type(ctx, ctx->tmp.type), ARRAYSIZE(ctx->tmp.params));
             } else {
                 ctx->tmp.params[0] = 0;
+            }
+            if (ctx->tmp.type == CI_POWER_BOOT_MENU) {
+                StrTrimW(ctx->tmp.label, L" \t\r\n");
+                if (!ctx->tmp.label[0]) lstrcpyW(ctx->tmp.label, L"Boot menu");
             }
             // submenu flag is implied by CI_FOLDER_SUBMENU item type now; clear for others
             ctx->tmp.submenu = (ctx->tmp.type==CI_FOLDER_SUBMENU);

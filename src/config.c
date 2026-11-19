@@ -87,8 +87,8 @@ static void write_default_ini(const WCHAR* path) {
         "\r\n"\
         "[Placement]\r\n"\
         "PointerRelative=true\r\n"\
-        "HOffset=13\r\n"\
-        "VOffset=13\r\n"\
+        "HOffset=12\r\n"\
+        "VOffset=12\r\n"\
         "IgnoreOffsetWhenRelative=true\r\n"\
         "\r\n"\
         "[Sorting]\r\n"\
@@ -193,6 +193,18 @@ static void exe_config_path(WCHAR* buf, size_t cch) {
     PathAppendW(buf, L"config.ini");
 }
 
+static void user_config_path(WCHAR* buf, size_t cch) {
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, buf))) {
+        exe_config_path(buf, cch);
+        return;
+    }
+    PathAppendW(buf, L"WinMac");
+    CreateDirectoryW(buf, NULL);
+    PathAppendW(buf, L"Menu");
+    CreateDirectoryW(buf, NULL);
+    PathAppendW(buf, L"config.ini");
+}
+
 static void resolve_config_path(const WCHAR* path, WCHAR* out, size_t cchOut) {
     if (!out || cchOut == 0) return;
     out[0] = 0;
@@ -213,7 +225,12 @@ BOOL config_ensure(Config* out) {
     if (g_defaultIniPath[0]) {
         lstrcpynW(out->iniPath, g_defaultIniPath, ARRAYSIZE(out->iniPath));
     } else {
-        exe_config_path(out->iniPath, MAX_PATH);
+        WCHAR portablePath[MAX_PATH];
+        exe_config_path(portablePath, ARRAYSIZE(portablePath));
+        if (PathFileExistsW(portablePath))
+            lstrcpynW(out->iniPath, portablePath, ARRAYSIZE(out->iniPath));
+        else
+            user_config_path(out->iniPath, MAX_PATH);
     }
     if (!PathFileExistsW(out->iniPath)) {
         write_default_ini(out->iniPath);
@@ -233,6 +250,7 @@ static ConfigItemType parse_type(const WCHAR* s) {
     if (!lstrcmpiW(s, L"FOLDER_SUBMENU")) return CI_FOLDER_SUBMENU;
     if (!lstrcmpiW(s, L"POWER_SLEEP")) return CI_POWER_SLEEP;
     if (!lstrcmpiW(s, L"POWER_SHUTDOWN")) return CI_POWER_SHUTDOWN;
+    if (!lstrcmpiW(s, L"POWER_BOOT_MENU")) return CI_POWER_BOOT_MENU;
     if (!lstrcmpiW(s, L"POWER_RESTART")) return CI_POWER_RESTART;
     if (!lstrcmpiW(s, L"POWER_LOCK")) return CI_POWER_LOCK;
     if (!lstrcmpiW(s, L"POWER_LOGOFF")) return CI_POWER_LOGOFF;
@@ -305,6 +323,10 @@ static int parse_menu(Config* cfg) {
         // Expand environment variables in label
         expand_env(label, it->label, ARRAYSIZE(it->label));
         it->type = parse_type(type);
+        if (it->type == CI_POWER_BOOT_MENU) {
+            StrTrimW(it->label, L" \t\r\n");
+            if (!it->label[0]) lstrcpyW(it->label, L"Boot menu");
+        }
         if (path) expand_env(path, it->path, ARRAYSIZE(it->path)); else it->path[0]=0;
         if (params) expand_env(params, it->params, ARRAYSIZE(it->params)); else it->params[0]=0;
     if (icon) expand_env(icon, it->iconPath, ARRAYSIZE(it->iconPath)); else it->iconPath[0]=0;
@@ -502,6 +524,7 @@ BOOL config_load(Config* out) {
     out->excludeSleep = GetPrivateProfileIntW(L"Power", L"ExcludeSleep", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeHibernate = GetPrivateProfileIntW(L"Power", L"ExcludeHibernate", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeShutdown = GetPrivateProfileIntW(L"Power", L"ExcludeShutdown", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeBootMenu = !GetPrivateProfileIntW(L"Power", L"BootMenu", 1, out->iniPath);
     out->excludeRestart = GetPrivateProfileIntW(L"Power", L"ExcludeRestart", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLock = GetPrivateProfileIntW(L"Power", L"ExcludeLock", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLogoff = GetPrivateProfileIntW(L"Power", L"ExcludeLogoff", 0, out->iniPath) ? TRUE : FALSE;
@@ -584,11 +607,12 @@ BOOL config_load(Config* out) {
     GetPrivateProfileStringW(L"Placement", L"Horizontal", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0] || !lstrcmpiW(buf, L"left")) out->hPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->hPlacement = 1; else out->hPlacement = 2;
-    out->hOffset = GetPrivateProfileIntW(L"Placement", L"HOffset", 13, out->iniPath);
+    out->hOffset = GetPrivateProfileIntW(L"Placement", L"HOffset", 12, out->iniPath);
     GetPrivateProfileStringW(L"Placement", L"Vertical", L"", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     if (!buf[0] || !lstrcmpiW(buf, L"top")) out->vPlacement = 0; else if (!lstrcmpiW(buf, L"center")) out->vPlacement = 1; else out->vPlacement = 2;
-    out->vOffset = GetPrivateProfileIntW(L"Placement", L"VOffset", 13, out->iniPath);
+    out->vOffset = GetPrivateProfileIntW(L"Placement", L"VOffset", 12, out->iniPath);
+    GetPrivateProfileStringW(L"Placement", L"Monitor", L"", out->monitorDevice, ARRAYSIZE(out->monitorDevice), out->iniPath);
     GetPrivateProfileStringW(L"Placement", L"PointerRelative", L"true", buf, ARRAYSIZE(buf), out->iniPath);
     trim_inplace(buf);
     out->pointerRelative = (!lstrcmpiW(buf, L"true") || !lstrcmpiW(buf, L"1"));
@@ -1025,6 +1049,7 @@ BOOL config_load(Config* out) {
     // Power menu exclusions (default all FALSE). Support legacy Exclude* keys and new inclusion model.
     out->excludeSleep = GetPrivateProfileIntW(L"Power", L"ExcludeSleep", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeShutdown = GetPrivateProfileIntW(L"Power", L"ExcludeShutdown", 0, out->iniPath) ? TRUE : FALSE;
+    out->excludeBootMenu = !GetPrivateProfileIntW(L"Power", L"BootMenu", 1, out->iniPath);
     out->excludeRestart = GetPrivateProfileIntW(L"Power", L"ExcludeRestart", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLock = GetPrivateProfileIntW(L"Power", L"ExcludeLock", 0, out->iniPath) ? TRUE : FALSE;
     out->excludeLogoff = GetPrivateProfileIntW(L"Power", L"ExcludeLogoff", 0, out->iniPath) ? TRUE : FALSE;
