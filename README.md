@@ -12,26 +12,27 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Asteski/WinMac-Menu/releases/latest/download/WinMacMenu-1.0.0-x64.zip"><img alt="Download x64" src="https://img.shields.io/badge/Download-x64-0078D6?style=for-the-badge"></a>
-  <a href="https://github.com/Asteski/WinMac-Menu/releases/download/v1.0.0/WinMacMenu-1.0.0-arm64.zip"><img alt="Download ARM64" src="https://img.shields.io/badge/Download-ARM64-00A86B?style=for-the-badge"></a>
+  <a href="https://github.com/Asteski/WinMac-Menu/releases/download/v1.1.0/WinMac-Menu-1.1.0-x64-Setup.exe"><img alt="Download x64" src="https://img.shields.io/badge/Download-x64-0078D6?style=for-the-badge"></a>
+  <a href="https://github.com/Asteski/WinMac-Menu/releases/download/v1.1.0/WinMac-Menu-1.1.0-arm64-Setup.exe"><img alt="Download ARM64" src="https://img.shields.io/badge/Download-ARM64-00A86B?style=for-the-badge"></a>
 </p>
 
 <p align="center">
   <img alt="Latest Release" src="https://img.shields.io/github/v/release/Asteski/WinMac-Menu">
   <img alt="Release Date" src="https://img.shields.io/github/release-date/Asteski/WinMac-Menu">
+</p>
+<p align="center">
   <img alt="Downloads (all releases)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/total">
   <img alt="Downloads (latest release)" src="https://img.shields.io/github/downloads/Asteski/WinMac-Menu/latest/total">
 </p>
 
 ### Windows 11:
-![WinMacMenu screenshot from Windows 11 with WinUI3 menu](https://github.com/Asteski/WinMac-Menu/blob/b728efa7215ddd02b44ca2c5c4874a162f013a55/img/winmacmenu-demo-11.png)
+![WinMacMenu screenshot from Windows 11 with WinUI3 menu](img/winmacmenu-demo-11.png)
 ### Windows 10:
-![WinMacMenu screenshot from Windows 10 with Win32 menu](https://github.com/Asteski/WinMac-Menu/blob/b728efa7215ddd02b44ca2c5c4874a162f013a55/img/winmacmenu-demo-10.png)
+![WinMacMenu screenshot from Windows 10 with Win32 menu](img/winmacmenu-demo-10.png)
 
 ## Features
 
-- Available in both Win32 and WinUI frameworks
-- WinUI 3 menu renderer with configurable menu appearance
+- Win32 and WinUI3 menu renderer with configurable menu appearance
 - Config-driven items with separators, folders as submenus, URIs, commands, power actions, and more
 - Recent Items - dynamic submenu from *%AppData%\Microsoft\Windows\Recent Items* folder
 - Recent Items grouping for folders and files
@@ -50,11 +51,8 @@
 - Win + X activation trigger
 - Large-menu highlight frame styles: background, border, or both
 - Optional file-type icons instead of thumbnails in generated submenus
-- Custom INI filenames displayed in the Settings window title
 - ARM64 builds in addition to x64
-- Configurable Hibernate power action
-- DPI-aware root menu and submenu sizing
-- Trigger folder or file context menu directly from submenus
+- Custom INI filenames displayed in the Settings window title
 - [Discover the range of possible use cases.](https://github.com/Asteski/WinMac-Menu/wiki/Examples-of-use)
 
 ## Run
