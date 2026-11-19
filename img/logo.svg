@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 256 256">
-  <title>WinMacMenu original gradient with 3D borders only</title>
+  <title>WinMacMenu original gradient with half-depth 3D borders</title>
   <defs>
     <clipPath id="corner" xmlns="http://www.w3.org/2000/svg">
       <path d="M 0 0 H 170.16 C 217.37 0 256 38.63 256 85.82 V 256 H 0 Z" />
@@ -18,14 +18,14 @@
       <stop offset="1" stop-color="#3c69a9" />
     </linearGradient>
     <filter id="bevel" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="0.55" result="soft" />
-      <feOffset in="soft" dx="-1.1" dy="-1.1" result="shiftDark" />
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.275" result="soft" />
+      <feOffset in="soft" dx="-0.55" dy="-0.55" result="shiftDark" />
       <feComposite in="SourceAlpha" in2="shiftDark" operator="out" result="darkEdge" />
-      <feFlood flood-color="#173b68" flood-opacity="0.6" />
+      <feFlood flood-color="#173b68" flood-opacity="0.3" />
       <feComposite in2="darkEdge" operator="in" result="dark" />
-      <feOffset in="soft" dx="1.1" dy="1.1" result="shiftLight" />
+      <feOffset in="soft" dx="0.55" dy="0.55" result="shiftLight" />
       <feComposite in="SourceAlpha" in2="shiftLight" operator="out" result="lightEdge" />
-      <feFlood flood-color="#e7f5ff" flood-opacity="0.9" />
+      <feFlood flood-color="#e7f5ff" flood-opacity="0.45" />
       <feComposite in2="lightEdge" operator="in" result="light" />
       <feMerge>
         <feMergeNode in="SourceGraphic" />
