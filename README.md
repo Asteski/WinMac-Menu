@@ -7,7 +7,7 @@
 </h1>
 
 <p align="center">
-  <span align="center">Windows application that shows a Windows context-like popup menu. It’s available in both Win32 and WinUI frameworks, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
+  <span align="center">Windows application that shows a Windows context-like popup menu. It’s available in both Win32 and WinUI 3 interfaces, adapts to your light/dark theme, allows to specify relative and absolute positioning, supports a dynamic Recent Items and Force Quit submenus, shell objects, folder submenus, power options menu, showing folder content in root menu, icons, sorting and many more!
   </span>
 </p>
 
